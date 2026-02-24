@@ -26,3 +26,6 @@ llm:
 
 context:
   dir: "context"
+
+storage:
+  data_dir: "./data"

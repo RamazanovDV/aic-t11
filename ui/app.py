@@ -161,6 +161,108 @@ def get_config():
     })
 
 
+@ui_bp.route("/api/sessions", methods=["GET"])
+def list_sessions():
+    url = f"{ui_config.backend_url}/sessions"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>", methods=["DELETE"])
+def delete_session(session_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.delete(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/rename", methods=["POST"])
+def rename_session(session_id: str):
+    data = request.get_json()
+    if not data or "new_name" not in data:
+        return jsonify({"error": "Missing 'new_name' field"}), 400
+
+    url = f"{ui_config.backend_url}/sessions/{session_id}/rename"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/messages", methods=["GET"])
+def get_session_messages(session_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 404:
+            return jsonify({"messages": []})
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/export", methods=["POST"])
+def export_sessions():
+    url = f"{ui_config.backend_url}/sessions/export"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.post(url, headers=headers, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        return {"error": f"Backend error: {str(e)}"}
+
+
+@ui_bp.route("/api/sessions/import", methods=["POST"])
+def import_session():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    url = f"{ui_config.backend_url}/sessions/import"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     app.register_blueprint(ui_bp)

@@ -67,5 +67,14 @@ class Config:
         dir_name = self.context.get("dir", "context")
         return Path(__file__).parent.parent.parent / dir_name
 
+    @property
+    def storage(self) -> dict[str, Any]:
+        return self._config.get("storage", {})
+
+    @property
+    def data_dir(self) -> Path:
+        dir_name = self.storage.get("data_dir", "./data")
+        return Path(__file__).parent.parent.parent / dir_name
+
 
 config = Config()

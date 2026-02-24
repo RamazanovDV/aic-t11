@@ -6,11 +6,22 @@
     <title>T6 AI Assistant</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 </head>
 <body>
     <header class="header">
         <div class="header-content">
             <h1 class="logo">T6 AI</h1>
+            <div class="header-controls">
+                <select id="session-select" class="session-select" onchange="switchSession(this.value)">
+                    <option value="default">default</option>
+                </select>
+                <button class="btn btn-small" onclick="createNewSession()" title="Новая сессия">+</button>
+                <button class="btn btn-small" onclick="renameCurrentSession()" title="Переименовать">✎</button>
+                <span id="status" class="status-dot" title="Проверка..."></span>
+            </div>
             <nav class="nav">
                 <a href="/" class="nav-link">Чат</a>
                 <a href="/settings" class="nav-link">Настройки</a>
@@ -22,30 +33,122 @@
         {% block content %}{% endblock %}
     </main>
 
-    <footer class="footer">
-        <div class="footer-content">
-            <span class="status" id="status">
-                <span class="status-dot"></span>
-                Проверка...
-            </span>
-        </div>
-    </footer>
-
     <script>
+        // Configure marked
+        marked.setOptions({
+            highlight: function(code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            breaks: false,
+            gfm: true
+        });
+
+        const STORAGE_KEY = 't6_session_id';
+
+        function getSessionId() {
+            return localStorage.getItem(STORAGE_KEY) || 'default';
+        }
+
+        function setSessionId(sessionId) {
+            localStorage.setItem(STORAGE_KEY, sessionId);
+            location.reload();
+        }
+
+        function switchSession(sessionId) {
+            setSessionId(sessionId);
+        }
+
+        async function createNewSession() {
+            const name = prompt('Введите имя новой сессии:', 'new-session');
+            if (!name) return;
+            
+            setSessionId(name);
+        }
+
+        async function renameCurrentSession() {
+            const currentSession = getSessionId();
+            if (currentSession === 'default') {
+                alert('Нельзя переименовать сессию default');
+                return;
+            }
+            
+            const newName = prompt('Введите новое имя сессии:', currentSession);
+            if (!newName || newName === currentSession) return;
+            
+            try {
+                const response = await fetch(`/api/sessions/${currentSession}/rename`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_name: newName })
+                });
+                
+                if (response.ok) {
+                    setSessionId(newName);
+                } else {
+                    const data = await response.json();
+                    alert('Ошибка переименования: ' + (data.error || 'Unknown error'));
+                }
+            } catch (err) {
+                alert('Ошибка: ' + err.message);
+            }
+        }
+
+        async function loadSessions() {
+            try {
+                const response = await fetch('/api/sessions');
+                const data = await response.json();
+                
+                const select = document.getElementById('session-select');
+                const currentSession = getSessionId();
+                
+                select.innerHTML = '';
+                
+                const sessions = data.sessions || [];
+                sessions.forEach(session => {
+                    const option = document.createElement('option');
+                    option.value = session.session_id;
+                    option.textContent = session.session_id;
+                    if (session.session_id === currentSession) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                });
+                
+                if (!sessions.find(s => s.session_id === currentSession)) {
+                    const option = document.createElement('option');
+                    option.value = currentSession;
+                    option.textContent = currentSession;
+                    option.selected = true;
+                    select.appendChild(option);
+                }
+            } catch (e) {
+                console.error('Failed to load sessions:', e);
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             fetch('/api/health')
                 .then(r => r.json())
                 .then(data => {
                     const status = document.getElementById('status');
                     if (data.backend === 'connected') {
-                        status.innerHTML = '<span class="status-dot connected"></span> Бэкенд подключён';
+                        status.classList.add('connected');
+                        status.title = 'Бэкенд подключён';
                     } else {
-                        status.innerHTML = '<span class="status-dot disconnected"></span> Бэкенд отключён';
+                        status.classList.add('disconnected');
+                        status.title = 'Бэкенд отключён';
                     }
                 })
                 .catch(() => {
-                    document.getElementById('status').innerHTML = '<span class="status-dot disconnected"></span> Бэкенд отключён';
+                    const status = document.getElementById('status');
+                    status.classList.add('disconnected');
+                    status.title = 'Бэкенд недоступен';
                 });
+
+            loadSessions();
         });
     </script>
 </body>

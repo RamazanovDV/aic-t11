@@ -44,3 +44,6 @@ Thumbs.db
 config.yaml
 ui/config.yaml
 cli/config.yaml
+
+# Session data
+data/
