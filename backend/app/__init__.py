@@ -1,6 +1,6 @@
 from flask import Flask
 
-from backend.app.routes import api_bp
+from app.routes import api_bp
 
 
 def create_app() -> Flask:

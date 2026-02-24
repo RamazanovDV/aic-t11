@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from backend.app.config import config
+from app.config import config
 
 
 class ContextLoader:

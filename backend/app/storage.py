@@ -2,8 +2,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from backend.app.config import config
-from backend.app.llm.base import Message
+from app.config import config
+from app.llm.base import Message
 
 
 class FileStorage:

@@ -2,10 +2,10 @@ import json
 
 from flask import Blueprint, jsonify, request, Response
 
-from backend.app.config import config
-from backend.app.context import get_system_prompt
-from backend.app.llm import ProviderFactory
-from backend.app.session import session_manager
+from app.config import config
+from app.context import get_system_prompt
+from app.llm import ProviderFactory
+from app.session import session_manager
 
 api_bp = Blueprint("api", __name__)
 

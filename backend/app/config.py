@@ -16,7 +16,7 @@ class Config:
         return cls._instance
 
     def _load_config(self) -> None:
-        config_path = Path(__file__).parent.parent.parent / "config.yaml"
+        config_path = Path(__file__).parent.parent / "config.yaml"
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
 
@@ -59,15 +59,6 @@ class Config:
         return self.providers.get(name, {})
 
     @property
-    def context(self) -> dict[str, Any]:
-        return self._config.get("context", {})
-
-    @property
-    def context_dir(self) -> Path:
-        dir_name = self.context.get("dir", "context")
-        return Path(__file__).parent.parent.parent / dir_name
-
-    @property
     def storage(self) -> dict[str, Any]:
         return self._config.get("storage", {})
 
@@ -75,6 +66,10 @@ class Config:
     def data_dir(self) -> Path:
         dir_name = self.storage.get("data_dir", "./data")
         return Path(__file__).parent.parent.parent / dir_name
+
+    @property
+    def context_dir(self) -> Path:
+        return self.data_dir / "context"
 
 
 config = Config()

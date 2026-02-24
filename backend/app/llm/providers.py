@@ -2,7 +2,7 @@ import json
 
 import requests
 
-from backend.app.llm.base import BaseProvider, LLMResponse, Message
+from app.llm.base import BaseProvider, LLMResponse, Message
 
 
 class GenericOpenAIProvider(BaseProvider):

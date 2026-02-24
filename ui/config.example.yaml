@@ -4,7 +4,13 @@ app:
 
 backend:
   url: "http://localhost:5000"
-  api_key: "YOUR_API_KEY_HERE"
+  api_key: "your-secret-api-key"
 
 auth:
-  api_key: "YOUR_API_KEY_HERE"
+  api_key: "your-secret-api-key"
+
+context:
+  dir: "../context"
+
+storage:
+  data_dir: "../data"

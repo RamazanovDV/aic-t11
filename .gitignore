@@ -41,9 +41,7 @@ Thumbs.db
 *.log
 
 # Local configs with secrets
-config.yaml
-ui/config.yaml
-cli/config.yaml
+*/config.yaml
 
 # Session data
 data/

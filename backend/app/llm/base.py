@@ -39,7 +39,7 @@ class ProviderFactory:
 
     @classmethod
     def create(cls, name: str, config: dict[str, Any]) -> BaseProvider:
-        from backend.app.llm.providers import GenericOpenAIProvider
+        from app.llm.providers import GenericOpenAIProvider
 
         if name in cls._providers:
             provider_class = cls._providers[name]
@@ -48,8 +48,12 @@ class ProviderFactory:
         else:
             raise ValueError(f"Unknown provider: {name}. Available: {list(cls._providers.keys())}")
 
+        url = config.get("url", "")
+        if url and "/chat/completions" not in url and "/messages" not in url:
+            url = url.rstrip("/") + "/chat/completions"
+
         return provider_class(
-            url=config.get("url", ""),
+            url=url,
             api_key=config.get("api_key", ""),
             model=config.get("model", ""),
         )

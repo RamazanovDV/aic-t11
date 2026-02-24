@@ -8,46 +8,80 @@ T6 is an AI agent with web interface and CLI. Backend is Flask, UI is Flask + ht
 
 ```
 t6/
-├── backend/app/         # Flask API (port 5000)
-│   ├── routes.py        # API endpoints
-│   ├── config.py        # YAML config loader
-│   ├── session.py      # Session management
-│   ├── storage.py      # File-based persistence
-│   ├── context.py      # Markdown context loader
-│   └── llm/            # LLM providers
-├── ui/                 # Web UI (Flask + htmx, port 5001)
-├── cli/                # Click-based CLI
-├── context/            # Markdown files for system prompt
-├── config.yaml         # Backend config
-├── run.py              # Backend entry point
-└── run_ui.py           # UI entry point
+├── backend/                  # Flask API (port 5000)
+│   ├── app/                 # Application code
+│   │   ├── routes.py        # API endpoints
+│   │   ├── config.py        # YAML config loader
+│   │   ├── session.py       # Session management
+│   │   ├── storage.py       # File-based persistence
+│   │   ├── context.py       # Markdown context loader
+│   │   └── llm/             # LLM providers
+│   ├── venv/                # Virtual environment
+│   ├── requirements.txt     # Dependencies
+│   ├── config.yaml          # Configuration (gitignored)
+│   ├── config.example.yaml  # Example configuration
+│   └── run.py               # Entry point
+├── ui/                      # Web UI (Flask + htmx, port 5001)
+│   ├── venv/                # Virtual environment
+│   ├── requirements.txt     # Dependencies
+│   ├── config.yaml          # Configuration (gitignored)
+│   ├── config.example.yaml  # Example configuration
+│   ├── run.py               # Entry point
+│   ├── app.py               # Application code
+│   ├── static/              # Static files
+│   └── templates/           # Jinja2 templates
+├── cli/                     # Click-based CLI
+│   ├── venv/                # Virtual environment
+│   ├── requirements.txt     # Dependencies
+│   ├── config.yaml          # Configuration (gitignored)
+│   ├── config.example.yaml  # Example configuration
+│   └── main.py              # CLI entry point
+├── context/                 # Markdown files for system prompt
+└── data/                   # Session data (gitignored)
 ```
 
 ## Build/Lint/Test Commands
 
 ### Setup
 ```bash
-cd /home/eof/dev/aic/t6
-python -m venv venv && source venv/bin/activate
+# Backend
+cd backend
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-pip install pytest ruff black mypy  # dev dependencies
+
+# UI
+cd ../ui
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# CLI
+cd ../cli
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ### Running the Application
 ```bash
-python run.py              # Backend (port 5000)
-python run_ui.py           # UI (port 5001)
-python cli/main.py         # CLI interactive
-python cli/main.py chat "Hello"
-python cli/main.py session list
-python cli/main.py health
+# Backend (port 5000)
+cd backend && source venv/bin/activate && python run.py
+
+# UI (port 5001) - in another terminal
+cd ui && source venv/bin/activate && python run.py
+
+# CLI
+cd cli && source venv/bin/activate
+python main.py chat "Hello"
+python main.py session list
+python main.py health
 ```
 
 ### Testing
 ```bash
-pytest                                  # Run all tests
-pytest tests/test_routes.py -v          # Single test file
-pytest tests/test_routes.py::test_health # Single test
+# Run tests from project root
+pytest
 
 # Quick app verification
 python -c "from backend.app import create_app; create_app(); print('OK')"
@@ -156,7 +190,7 @@ def chat(message: str, provider: str | None): """Send a message""" ...
 ## Common Tasks
 
 ### Add LLM Provider
-Add to `config.yaml`:
+Add to `backend/config.yaml`:
 ```yaml
 llm:
   providers:
@@ -173,4 +207,3 @@ llm:
 
 ## Important Files
 - `.gitignore` - Excludes config.yaml, venv/
-- `requirements.txt` - Python dependencies

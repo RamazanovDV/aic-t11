@@ -2,8 +2,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from backend.app.llm.base import Message
-from backend.app.storage import storage
+from app.llm.base import Message
+from app.storage import storage
 
 
 @dataclass

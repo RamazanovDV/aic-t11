@@ -1,5 +1,5 @@
-from backend.app.llm.base import BaseProvider, ProviderFactory
-from backend.app.llm.providers import AnthropicProvider, OllamaProvider, OpenAIProvider
+from app.llm.base import BaseProvider, ProviderFactory
+from app.llm.providers import AnthropicProvider, OllamaProvider, OpenAIProvider
 
 ProviderFactory.register("openai", OpenAIProvider)
 ProviderFactory.register("anthropic", AnthropicProvider)
