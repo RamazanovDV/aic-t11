@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="chat-container">
+    <div class="chat-header">
+        <h2>Чат с AI</h2>
+        <div class="chat-controls">
+            <select id="provider-select" class="provider-select">
+                <option value="">По умолчанию</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="ollama">Ollama</option>
+                <option value="itphx">ITPHX</option>
+            </select>
+            <button class="btn btn-secondary" onclick="resetChat()">Сбросить чат</button>
+        </div>
+    </div>
+
+    <div class="chat-messages" id="chat-messages">
+        <div class="message message-system">
+            <div class="message-content">
+                Привет! Я AI-ассистент. Задайте мне вопрос.
+            </div>
+        </div>
+    </div>
+
+    <form class="chat-input-form" id="chat-form">
+        <div class="input-wrapper">
+            <textarea 
+                id="message-input" 
+                class="message-input" 
+                placeholder="Введите сообщение..." 
+                rows="1"
+                required
+            ></textarea>
+            <button type="submit" class="btn btn-primary" id="send-btn">Отправить</button>
+        </div>
+    </form>
+</div>
+
+<script>
+    const chatMessages = document.getElementById('chat-messages');
+    const chatForm = document.getElementById('chat-form');
+    const messageInput = document.getElementById('message-input');
+    const providerSelect = document.getElementById('provider-select');
+
+    chatForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const message = messageInput.value.trim();
+        if (!message) return;
+
+        const sendBtn = document.getElementById('send-btn');
+        sendBtn.disabled = true;
+        sendBtn.textContent = '...';
+
+        addMessage(message, 'user');
+
+        const provider = providerSelect.value || null;
+        
+        try {
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message, provider })
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+                addMessage('Ошибка: ' + data.error, 'error');
+            } else {
+                addMessage(data.message, 'assistant');
+            }
+        } catch (err) {
+            addMessage('Ошибка соединения: ' + err.message, 'error');
+        }
+
+        messageInput.value = '';
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Отправить';
+    });
+
+    function addMessage(content, role) {
+        const div = document.createElement('div');
+        div.className = `message message-${role}`;
+        div.innerHTML = `<div class="message-content">${escapeHtml(content)}</div>`;
+        chatMessages.appendChild(div);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML.replace(/\n/g, '<br>');
+    }
+
+    async function resetChat() {
+        try {
+            await fetch('/api/chat/reset', { method: 'POST' });
+            chatMessages.innerHTML = `
+                <div class="message message-system">
+                    <div class="message-content">
+                        Чат сброшен. Задайте новый вопрос.
+                    </div>
+                </div>
+            `;
+        } catch (err) {
+            alert('Ошибка сброса чата: ' + err.message);
+        }
+    }
+
+    messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            chatForm.dispatchEvent(new Event('submit'));
+        }
+    });
+</script>
+{% endblock %}

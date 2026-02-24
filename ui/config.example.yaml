@@ -1,0 +1,10 @@
+app:
+  host: "0.0.0.0"
+  port: 5001
+
+backend:
+  url: "http://localhost:5000"
+  api_key: "YOUR_API_KEY_HERE"
+
+auth:
+  api_key: "YOUR_API_KEY_HERE"

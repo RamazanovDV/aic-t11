@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="settings-container">
+    <h2>Настройки</h2>
+
+    <div class="settings-section">
+        <h3>Подключение к бэкенду</h3>
+        <div class="form-group">
+            <label for="backend-url">URL бэкенда</label>
+            <input type="text" id="backend-url" class="form-input" value="http://localhost:5000">
+        </div>
+        <div class="form-group">
+            <label for="backend-api-key">API Key бэкенда</label>
+            <input type="password" id="backend-api-key" class="form-input" value="your-secret-api-key">
+        </div>
+    </div>
+
+    <div class="settings-section">
+        <h3>Провайдеры LLM</h3>
+        <div id="providers-list">
+            <div class="provider-card">
+                <h4>OpenAI</h4>
+                <div class="form-group">
+                    <label>Модель</label>
+                    <input type="text" class="form-input" value="gpt-4o-mini" readonly>
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" class="form-input" value="sk-..." readonly>
+                </div>
+            </div>
+
+            <div class="provider-card">
+                <h4>Anthropic</h4>
+                <div class="form-group">
+                    <label>Модель</label>
+                    <input type="text" class="form-input" value="claude-3-haiku-20240307" readonly>
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" class="form-input" value="sk-ant-..." readonly>
+                </div>
+            </div>
+
+            <div class="provider-card">
+                <h4>Ollama</h4>
+                <div class="form-group">
+                    <label>Модель</label>
+                    <input type="text" class="form-input" value="llama3" readonly>
+                </div>
+                <div class="form-group">
+                    <label>URL</label>
+                    <input type="text" class="form-input" value="http://localhost:11434" readonly>
+                </div>
+            </div>
+
+            <div class="provider-card">
+                <h4>ITPHX</h4>
+                <div class="form-group">
+                    <label>Модель</label>
+                    <input type="text" class="form-input" value="deepseek-coder-v2:16b" readonly>
+                </div>
+                <div class="form-group">
+                    <label>URL</label>
+                    <input type="text" class="form-input" value="https://ai.itphx.ru/v1/chat/completions" readonly>
+                </div>
+            </div>
+        </div>
+        <p class="help-text">Для изменения настроек провайдеров отредактируйте файл config.yaml в директории backend.</p>
+    </div>
+
+    <div class="settings-section">
+        <h3>Контекст</h3>
+        <p class="help-text">Markdown файлы из директории context загружаются как дополнительный контекст для AI.</p>
+        <div class="context-files">
+            <div class="context-file">
+                <span class="file-icon">📄</span>
+                <span>about.md</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="settings-actions">
+        <button class="btn btn-primary" onclick="saveSettings()">Сохранить настройки</button>
+    </div>
+</div>
+
+<script>
+    async function saveSettings() {
+        const backendUrl = document.getElementById('backend-url').value;
+        const backendApiKey = document.getElementById('backend-api-key').value;
+
+        alert('Настройки сохранены (в памяти). Перезапустите UI для применения.');
+    }
+</script>
+{% endblock %}
