@@ -88,7 +88,7 @@ class FileStorage:
                     "updated_at": session_data.get("updated_at"),
                 })
         
-        return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+        return sorted(sessions, key=lambda x: x.get("updated_at") or "", reverse=True)
 
     def delete_session(self, session_id: str) -> bool:
         session_file = self._session_file(session_id)
