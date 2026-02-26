@@ -15,6 +15,9 @@
         <div class="header-content">
             <h1 class="logo">T6 UI</h1>
             <div class="header-controls">
+                <button class="btn btn-small" id="panel-mode-btn" onclick="togglePanelMode()" title="Переключить режим (одна/две панели)">
+                    <span id="panel-mode-icon">⧉</span> <span id="panel-mode-text">Split</span>
+                </button>
                 <button class="btn btn-small" onclick="openSettings()" title="Настройки">⚙️</button>
                 <span id="status" class="status-dot" title="Проверка..."></span>
             </div>
@@ -67,6 +70,33 @@
 
         function switchSession(sessionId) {
             setSessionId(sessionId);
+        }
+
+        function togglePanelMode() {
+            const currentMode = localStorage.getItem('t6_panel_mode') || 'single';
+            const newMode = currentMode === 'single' ? 'dual' : 'single';
+            localStorage.setItem('t6_panel_mode', newMode);
+            
+            const url = new URL(window.location.href);
+            if (newMode === 'dual') {
+                url.searchParams.set('mode', 'dual');
+            } else {
+                url.searchParams.delete('mode');
+            }
+            window.location.href = url.toString();
+        }
+
+        function updatePanelModeButton() {
+            const mode = localStorage.getItem('t6_panel_mode') || 'single';
+            const icon = document.getElementById('panel-mode-icon');
+            const text = document.getElementById('panel-mode-text');
+            if (mode === 'dual') {
+                icon.textContent = '◫';
+                text.textContent = 'Single';
+            } else {
+                icon.textContent = '⧉';
+                text.textContent = 'Split';
+            }
         }
 
         async function createNewSession() {
@@ -138,6 +168,14 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('mode') === 'dual') {
+                localStorage.setItem('t6_panel_mode', 'dual');
+            } else if (urlParams.get('mode') === 'single') {
+                localStorage.setItem('t6_panel_mode', 'single');
+            }
+            updatePanelModeButton();
+            
             fetch('/api/health')
                 .then(r => r.json())
                 .then(data => {
@@ -155,8 +193,6 @@
                     status.classList.add('disconnected');
                     status.title = 'Бэкенд недоступен';
                 });
-
-            loadSessions();
         });
     </script>
 </body>

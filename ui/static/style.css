@@ -15,6 +15,12 @@
     --message-error: #3a1a1a;
 }
 
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -25,9 +31,11 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
-    min-height: 100vh;
+    height: 100vh;
     display: flex;
     flex-direction: column;
+    margin: 0;
+    overflow: hidden;
 }
 
 .header {
@@ -37,6 +45,29 @@ body {
     position: sticky;
     top: 0;
     z-index: 100;
+    flex-shrink: 0;
+}
+
+.main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    max-width: 100%;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.header {
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    padding: 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    flex-shrink: 0;
 }
 
 .header-content {
@@ -129,7 +160,7 @@ body {
 
 .main {
     flex: 1;
-    max-width: 1200px;
+    max-width: 100%;
     width: 100%;
     margin: 0 auto;
     padding: 1rem;
@@ -310,6 +341,60 @@ body {
     border: 1px solid var(--border);
 }
 
+.chat-panels-wrapper {
+    display: flex;
+    gap: 1rem;
+    flex: 1;
+    min-height: 0;
+}
+
+.chat-panels {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    max-width: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0.5rem;
+    box-sizing: border-box;
+}
+
+.chat-panels-dual {
+    gap: 1rem;
+}
+
+.chat-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    min-width: 200px;
+    min-height: 400px;
+}
+
+.chat-panel .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-height: 200px;
+    background: var(--bg-primary);
+}
+
+.chat-input-area {
+    flex-shrink: 0;
+    padding: 0.5rem 1rem;
+}
+
+.chat-panels-dual + .chat-input-area {
+    max-width: 1400px;
+}
+
 @media (max-height: 600px) {
     .chat-container {
         height: calc(100vh - 60px);
@@ -421,11 +506,6 @@ body {
     gap: 1rem;
 }
 
-.chat-input-form {
-    padding: 1rem;
-    border-top: 1px solid var(--border);
-}
-
 .input-wrapper {
     display: flex;
     gap: 0.5rem;
@@ -486,6 +566,7 @@ body {
     background: var(--message-system);
     color: var(--text-secondary);
     font-style: italic;
+    border-radius: 12px;
 }
 
 .message.message-error {

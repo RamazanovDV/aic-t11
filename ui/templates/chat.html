@@ -1,64 +1,17 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="chat-container">
-    <div class="session-panel">
-        <span class="panel-label">Сессия:</span>
-        <select id="session-select" class="session-select" onchange="switchSession(this.value)">
-            <option value="default">default</option>
-        </select>
-        <button class="btn btn-small" onclick="createNewSession()" title="Новая сессия">+</button>
-        <button class="btn btn-small" onclick="renameCurrentSession()" title="Переименовать">✎</button>
-        <button class="btn btn-small" onclick="copyCurrentSession()" title="Копировать">📋</button>
-    </div>
+<script>
+    function loadSessions() {
+        // overridden in chat.html - no-op
+    }
+</script>
+<div id="chat-panels-container" class="chat-panels">
+    <!-- Panels will be rendered by JavaScript -->
+</div>
 
-    <div class="chat-header">
-        <span class="panel-label">Провайдер:</span>
-        <select id="provider-select" class="provider-select" onchange="onProviderChange()">
-            <option value="">По умолчанию</option>
-        </select>
-        <span class="panel-label">Модель:</span>
-        <select id="model-select" class="model-select" disabled>
-            <option value="">Выберите модель</option>
-        </select>
-        <button class="btn btn-icon btn-refresh" onclick="loadModels()" title="Обновить модели">↻</button>
-        <div class="chat-header-right">
-            <label class="debug-toggle">
-                <input type="checkbox" id="debug-toggle" onchange="toggleDebug()">
-                <span>Debug</span>
-            </label>
-            <label class="debug-toggle">
-                <input type="checkbox" id="stream-toggle" checked>
-                <span>Stream</span>
-            </label>
-        </div>
-        <button class="btn btn-secondary" onclick="resetChat()" title="Сбросить чат">🗑️</button>
-    </div>
-
-    <div class="chat-stats" id="chat-stats" style="display: none;">
-        <span id="tokens-info"></span>
-    </div>
-
-    <div class="chat-messages" id="chat-messages">
-        <div class="message message-system">
-            <div class="message-content">
-                Привет! Я AI-ассистент. Задайте мне вопрос.
-            </div>
-        </div>
-    </div>
-
-    <form class="chat-input-form" id="chat-form">
-        <div class="input-wrapper">
-            <textarea 
-                id="message-input" 
-                class="message-input" 
-                placeholder="Введите сообщение..." 
-                rows="1"
-                required
-            ></textarea>
-            <button type="submit" class="btn btn-primary" id="send-btn">Отправить</button>
-        </div>
-    </form>
+<div id="chat-input-area" class="chat-input-area">
+    <!-- Input area will be rendered by JavaScript -->
 </div>
 
 <div id="debug-modal" class="modal" style="display: none;">
@@ -101,267 +54,236 @@
 </div>
 
 <script>
-    const chatMessages = document.getElementById('chat-messages');
-    const chatForm = document.getElementById('chat-form');
-    const messageInput = document.getElementById('message-input');
-    const providerSelect = document.getElementById('provider-select');
-    const modelSelect = document.getElementById('model-select');
+    const PANEL_MODE_KEY = 't6_panel_mode';
+    const PANEL_0_SESSION_KEY = 't6_panel_0_session';
+    const PANEL_1_SESSION_KEY = 't6_panel_1_session';
+    const SESSION_ID_KEY = 't6_session_id';
+
+    let panelMode = localStorage.getItem(PANEL_MODE_KEY) || 'single';
+    let panels = [];
     let debugMode = localStorage.getItem('t6_debug') === 'true';
     let currentDebugData = null;
-    let currentTotalInput = 0;
-    let currentTotalOutput = 0;
-    let currentTotalTokens = 0;
-    let abortController = null;
-    let isRequestInProgress = false;
+    let availableProviders = [];
+    let allSessions = [];
 
-    document.getElementById('send-btn').addEventListener('click', function(e) {
-        if (isRequestInProgress && abortController) {
-            e.preventDefault();
-            abortController.abort();
+    function getPanelSessionId(panelIndex) {
+        if (panelIndex === 0) {
+            return localStorage.getItem(PANEL_0_SESSION_KEY) || localStorage.getItem(SESSION_ID_KEY) || 'default';
+        } else {
+            return localStorage.getItem(PANEL_1_SESSION_KEY) || 'default';
         }
-    });
+    }
 
-    document.addEventListener('DOMContentLoaded', function() {
-        document.getElementById('debug-toggle').checked = debugMode;
+    function setPanelSessionId(panelIndex, sessionId) {
+        if (panelIndex === 0) {
+            localStorage.setItem(PANEL_0_SESSION_KEY, sessionId);
+            localStorage.setItem(SESSION_ID_KEY, sessionId);
+        } else {
+            localStorage.setItem(PANEL_1_SESSION_KEY, sessionId);
+        }
+    }
+
+    function initPanels() {
+        const mode = panelMode;
+        const count = mode === 'dual' ? 2 : 1;
         
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('settings') === '1') {
-            openSettingsModal();
-            window.history.replaceState({}, document.title, '/');
+        panels = [];
+        for (let i = 0; i < count; i++) {
+            panels.push({
+                index: i,
+                sessionId: getPanelSessionId(i),
+                provider: '',
+                model: '',
+                messages: [],
+                totalInput: 0,
+                totalOutput: 0,
+                totalTokens: 0,
+                isLoading: false,
+                abortController: null,
+                messagesContainer: null
+            });
         }
-    });
-
-    function openSettingsModal() {
-        loadSessionsList();
-        document.getElementById('settings-modal').style.display = 'flex';
     }
 
-    function closeSettingsModal() {
-        document.getElementById('settings-modal').style.display = 'none';
-    }
+    function renderPanels() {
+        const container = document.getElementById('chat-panels-container');
+        container.innerHTML = '';
 
-    async function loadSessionsList() {
-        const container = document.getElementById('settings-sessions-list');
-        try {
-            const response = await fetch('/api/sessions');
-            const data = await response.json();
+        const panelsWrapper = document.createElement('div');
+        panelsWrapper.className = 'chat-panels-wrapper';
+        container.appendChild(panelsWrapper);
+
+        panels.forEach((panel, index) => {
+            const panelEl = document.createElement('div');
+            panelEl.className = 'chat-panel';
+            panelEl.id = `panel-${index}`;
             
-            if (!data.sessions || data.sessions.length === 0) {
-                container.innerHTML = '<p class="help-text">Нет сессий</p>';
+            panelEl.innerHTML = `
+                <div class="session-panel">
+                    <span class="panel-label">Сессия:</span>
+                    <select class="session-select panel-session-select" data-panel="${index}" onchange="onPanelSessionChange(${index}, this.value)">
+                        <option value="default">default</option>
+                    </select>
+                    <button class="btn btn-small" onclick="createNewSessionPanel(${index})" title="Новая сессия">+</button>
+                    <button class="btn btn-small" onclick="copySessionPanel(${index})" title="Копировать">📋</button>
+                    <button class="btn btn-small" onclick="renameSessionPanel(${index})" title="Переименовать">✎</button>
+                    ${panelMode === 'dual' ? `<span class="panel-label">#${index + 1}</span>` : ''}
+                </div>
+
+                <div class="chat-header">
+                    <span class="panel-label">Провайдер:</span>
+                    <select class="provider-select panel-provider-select" data-panel="${index}" onchange="onPanelProviderChange(${index})">
+                        <option value="">По умолчанию</option>
+                    </select>
+                    <span class="panel-label">Модель:</span>
+                    <select class="model-select panel-model-select" data-panel="${index}" disabled>
+                        <option value="">Выберите модель</option>
+                    </select>
+                    <button class="btn btn-icon btn-refresh" onclick="loadPanelModels(${index})" title="Обновить модели">↻</button>
+                    <div class="chat-header-right">
+                        <label class="debug-toggle">
+                            <input type="checkbox" class="panel-debug-toggle" data-panel="${index}" ${debugMode ? 'checked' : ''} onchange="togglePanelDebug(${index})">
+                            <span>Debug</span>
+                        </label>
+                        <label class="debug-toggle">
+                            <input type="checkbox" class="panel-stream-toggle" data-panel="${index}" checked>
+                            <span>Stream</span>
+                        </label>
+                    </div>
+                    <button class="btn btn-secondary btn-small" onclick="resetPanelChat(${index})" title="Сбросить чат">🗑️</button>
+                </div>
+
+                <div class="chat-stats" id="panel-stats-${index}" style="display: none;">
+                    <span class="panel-tokens-info"></span>
+                </div>
+
+                <div class="chat-messages" id="panel-messages-${index}">
+                    <div class="message message-system">
+                        <div class="message-content">
+                            Привет! Я AI-ассистент. Задайте мне вопрос.
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            panelsWrapper.appendChild(panelEl);
+            panel.messagesContainer = document.getElementById(`panel-messages-${index}`);
+        });
+
+        renderInputArea();
+        loadAllData();
+    }
+
+    function renderInputArea() {
+        const inputArea = document.getElementById('chat-input-area');
+        inputArea.innerHTML = `
+            <form class="chat-input-form" id="chat-form">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="message-input" 
+                        class="message-input" 
+                        placeholder="Введите сообщение..." 
+                        rows="1"
+                        required
+                    ></textarea>
+                    <button type="submit" class="btn btn-primary" id="send-btn">Отправить</button>
+                </div>
+            </form>
+        `;
+
+        const chatForm = document.getElementById('chat-form');
+        const messageInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        sendBtn.addEventListener('click', function(e) {
+            const hasLoading = panels.some(p => p.isLoading);
+            if (hasLoading && panels[0].abortController) {
+                e.preventDefault();
+                panels.forEach(p => {
+                    if (p.abortController) p.abortController.abort();
+                });
+            }
+        });
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            const streamToggle = document.querySelector('.panel-stream-toggle');
+            const useStream = streamToggle ? streamToggle.checked : true;
+
+            const hasLoading = panels.some(p => p.isLoading);
+            if (hasLoading) {
+                panels.forEach(p => {
+                    if (p.abortController) p.abortController.abort();
+                });
                 return;
             }
 
-            let html = '<div style="max-height: 200px; overflow-y: auto;">';
-            data.sessions.forEach(session => {
-                const date = session.updated_at ? new Date(session.updated_at).toLocaleString('ru') : 'N/A';
-                html += `
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; border-bottom: 1px solid var(--border);">
-                        <div>
-                            <div style="font-weight: 500;">${session.session_id}</div>
-                            <div style="font-size: 0.75rem; color: var(--text-secondary);">${session.message_count} сообщений</div>
-                        </div>
-                        <div>
-                            <button class="btn btn-small" onclick="copySessionSettings('${session.session_id}')">📋</button>
-                            ${session.session_id !== 'default' ? `<button class="btn btn-small" onclick="renameSessionSettings('${session.session_id}')">✎</button>
-                            <button class="btn btn-small btn-danger" onclick="deleteSessionSettings('${session.session_id}')">✕</button>` : ''}
-                        </div>
-                    </div>
-                `;
+            panels.forEach(p => {
+                p.abortController = new AbortController();
+                p.isLoading = true;
             });
-            html += '</div>';
-            container.innerHTML = html;
-        } catch (e) {
-            container.innerHTML = '<p class="help-text">Ошибка загрузки</p>';
-        }
-    }
 
-    async function deleteSessionSettings(sessionId) {
-        if (!confirm(`Удалить сессию "${sessionId}"?`)) return;
-        
-        try {
-            const response = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
-            const data = await response.json();
-            if (response.ok) {
-                loadSessionsList();
-                loadSessions();
-            } else {
-                alert('Ошибка удаления: ' + (data.error || 'Unknown'));
-            }
-        } catch (e) {
-            alert('Ошибка: ' + e.message);
-        }
-    }
+            messageInput.disabled = true;
+            sendBtn.textContent = 'Стоп';
 
-    async function renameSessionSettings(sessionId) {
-        const newName = prompt('Новое имя:', sessionId);
-        if (!newName || newName === sessionId) return;
-        
-        try {
-            const response = await fetch(`/api/sessions/${sessionId}/rename`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ new_name: newName })
+            panels.forEach((panel, idx) => {
+                addMessageToPanel(idx, message, 'user');
             });
-            
-            if (response.ok) {
-                loadSessionsList();
-                loadSessions();
-            } else {
-                const data = await response.json();
-                alert('Ошибка переименования: ' + (data.error || 'Unknown'));
+
+            const messageText = message;
+            messageInput.value = '';
+
+            try {
+                const promises = panels.map((panel, idx) => 
+                    sendToPanel(panel, messageText, useStream, idx)
+                );
+                await Promise.all(promises);
+            } finally {
+                messageInput.disabled = false;
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Отправить';
+                panels.forEach(p => {
+                    p.isLoading = false;
+                    p.abortController = null;
+                });
             }
-        } catch (e) {
-            alert('Ошибка: ' + e.message);
-        }
-    }
-
-    async function copySessionSettings(sessionId) {
-        const newSessionId = prompt('Имя новой сессии:', sessionId + '-copy');
-        if (!newSessionId || newSessionId === sessionId) return;
-        
-        try {
-            const response = await fetch(`/api/sessions/${sessionId}/copy`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ new_session_id: newSessionId })
-            });
-            
-            if (response.ok) {
-                loadSessionsList();
-                loadSessions();
-            } else {
-                const data = await response.json();
-                alert('Ошибка копирования: ' + (data.error || 'Unknown'));
-            }
-        } catch (e) {
-            alert('Ошибка: ' + e.message);
-        }
-    }
-
-    async function exportSessions() {
-        try {
-            const response = await fetch('/api/sessions/export', { method: 'POST' });
-            const data = await response.json();
-            
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 't6-sessions.json';
-            a.click();
-            URL.revokeObjectURL(url);
-        } catch (e) {
-            alert('Ошибка: ' + e.message);
-        }
-    }
-
-    async function importSessions(input) {
-        const file = input.files[0];
-        if (!file) return;
-        
-        try {
-            const text = await file.text();
-            const data = JSON.parse(text);
-            
-            const response = await fetch('/api/sessions/import', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
-            
-            if (response.ok) {
-                alert('Импортировано');
-                loadSessionsList();
-            } else {
-                alert('Ошибка импорта');
-            }
-        } catch (e) {
-            alert('Ошибка: ' + e.message);
-        }
-        
-        input.value = '';
-    }
-
-    function toggleDebug() {
-        debugMode = document.getElementById('debug-toggle').checked;
-        localStorage.setItem('t6_debug', debugMode ? 'true' : 'false');
-    }
-
-    function showDebugModal(debugData) {
-        currentDebugData = debugData;
-        const hasRequest = debugData.request;
-        const hasResponse = debugData.response;
-        
-        document.querySelectorAll('.debug-tab').forEach(t => {
-            t.style.display = (hasRequest && hasResponse) ? '' : 'none';
         });
+
+        messageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                chatForm.dispatchEvent(new Event('submit'));
+            }
+        });
+    }
+
+    async function loadAllData() {
+        await loadSessionsList();
+        await loadProviders();
         
-        if (hasResponse && !hasRequest) {
-            document.getElementById('debug-json').textContent = JSON.stringify(debugData.response, null, 2);
-            document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
-            document.querySelector('.debug-tab[data-tab="response"]').classList.add('active');
-        } else {
-            document.getElementById('debug-json').textContent = JSON.stringify(debugData.request, null, 2);
-            document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
-            document.querySelector('.debug-tab[data-tab="request"]').classList.add('active');
-        }
-        document.getElementById('debug-modal').style.display = 'flex';
-    }
-
-    function switchDebugTab(tab) {
-        document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
-        document.querySelector(`.debug-tab[data-tab="${tab}"]`).classList.add('active');
-        
-        if (currentDebugData) {
-            const data = tab === 'request' ? currentDebugData.request : currentDebugData.response;
-            document.getElementById('debug-json').textContent = JSON.stringify(data, null, 2);
+        for (let i = 0; i < panels.length; i++) {
+            try {
+                await loadPanelSessions(i);
+                await loadPanelSettings(i);
+                await loadPanelMessages(i);
+            } catch(e) {
+                console.error('Failed to load panel', i, e);
+            }
         }
     }
 
-    function closeDebugModal() {
-        document.getElementById('debug-modal').style.display = 'none';
-    }
-
-    function clearDebugData() {
-        const sessionId = getSessionId();
-        fetch(`/api/sessions/${sessionId}/clear-debug`, { method: 'POST' })
-            .then(() => {
-                document.querySelectorAll('.message-debug-btn').forEach(btn => btn.remove());
-                closeDebugModal();
-                location.reload();
-            })
-            .catch(err => console.error('Failed to clear debug:', err));
-    }
-
-    function getSessionId() {
-        return localStorage.getItem('t6_session_id') || 'default';
-    }
-
-    async function loadSessions() {
-        const sessionSelect = document.getElementById('session-select');
+    async function loadSessionsList() {
         try {
             const response = await fetch('/api/sessions');
             const data = await response.json();
-            
-            sessionSelect.innerHTML = '';
-            const sessions = data.sessions || [];
-            
-            sessions.forEach(session => {
-                const option = document.createElement('option');
-                option.value = session.session_id;
-                option.textContent = session.session_id;
-                sessionSelect.appendChild(option);
-            });
-            
-            sessionSelect.value = getSessionId();
+            allSessions = data.sessions || [];
         } catch (e) {
             console.error('Failed to load sessions:', e);
         }
-    }
-
-    function switchSession(sessionId) {
-        localStorage.setItem('t6_session_id', sessionId);
-        location.reload();
     }
 
     async function loadProviders() {
@@ -369,42 +291,97 @@
             const response = await fetch('/api/admin/config');
             if (response.ok) {
                 const data = await response.json();
-                const providers = data.providers || {};
-                const availableProviders = Object.keys(providers);
+                availableProviders = Object.keys(data.providers || {});
                 const defaultProvider = data.default_provider || '';
                 
-                providerSelect.innerHTML = '<option value="">По умолчанию</option>';
-                for (const name of availableProviders) {
-                    const option = document.createElement('option');
-                    option.value = name;
-                    option.textContent = name;
-                    providerSelect.appendChild(option);
-                }
-                
-                const sessionResponse = await fetch(`/api/sessions/${getSessionId()}`);
-                let sessionProvider = '';
-                let sessionModel = '';
-                if (sessionResponse.ok) {
-                    const sessionData = await sessionResponse.json();
-                    sessionProvider = sessionData.provider || '';
-                    sessionModel = sessionData.model || '';
-                }
-                
-                let selectedProvider = defaultProvider;
-                if (sessionProvider && availableProviders.includes(sessionProvider)) {
-                    selectedProvider = sessionProvider;
-                }
-                
-                providerSelect.value = selectedProvider;
-                
-                await loadModels(sessionModel);
+                panels.forEach((panel, idx) => {
+                    const providerSelect = document.querySelector(`.panel-provider-select[data-panel="${idx}"]`);
+                    if (providerSelect) {
+                        providerSelect.innerHTML = '<option value="">По умолчанию</option>';
+                        for (const name of availableProviders) {
+                            const option = document.createElement('option');
+                            option.value = name;
+                            option.textContent = name;
+                            providerSelect.appendChild(option);
+                        }
+                    }
+                });
             }
         } catch (err) {
             console.error('Failed to load providers:', err);
         }
     }
 
-    async function loadModels(preferredModel = null) {
+    async function loadPanelSessions(panelIndex) {
+        const panel = panels[panelIndex];
+        const sessionSelect = document.querySelector(`.panel-session-select[data-panel="${panelIndex}"]`);
+        
+        if (!sessionSelect) return;
+
+        sessionSelect.innerHTML = '';
+        
+        const sortedSessions = [...allSessions].sort((a, b) => a.session_id.localeCompare(b.session_id));
+        
+        sortedSessions.forEach(session => {
+            const option = document.createElement('option');
+            option.value = session.session_id;
+            option.textContent = session.session_id;
+            if (session.session_id === panel.sessionId) {
+                option.selected = true;
+            }
+            sessionSelect.appendChild(option);
+        });
+
+        if (!allSessions.find(s => s.session_id === panel.sessionId)) {
+            const option = document.createElement('option');
+            option.value = panel.sessionId;
+            option.textContent = panel.sessionId;
+            option.selected = true;
+            sessionSelect.appendChild(option);
+        }
+    }
+
+    async function loadPanelSettings(panelIndex) {
+        const panel = panels[panelIndex];
+        
+        try {
+            const response = await fetch(`/api/sessions/${panel.sessionId}`);
+            if (response.ok) {
+                const data = await response.json();
+                panel.provider = data.provider || '';
+                panel.model = data.model || '';
+            }
+        } catch (e) {
+            console.error('Failed to load panel settings:', e);
+        }
+
+        const providerSelect = document.querySelector(`.panel-provider-select[data-panel="${panelIndex}"]`);
+        const modelSelect = document.querySelector(`.model-select[data-panel="${panelIndex}"]`);
+        
+        if (providerSelect) {
+            let selectedProvider = panel.provider;
+            if (!selectedProvider) {
+                try {
+                    const configResp = await fetch('/api/admin/config');
+                    if (configResp.ok) {
+                        const configData = await configResp.json();
+                        selectedProvider = configData.default_provider || '';
+                    }
+                } catch (e) {}
+            }
+            providerSelect.value = selectedProvider;
+        }
+
+        await loadPanelModels(panelIndex);
+    }
+
+    async function loadPanelModels(panelIndex) {
+        const panel = panels[panelIndex];
+        const providerSelect = document.querySelector(`.panel-provider-select[data-panel="${panelIndex}"]`);
+        const modelSelect = document.querySelector(`.model-select[data-panel="${panelIndex}"]`);
+        
+        if (!providerSelect || !modelSelect) return;
+
         const provider = providerSelect.value;
         if (!provider) {
             modelSelect.innerHTML = '<option value="">Выберите провайдер</option>';
@@ -429,334 +406,70 @@
                         modelSelect.appendChild(option);
                     });
                     
-                    if (preferredModel && data.models.includes(preferredModel)) {
-                        modelSelect.value = preferredModel;
+                    if (panel.model && data.models.includes(panel.model)) {
+                        modelSelect.value = panel.model;
                     }
                     
                     modelSelect.disabled = false;
                 } else {
                     modelSelect.innerHTML = '<option value="">Нет доступных моделей</option>';
                 }
-            } else {
-                const errorData = await response.json();
-                modelSelect.innerHTML = `<option value="">Ошибка: ${errorData.error || 'Unknown'}</option>`;
             }
         } catch (err) {
             modelSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
         }
     }
 
-    async function onProviderChange() {
-        await loadModels();
-    }
-
-    async function loadUserSettings() {
-        try {
-            const response = await fetch('/api/user/settings');
-            if (response.ok) {
-                const data = await response.json();
-                if (data.provider) {
-                    providerSelect.value = data.provider;
-                }
-                await loadModels();
-                if (data.model) {
-                    modelSelect.value = data.model;
-                }
-            }
-        } catch (err) {
-            console.error('Failed to load user settings:', err);
-        }
-    }
-
-    async function saveUserSettings() {
-        const provider = providerSelect.value;
-        const model = modelSelect.value;
+    async function loadPanelMessages(panelIndex) {
+        const panel = panels[panelIndex];
         
         try {
-            await fetch('/api/user/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider, model })
-            });
-        } catch (err) {
-            console.error('Failed to save user settings:', err);
-        }
-    }
-
-    async function loadMessages() {
-        const sessionId = getSessionId();
-        try {
-            const response = await fetch(`/api/sessions/${sessionId}/messages`);
+            const response = await fetch(`/api/sessions/${panel.sessionId}/messages`);
             const data = await response.json();
             
-            chatMessages.innerHTML = '';
+            panel.messages = data.messages || [];
             
-            const messages = data.messages || [];
-            if (messages.length === 0) {
-                chatMessages.innerHTML = `
+            const container = panel.messagesContainer;
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            if (panel.messages.length === 0) {
+                container.innerHTML = `
                     <div class="message message-system">
                         <div class="message-content">
                             Привет! Я AI-ассистент. Задайте мне вопрос.
                         </div>
                     </div>
                 `;
-                updateStats(0, 0, 0);
+                updatePanelStats(panelIndex, 0, 0, 0);
                 return;
             }
             
-            let totalInput = 0;
-            let totalOutput = 0;
-            currentTotalInput = 0;
-            currentTotalOutput = 0;
-            currentTotalTokens = 0;
+            panel.totalInput = 0;
+            panel.totalOutput = 0;
+            panel.totalTokens = 0;
             
-            messages.forEach(msg => {
-                addMessage(msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null);
+            panel.messages.forEach(msg => {
+                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null);
                 if (msg.usage) {
-                    totalInput += msg.usage.input_tokens || 0;
-                    totalOutput += msg.usage.output_tokens || 0;
+                    panel.totalInput += msg.usage.input_tokens || 0;
+                    panel.totalOutput += msg.usage.output_tokens || 0;
+                    panel.totalTokens += msg.usage.total_tokens || 0;
                 }
             });
             
-            currentTotalInput = totalInput;
-            currentTotalOutput = totalOutput;
-            currentTotalTokens = totalInput + totalOutput;
-            updateStats(currentTotalInput, currentTotalOutput, currentTotalTokens);
+            updatePanelStats(panelIndex, panel.totalInput, panel.totalOutput, panel.totalTokens);
         } catch (err) {
-            console.error('Failed to load messages:', err);
+            console.error('Failed to load panel messages:', err);
         }
     }
 
-    function updateStats(inputTokens, outputTokens, totalTokens) {
-        const statsEl = document.getElementById('chat-stats');
-        const tokensInfo = document.getElementById('tokens-info');
-        if (totalTokens > 0 || inputTokens > 0 || outputTokens > 0) {
-            statsEl.style.display = 'block';
-            let text = '';
-            if (inputTokens > 0) text += `Вход: ${inputTokens} | `;
-            if (outputTokens > 0) text += `Выход: ${outputTokens} | `;
-            text += `Всего: ${totalTokens}`;
-            tokensInfo.textContent = text;
-        } else {
-            statsEl.style.display = 'none';
-        }
-    }
+    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null) {
+        const panel = panels[panelIndex];
+        const container = panel.messagesContainer;
+        if (!container) return;
 
-    chatForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        
-        const message = messageInput.value.trim();
-        if (!message) return;
-
-        const sendBtn = document.getElementById('send-btn');
-        const streamToggle = document.getElementById('stream-toggle');
-        const useStream = streamToggle.checked;
-
-        isRequestInProgress = true;
-        abortController = new AbortController();
-        
-        sendBtn.textContent = 'Стоп';
-        messageInput.disabled = true;
-
-        addMessage(message, 'user');
-
-        const provider = providerSelect.value || null;
-        const model = modelSelect.value || null;
-        const sessionId = getSessionId();
-        
-        try {
-            if (useStream) {
-                await sendStreamMessage(message, provider, model, sessionId, sendBtn);
-            } else {
-                await sendRegularMessage(message, provider, model, sessionId, sendBtn);
-            }
-        } finally {
-            messageInput.value = '';
-            messageInput.disabled = false;
-            sendBtn.disabled = false;
-            sendBtn.textContent = 'Отправить';
-            isRequestInProgress = false;
-            abortController = null;
-        }
-    });
-
-    async function sendRegularMessage(message, provider, model, sessionId, sendBtn) {
-        try {
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Session-Id': sessionId,
-                },
-                signal: abortController ? abortController.signal : null,
-                body: JSON.stringify({ message, provider, model, debug: debugMode })
-            });
-
-            const data = await response.json();
-
-            if (data.error) {
-                messageInput.value = message;
-                const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
-                addMessage('Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
-            } else {
-                const usage = data.usage || null;
-                addMessage(data.message, 'assistant', data.debug || null, usage, data.model || null);
-                if (data.usage) {
-                    const inputTokens = data.usage.input_tokens || 0;
-                    const outputTokens = data.usage.output_tokens || 0;
-                    const totalTokens = data.usage.total_tokens || (inputTokens + outputTokens);
-                    currentTotalInput += inputTokens;
-                    currentTotalOutput += outputTokens;
-                    currentTotalTokens += totalTokens;
-                    updateStats(currentTotalInput, currentTotalOutput, currentTotalTokens);
-                }
-                saveUserSettings();
-            }
-        } catch (err) {
-            if (err.name === 'AbortError') {
-                addMessage('Запрос прерван', 'error');
-                return;
-            }
-            messageInput.value = message;
-            addMessage('Ошибка соединения: ' + err.message, 'error');
-        }
-    }
-
-    async function sendStreamMessage(message, provider, model, sessionId, sendBtn) {
-        let assistantDiv = null;
-        let assistantRow = null;
-        let messageContent = null;
-
-        try {
-            const response = await fetch('/api/chat/stream', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Session-Id': sessionId,
-                },
-                signal: abortController ? abortController.signal : null,
-                body: JSON.stringify({ message, provider, model, debug: debugMode })
-            });
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let fullContent = '';
-
-            const assistantRow = document.createElement('div');
-            assistantRow.className = 'message-row message-assistant';
-            
-            assistantDiv = document.createElement('div');
-            assistantDiv.className = 'message message-assistant';
-            messageContent = document.createElement('div');
-            messageContent.className = 'message-content';
-            messageContent.innerHTML = '';
-            assistantDiv.appendChild(messageContent);
-            assistantRow.appendChild(assistantDiv);
-            
-            chatMessages.appendChild(assistantRow);
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const dataStr = line.slice(6);
-                        if (dataStr === '[DONE]') continue;
-
-                        try {
-                            const data = JSON.parse(dataStr);
-
-                            if (data.error) {
-                                messageInput.value = message;
-                                assistantRow.remove();
-                                const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
-                                addMessage('Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
-                                return;
-                            }
-
-                            if (data.done) {
-                                let modelName = null;
-                                if (data.debug && data.debug.response && data.debug.response.model) {
-                                    modelName = data.debug.response.model;
-                                }
-                                
-                                messageContent.innerHTML = marked.parse(fullContent.trim());
-                                
-                                if (data.usage) {
-                                    const inputTokens = data.usage.input_tokens || 0;
-                                    const outputTokens = data.usage.output_tokens || 0;
-                                    const totalTokens = data.usage.total_tokens || (inputTokens + outputTokens);
-                                    currentTotalInput += inputTokens;
-                                    currentTotalOutput += outputTokens;
-                                    currentTotalTokens += totalTokens;
-                                    updateStats(currentTotalInput, currentTotalOutput, currentTotalTokens);
-                                    
-                                    const tokensDiv = document.createElement('div');
-                                    tokensDiv.className = 'message-tokens';
-                                    const tokensInfo = `вх: ${inputTokens} | вых: ${outputTokens} | всего: ${totalTokens}`;
-                                    tokensDiv.textContent = modelName ? modelName + ' • ' + tokensInfo : tokensInfo;
-                                    assistantDiv.appendChild(tokensDiv);
-                                } else if (modelName) {
-                                    const tokensDiv = document.createElement('div');
-                                    tokensDiv.className = 'message-tokens';
-                                    tokensDiv.textContent = modelName;
-                                    assistantDiv.appendChild(tokensDiv);
-                                }
-                                
-                                const plainContent = fullContent.replace(/<[^>]*>/g, '');
-                                const actionsDiv = document.createElement('div');
-                                actionsDiv.className = 'message-actions';
-                                
-                                const copyBtn = document.createElement('button');
-                                copyBtn.className = 'message-copy-btn';
-                                copyBtn.textContent = '📋';
-                                copyBtn.title = 'Копировать';
-                                copyBtn.onclick = function() { copyMessage(this, 'assistant'); };
-                                copyBtn.setAttribute('data-content', plainContent);
-                                actionsDiv.appendChild(copyBtn);
-                                
-                                if (debugMode && data.debug) {
-                                    const debugBtn = document.createElement('button');
-                                    debugBtn.className = 'message-debug-btn';
-                                    debugBtn.textContent = '🔍';
-                                    debugBtn.title = 'Debug';
-                                    debugBtn.onclick = function() { showDebugModal(data.debug); };
-                                    actionsDiv.appendChild(debugBtn);
-                                }
-                                assistantRow.appendChild(actionsDiv);
-                                
-                                chatMessages.scrollTop = chatMessages.scrollHeight;
-                                saveUserSettings();
-                            } else {
-                                fullContent = data.content || '';
-                                messageContent.innerHTML = marked.parse(fullContent.trim());
-                                chatMessages.scrollTop = chatMessages.scrollHeight;
-                            }
-                        } catch (e) {
-                            console.error('Parse error:', e);
-                        }
-                    }
-                }
-            }
-        } catch (err) {
-            messageInput.value = message;
-            if (err.name === 'AbortError') {
-                if (assistantRow) assistantRow.remove();
-                addMessage('Запрос прерван', 'error');
-                return;
-            }
-            if (assistantRow) assistantRow.remove();
-            addMessage('Ошибка соединения: ' + err.message, 'error');
-        }
-    }
-
-    function addMessage(content, role, debugData = null, usage = null, model = null) {
         const rowDiv = document.createElement('div');
         rowDiv.className = `message-row message-${role}`;
         
@@ -818,8 +531,380 @@
             rowDiv.appendChild(actionsDiv);
         }
         
-        chatMessages.appendChild(rowDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        container.appendChild(rowDiv);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    function updatePanelStats(panelIndex, inputTokens, outputTokens, totalTokens) {
+        const panel = panels[panelIndex];
+        panel.totalInput = inputTokens;
+        panel.totalOutput = outputTokens;
+        panel.totalTokens = totalTokens;
+        
+        const statsEl = document.getElementById(`panel-stats-${panelIndex}`);
+        const tokensInfo = statsEl ? statsEl.querySelector('.panel-tokens-info') : null;
+        if (statsEl && tokensInfo) {
+            if (totalTokens > 0 || inputTokens > 0 || outputTokens > 0) {
+                statsEl.style.display = 'block';
+                let text = '';
+                if (inputTokens > 0) text += `Вход: ${inputTokens} | `;
+                if (outputTokens > 0) text += `Выход: ${outputTokens} | `;
+                text += `Всего: ${totalTokens}`;
+                tokensInfo.textContent = text;
+            } else {
+                statsEl.style.display = 'none';
+            }
+        }
+    }
+
+    async function onPanelSessionChange(panelIndex, sessionId) {
+        if (panelMode === 'dual') {
+            const otherPanelIndex = panelIndex === 0 ? 1 : 0;
+            const otherSessionId = panels[otherPanelIndex].sessionId;
+            if (sessionId === otherSessionId) {
+                alert('Сессия уже используется в другой панели');
+                return;
+            }
+        }
+        
+        setPanelSessionId(panelIndex, sessionId);
+        panels[panelIndex].sessionId = sessionId;
+        await loadPanelSettings(panelIndex);
+        await loadPanelMessages(panelIndex);
+    }
+
+    async function createNewSessionPanel(panelIndex) {
+        const newSessionId = prompt('Имя новой сессии:');
+        if (!newSessionId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${newSessionId}`);
+            if (response.status === 200) {
+                const data = await response.json();
+                if (data.messages && data.messages.length > 0) {
+                    alert('Сессия уже существует');
+                    return;
+                }
+            }
+        } catch (e) {
+        }
+        
+        allSessions.push({ session_id: newSessionId, message_count: 0 });
+        setPanelSessionId(panelIndex, newSessionId);
+        panels[panelIndex].sessionId = newSessionId;
+        
+        for (let i = 0; i < panels.length; i++) {
+            await loadPanelSessions(i);
+        }
+        
+        if (typeof loadSettingsSessionsList === 'function') {
+            loadSettingsSessionsList();
+        }
+        
+        await loadPanelSettings(panelIndex);
+        await loadPanelMessages(panelIndex);
+    }
+
+    async function copySessionPanel(panelIndex) {
+        const currentId = panels[panelIndex].sessionId;
+        const newSessionId = prompt('Имя новой сессии:', currentId + '-copy');
+        if (!newSessionId || newSessionId === currentId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${currentId}/copy`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_session_id: newSessionId })
+            });
+            
+            if (response.ok) {
+                allSessions.push({ session_id: newSessionId, message_count: 0 });
+                setPanelSessionId(panelIndex, newSessionId);
+                panels[panelIndex].sessionId = newSessionId;
+                
+                for (let i = 0; i < panels.length; i++) {
+                    await loadPanelSessions(i);
+                }
+                
+                if (typeof loadSettingsSessionsList === 'function') {
+                    loadSettingsSessionsList();
+                }
+                
+                await loadPanelSettings(panelIndex);
+                await loadPanelMessages(panelIndex);
+            } else {
+                const data = await response.json();
+                alert('Ошибка копирования: ' + (data.error || 'Unknown'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function renameSessionPanel(panelIndex) {
+        const currentId = panels[panelIndex].sessionId;
+        if (currentId === 'default') {
+            alert('Нельзя переименовать сессию default');
+            return;
+        }
+        
+        const newName = prompt('Новое имя:', currentId);
+        if (!newName || newName === currentId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${currentId}/rename`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_name: newName })
+            });
+            
+            if (response.ok) {
+                const idx = allSessions.findIndex(s => s.session_id === currentId);
+                if (idx !== -1) {
+                    allSessions[idx].session_id = newName;
+                }
+                setPanelSessionId(panelIndex, newName);
+                panels[panelIndex].sessionId = newName;
+                
+                for (let i = 0; i < panels.length; i++) {
+                    await loadPanelSessions(i);
+                }
+                
+                if (typeof loadSettingsSessionsList === 'function') {
+                    loadSettingsSessionsList();
+                }
+                
+                await loadPanelSettings(panelIndex);
+                await loadPanelMessages(panelIndex);
+            } else {
+                const data = await response.json();
+                alert('Ошибка переименования: ' + (data.error || 'Unknown'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function onPanelProviderChange(panelIndex) {
+        await loadPanelModels(panelIndex);
+    }
+
+    function togglePanelDebug(panelIndex) {
+        debugMode = document.querySelector(`.panel-debug-toggle[data-panel="${panelIndex}"]`).checked;
+        localStorage.setItem('t6_debug', debugMode ? 'true' : 'false');
+        document.querySelectorAll('.panel-debug-toggle').forEach(cb => {
+            cb.checked = debugMode;
+        });
+    }
+
+    async function sendToPanel(panel, message, useStream, panelIndex) {
+        const providerSelect = document.querySelector(`.panel-provider-select[data-panel="${panelIndex}"]`);
+        const modelSelect = document.querySelector(`.model-select[data-panel="${panelIndex}"]`);
+        
+        const provider = providerSelect ? providerSelect.value || null : null;
+        const model = modelSelect ? modelSelect.value || null : null;
+        const sessionId = panel.sessionId;
+
+        if (useStream) {
+            await sendStreamToPanel(panel, message, provider, model, sessionId, panelIndex);
+        } else {
+            await sendRegularToPanel(panel, message, provider, model, sessionId, panelIndex);
+        }
+    }
+
+    async function sendRegularToPanel(panel, message, provider, model, sessionId, panelIndex) {
+        try {
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Session-Id': sessionId,
+                },
+                signal: panel.abortController ? panel.abortController.signal : null,
+                body: JSON.stringify({ message, provider, model, debug: debugMode })
+            });
+
+            const data = await response.json();
+
+            if (data.error) {
+                const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
+                addMessageToPanel(panelIndex, 'Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
+            } else {
+                const usage = data.usage || null;
+                addMessageToPanel(panelIndex, data.message, 'assistant', data.debug || null, usage, data.model || null);
+                if (data.usage) {
+                    panel.totalInput += data.usage.input_tokens || 0;
+                    panel.totalOutput += data.usage.output_tokens || 0;
+                    panel.totalTokens += data.usage.total_tokens || 0;
+                    updatePanelStats(panelIndex, panel.totalInput, panel.totalOutput, panel.totalTokens);
+                }
+            }
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                addMessageToPanel(panelIndex, 'Запрос прерван', 'error');
+                return;
+            }
+            addMessageToPanel(panelIndex, 'Ошибка соединения: ' + err.message, 'error');
+        }
+    }
+
+    async function sendStreamToPanel(panel, message, provider, model, sessionId, panelIndex) {
+        let assistantRow = null;
+
+        try {
+            const response = await fetch('/api/chat/stream', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Session-Id': sessionId,
+                },
+                signal: panel.abortController ? panel.abortController.signal : null,
+                body: JSON.stringify({ message, provider, model, debug: debugMode })
+            });
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let fullContent = '';
+
+            const rowDiv = document.createElement('div');
+            rowDiv.className = 'message-row message-assistant';
+            
+            const div = document.createElement('div');
+            div.className = 'message message-assistant';
+            const messageContent = document.createElement('div');
+            messageContent.className = 'message-content';
+            messageContent.innerHTML = '';
+            div.appendChild(messageContent);
+            rowDiv.appendChild(div);
+            
+            panel.messagesContainer.appendChild(rowDiv);
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.slice(6);
+                        if (dataStr === '[DONE]') continue;
+
+                        try {
+                            const data = JSON.parse(dataStr);
+
+                            if (data.error) {
+                                rowDiv.remove();
+                                const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
+                                addMessageToPanel(panelIndex, 'Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
+                                return;
+                            }
+
+                            if (data.done) {
+                                let modelName = null;
+                                if (data.debug && data.debug.response && data.debug.response.model) {
+                                    modelName = data.debug.response.model;
+                                }
+                                
+                                messageContent.innerHTML = marked.parse(fullContent.trim());
+                                
+                                if (data.usage) {
+                                    const inputTokens = data.usage.input_tokens || 0;
+                                    const outputTokens = data.usage.output_tokens || 0;
+                                    const totalTokens = data.usage.total_tokens || (inputTokens + outputTokens);
+                                    panel.totalInput += inputTokens;
+                                    panel.totalOutput += outputTokens;
+                                    panel.totalTokens += totalTokens;
+                                    updatePanelStats(panelIndex, panel.totalInput, panel.totalOutput, panel.totalTokens);
+                                    
+                                    const tokensDiv = document.createElement('div');
+                                    tokensDiv.className = 'message-tokens';
+                                    const tokensInfo = `вх: ${inputTokens} | вых: ${outputTokens} | всего: ${totalTokens}`;
+                                    tokensDiv.textContent = modelName ? modelName + ' • ' + tokensInfo : tokensInfo;
+                                    div.appendChild(tokensDiv);
+                                } else if (modelName) {
+                                    const tokensDiv = document.createElement('div');
+                                    tokensDiv.className = 'message-tokens';
+                                    tokensDiv.textContent = modelName;
+                                    div.appendChild(tokensDiv);
+                                }
+                                
+                                const plainContent = fullContent.replace(/<[^>]*>/g, '');
+                                const actionsDiv = document.createElement('div');
+                                actionsDiv.className = 'message-actions';
+                                
+                                const copyBtn = document.createElement('button');
+                                copyBtn.className = 'message-copy-btn';
+                                copyBtn.textContent = '📋';
+                                copyBtn.title = 'Копировать';
+                                copyBtn.onclick = function() { copyMessage(this, 'assistant'); };
+                                copyBtn.setAttribute('data-content', plainContent);
+                                actionsDiv.appendChild(copyBtn);
+                                
+                                if (debugMode && data.debug) {
+                                    const debugBtn = document.createElement('button');
+                                    debugBtn.className = 'message-debug-btn';
+                                    debugBtn.textContent = '🔍';
+                                    debugBtn.title = 'Debug';
+                                    debugBtn.onclick = function() { showDebugModal(data.debug); };
+                                    actionsDiv.appendChild(debugBtn);
+                                }
+                                rowDiv.appendChild(actionsDiv);
+                                
+                                panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
+                            } else {
+                                fullContent = data.content || '';
+                                messageContent.innerHTML = marked.parse(fullContent.trim());
+                                panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            if (err.name === 'AbortError') {
+                if (rowDiv) rowDiv.remove();
+                addMessageToPanel(panelIndex, 'Запрос прерван', 'error');
+                return;
+            }
+            if (rowDiv) rowDiv.remove();
+            addMessageToPanel(panelIndex, 'Ошибка соединения: ' + err.message, 'error');
+        }
+    }
+
+    async function resetPanelChat(panelIndex) {
+        const panel = panels[panelIndex];
+        try {
+            await fetch('/api/chat/reset', { 
+                method: 'POST',
+                headers: { 'X-Session-Id': panel.sessionId }
+            });
+            panel.messagesContainer.innerHTML = `
+                <div class="message message-system">
+                    <div class="message-content">
+                        Чат сброшен. Задайте новый вопрос.
+                    </div>
+                </div>
+            `;
+            updatePanelStats(panelIndex, 0, 0, 0);
+            panel.messages = [];
+            panel.totalInput = 0;
+            panel.totalOutput = 0;
+            panel.totalTokens = 0;
+        } catch (err) {
+            alert('Ошибка сброса чата: ' + err.message);
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML.replace(/\n/g, '<br>');
     }
 
     function copyMessage(btn, role) {
@@ -832,98 +917,150 @@
         });
     }
 
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML.replace(/\n/g, '<br>');
-    }
-
-    async function resetChat() {
-        const sessionId = getSessionId();
-        try {
-            await fetch('/api/chat/reset', { 
-                method: 'POST',
-                headers: { 'X-Session-Id': sessionId }
-            });
-            chatMessages.innerHTML = `
-                <div class="message message-system">
-                    <div class="message-content">
-                        Чат сброшен. Задайте новый вопрос.
-                    </div>
-                </div>
-            `;
-            updateStats(0, 0, 0);
-        } catch (err) {
-            alert('Ошибка сброса чата: ' + err.message);
-        }
-    }
-
-    messageInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            chatForm.dispatchEvent(new Event('submit'));
-        }
-    });
-
-    loadSessions();
-    loadProviders();
-    loadMessages();
-
-    async function createNewSession() {
-        const newSessionId = prompt('Имя новой сессии:');
-        if (!newSessionId) return;
+    function showDebugModal(debugData) {
+        currentDebugData = debugData;
+        const hasRequest = debugData && debugData.request;
+        const hasResponse = debugData && debugData.response;
         
+        document.querySelectorAll('.debug-tab').forEach(t => {
+            t.style.display = (hasRequest && hasResponse) ? '' : 'none';
+        });
+        
+        if (hasResponse && !hasRequest) {
+            document.getElementById('debug-json').textContent = JSON.stringify(debugData.response, null, 2);
+            document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.debug-tab[data-tab="response"]').classList.add('active');
+        } else {
+            document.getElementById('debug-json').textContent = JSON.stringify(debugData ? debugData.request : {}, null, 2);
+            document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.debug-tab[data-tab="request"]').classList.add('active');
+        }
+        document.getElementById('debug-modal').style.display = 'flex';
+    }
+
+    function switchDebugTab(tab) {
+        document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+        document.querySelector(`.debug-tab[data-tab="${tab}"]`).classList.add('active');
+        
+        if (currentDebugData) {
+            const data = tab === 'request' ? currentDebugData.request : currentDebugData.response;
+            document.getElementById('debug-json').textContent = JSON.stringify(data, null, 2);
+        }
+    }
+
+    function closeDebugModal() {
+        document.getElementById('debug-modal').style.display = 'none';
+    }
+
+    function clearDebugData() {
+        const sessionId = panels[0] ? panels[0].sessionId : 'default';
+        fetch(`/api/sessions/${sessionId}/clear-debug`, { method: 'POST' })
+            .then(() => {
+                location.reload();
+            })
+            .catch(err => console.error('Failed to clear debug:', err));
+    }
+
+    function openSettingsModal() {
+        loadSettingsSessionsList();
+        document.getElementById('settings-modal').style.display = 'flex';
+    }
+
+    function closeSettingsModal() {
+        document.getElementById('settings-modal').style.display = 'none';
+    }
+
+    async function loadSettingsSessionsList() {
+        const container = document.getElementById('settings-sessions-list');
         try {
-            const response = await fetch(`/api/sessions/${newSessionId}`, { method: 'GET' });
-            if (response.ok) {
-                alert('Сессия уже существует');
+            const response = await fetch('/api/sessions');
+            const data = await response.json();
+            
+            if (!data.sessions || data.sessions.length === 0) {
+                container.innerHTML = '<p class="help-text">Нет сессий</p>';
                 return;
             }
+
+            const sortedSessions = [...data.sessions].sort((a, b) => a.session_id.localeCompare(b.session_id));
+            
+            let html = '<div style="max-height: 200px; overflow-y: auto;">';
+            sortedSessions.forEach(session => {
+                const date = session.updated_at ? new Date(session.updated_at).toLocaleString('ru') : 'N/A';
+                html += `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; border-bottom: 1px solid var(--border);">
+                        <div>
+                            <div style="font-weight: 500;">${session.session_id}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-secondary);">${session.message_count} сообщений</div>
+                        </div>
+                        <div>
+                            <button class="btn btn-small" onclick="copySessionSettings('${session.session_id}')">📋</button>
+                            ${session.session_id !== 'default' ? `<button class="btn btn-small" onclick="renameSessionSettings('${session.session_id}')">✎</button>
+                            <button class="btn btn-small btn-danger" onclick="deleteSessionSettings('${session.session_id}')">✕</button>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
         } catch (e) {
+            container.innerHTML = '<p class="help-text">Ошибка загрузки</p>';
         }
-        
-        switchSession(newSessionId);
     }
 
-    async function renameCurrentSession() {
-        const currentId = getSessionId();
-        const newName = prompt('Новое имя:', currentId);
-        if (!newName || newName === currentId) return;
+    async function deleteSessionSettings(sessionId) {
+        if (!confirm(`Удалить сессию "${sessionId}"?`)) return;
         
         try {
-            const response = await fetch(`/api/sessions/${currentId}/rename`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ new_name: newName })
-            });
-            
+            const response = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+            const data = await response.json();
             if (response.ok) {
-                localStorage.setItem('t6_session_id', newName);
-                location.reload();
+                loadSessionsList();
+                renderPanels();
             } else {
-                alert('Ошибка переименования');
+                alert('Ошибка удаления: ' + (data.error || 'Unknown'));
             }
         } catch (e) {
             alert('Ошибка: ' + e.message);
         }
     }
 
-    async function copyCurrentSession() {
-        const currentId = getSessionId();
-        const newSessionId = prompt('Имя новой сессии:', currentId + '-copy');
-        if (!newSessionId || newSessionId === currentId) return;
+    async function renameSessionSettings(sessionId) {
+        const newName = prompt('Новое имя:', sessionId);
+        if (!newName || newName === sessionId) return;
         
         try {
-            const response = await fetch(`/api/sessions/${currentId}/copy`, {
+            const response = await fetch(`/api/sessions/${sessionId}/rename`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_name: newName })
+            });
+            
+            if (response.ok) {
+                loadSessionsList();
+                renderPanels();
+            } else {
+                const data = await response.json();
+                alert('Ошибка переименования: ' + (data.error || 'Unknown'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function copySessionSettings(sessionId) {
+        const newSessionId = prompt('Имя новой сессии:', sessionId + '-copy');
+        if (!newSessionId || newSessionId === sessionId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/copy`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ new_session_id: newSessionId })
             });
             
             if (response.ok) {
-                alert('Сессия скопирована');
                 loadSessionsList();
-                loadSessions();
+                renderPanels();
             } else {
                 const data = await response.json();
                 alert('Ошибка копирования: ' + (data.error || 'Unknown'));
@@ -932,5 +1069,66 @@
             alert('Ошибка: ' + e.message);
         }
     }
+
+    async function exportSessions() {
+        try {
+            const response = await fetch('/api/sessions/export', { method: 'POST' });
+            const data = await response.json();
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 't6-sessions.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function importSessions(input) {
+        const file = input.files[0];
+        if (!file) return;
+        
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            
+            const response = await fetch('/api/sessions/import', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            
+            if (response.ok) {
+                alert('Импортировано');
+                loadSessionsList();
+                renderPanels();
+            } else {
+                alert('Ошибка импорта');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+        
+        input.value = '';
+    }
+
+    document.getElementById('debug-toggle')?.addEventListener('change', function() {
+        debugMode = this.checked;
+        localStorage.setItem('t6_debug', debugMode ? 'true' : 'false');
+    });
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('settings') === '1') {
+        window.addEventListener('load', () => {
+            openSettingsModal();
+            window.history.replaceState({}, document.title, '/');
+        });
+    }
+
+    initPanels();
+    renderPanels();
 </script>
 {% endblock %}
