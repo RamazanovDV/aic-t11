@@ -258,6 +258,23 @@ def rename_session(session_id: str):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/sessions/<session_id>", methods=["GET"])
+def get_session(session_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 404:
+            return jsonify({"provider": "", "model": "", "messages": []})
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/sessions/<session_id>/messages", methods=["GET"])
 def get_session_messages(session_id: str):
     url = f"{ui_config.backend_url}/sessions/{session_id}"
