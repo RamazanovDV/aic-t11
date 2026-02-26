@@ -305,6 +305,30 @@ def rename_session(session_id: str):
     return jsonify({"status": "renamed", "old_id": session_id, "new_id": new_name})
 
 
+@api_bp.route("/sessions/<session_id>/copy", methods=["POST"])
+@require_auth
+def copy_session(session_id: str):
+    session_data = session_manager.get_session_data(session_id)
+    if not session_data:
+        return jsonify({"error": "Session not found"}), 404
+    
+    data = request.get_json()
+    if not data or "new_session_id" not in data:
+        return jsonify({"error": "Missing 'new_session_id' field"}), 400
+    
+    new_session_id = data["new_session_id"].strip()
+    if not new_session_id:
+        return jsonify({"error": "New session_id cannot be empty"}), 400
+    
+    if session_manager.get_session_data(new_session_id):
+        return jsonify({"error": "Session already exists"}), 400
+    
+    session_data["session_id"] = new_session_id
+    session_manager.import_session(session_data)
+    
+    return jsonify({"status": "copied", "session_id": new_session_id})
+
+
 @api_bp.route("/sessions/<session_id>/clear-debug", methods=["POST"])
 @require_auth
 def clear_session_debug(session_id: str):

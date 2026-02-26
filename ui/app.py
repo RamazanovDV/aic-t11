@@ -248,6 +248,26 @@ def rename_session(session_id: str):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/sessions/<session_id>/copy", methods=["POST"])
+def copy_session(session_id: str):
+    data = request.get_json()
+    if not data or "new_session_id" not in data:
+        return jsonify({"error": "Missing 'new_session_id' field"}), 400
+
+    url = f"{ui_config.backend_url}/sessions/{session_id}/copy"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/sessions/<session_id>", methods=["GET"])
 def get_session(session_id: str):
     url = f"{ui_config.backend_url}/sessions/{session_id}"

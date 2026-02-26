@@ -9,6 +9,7 @@
         </select>
         <button class="btn btn-small" onclick="createNewSession()" title="Новая сессия">+</button>
         <button class="btn btn-small" onclick="renameCurrentSession()" title="Переименовать">✎</button>
+        <button class="btn btn-small" onclick="copyCurrentSession()" title="Копировать">📋</button>
     </div>
 
     <div class="chat-header">
@@ -160,6 +161,7 @@
                             <div style="font-size: 0.75rem; color: var(--text-secondary);">${session.message_count} сообщений</div>
                         </div>
                         <div>
+                            <button class="btn btn-small" onclick="copySessionSettings('${session.session_id}')">📋</button>
                             ${session.session_id !== 'default' ? `<button class="btn btn-small" onclick="renameSessionSettings('${session.session_id}')">✎</button>
                             <button class="btn btn-small btn-danger" onclick="deleteSessionSettings('${session.session_id}')">✕</button>` : ''}
                         </div>
@@ -203,6 +205,28 @@
                 loadSessionsList();
             } else {
                 alert('Ошибка переименования');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function copySessionSettings(sessionId) {
+        const newSessionId = prompt('Имя новой сессии:', sessionId + '-copy');
+        if (!newSessionId || newSessionId === sessionId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/copy`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_session_id: newSessionId })
+            });
+            
+            if (response.ok) {
+                loadSessionsList();
+            } else {
+                const data = await response.json();
+                alert('Ошибка копирования: ' + (data.error || 'Unknown'));
             }
         } catch (e) {
             alert('Ошибка: ' + e.message);
@@ -306,6 +330,33 @@
 
     function getSessionId() {
         return localStorage.getItem('t6_session_id') || 'default';
+    }
+
+    async function loadSessions() {
+        const sessionSelect = document.getElementById('session-select');
+        try {
+            const response = await fetch('/api/sessions');
+            const data = await response.json();
+            
+            sessionSelect.innerHTML = '';
+            const sessions = data.sessions || [];
+            
+            sessions.forEach(session => {
+                const option = document.createElement('option');
+                option.value = session.session_id;
+                option.textContent = session.session_id;
+                sessionSelect.appendChild(option);
+            });
+            
+            sessionSelect.value = getSessionId();
+        } catch (e) {
+            console.error('Failed to load sessions:', e);
+        }
+    }
+
+    function switchSession(sessionId) {
+        localStorage.setItem('t6_session_id', sessionId);
+        location.reload();
     }
 
     async function loadProviders() {
@@ -809,7 +860,71 @@
         }
     });
 
+    loadSessions();
     loadProviders();
     loadMessages();
+
+    async function createNewSession() {
+        const newSessionId = prompt('Имя новой сессии:');
+        if (!newSessionId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${newSessionId}`, { method: 'GET' });
+            if (response.ok) {
+                alert('Сессия уже существует');
+                return;
+            }
+        } catch (e) {
+        }
+        
+        switchSession(newSessionId);
+    }
+
+    async function renameCurrentSession() {
+        const currentId = getSessionId();
+        const newName = prompt('Новое имя:', currentId);
+        if (!newName || newName === currentId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${currentId}/rename`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_name: newName })
+            });
+            
+            if (response.ok) {
+                localStorage.setItem('t6_session_id', newName);
+                location.reload();
+            } else {
+                alert('Ошибка переименования');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function copyCurrentSession() {
+        const currentId = getSessionId();
+        const newSessionId = prompt('Имя новой сессии:', currentId + '-copy');
+        if (!newSessionId || newSessionId === currentId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${currentId}/copy`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_session_id: newSessionId })
+            });
+            
+            if (response.ok) {
+                alert('Сессия скопирована');
+                loadSessionsList();
+            } else {
+                const data = await response.json();
+                alert('Ошибка копирования: ' + (data.error || 'Unknown'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
 </script>
 {% endblock %}
