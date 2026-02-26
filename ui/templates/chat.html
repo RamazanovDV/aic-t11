@@ -110,7 +110,7 @@
         container.innerHTML = '';
 
         const panelsWrapper = document.createElement('div');
-        panelsWrapper.className = 'chat-panels-wrapper';
+        panelsWrapper.className = 'chat-panels-wrapper' + (panelMode === 'dual' ? ' dual' : '');
         container.appendChild(panelsWrapper);
 
         panels.forEach((panel, index) => {
@@ -176,6 +176,7 @@
 
     function renderInputArea() {
         const inputArea = document.getElementById('chat-input-area');
+        inputArea.className = 'chat-input-area' + (panelMode === 'dual' ? ' dual' : '');
         inputArea.innerHTML = `
             <form class="chat-input-form" id="chat-form">
                 <div class="input-wrapper">

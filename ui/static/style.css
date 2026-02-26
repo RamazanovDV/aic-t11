@@ -346,6 +346,13 @@ body {
     gap: 1rem;
     flex: 1;
     min-height: 0;
+    max-width: 60%;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.chat-panels-wrapper.dual {
+    max-width: 80%;
 }
 
 .chat-panels {
@@ -389,10 +396,13 @@ body {
 .chat-input-area {
     flex-shrink: 0;
     padding: 0.5rem 1rem;
+    max-width: 60%;
+    margin: 0 auto;
+    width: 100%;
 }
 
-.chat-panels-dual + .chat-input-area {
-    max-width: 1400px;
+.chat-input-area.dual {
+    max-width: 80%;
 }
 
 @media (max-height: 600px) {
