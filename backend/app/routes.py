@@ -214,7 +214,8 @@ def chat_stream():
 
             yield f"data: {json.dumps({'content': full_content, 'done': True, 'usage': total_usage, 'debug': {'request': debug_request, 'response': debug_response}})}\n\n"
 
-            session.add_assistant_message(full_content, total_usage, model=provider.model)
+            debug_info = {"request": debug_request, "response": debug_response} if debug_mode else None
+            session.add_assistant_message(full_content, total_usage, debug=debug_info, model=provider.model)
             session_manager.save_session(session_id)
 
         except ContextLengthExceededError as e:
