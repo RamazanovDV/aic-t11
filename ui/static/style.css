@@ -488,10 +488,11 @@ body {
     font-style: italic;
 }
 
-.message-error {
+.message.message-error {
     align-self: center;
     background: var(--message-error);
     color: var(--error);
+    border-radius: 12px;
 }
 
 .message-content {
@@ -554,6 +555,10 @@ body {
 }
 
 .message-row.message-system {
+    margin: 0 auto;
+}
+
+.message-row.message-error {
     margin: 0 auto;
 }
 

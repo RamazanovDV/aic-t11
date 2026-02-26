@@ -180,10 +180,12 @@
         
         try {
             const response = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+            const data = await response.json();
             if (response.ok) {
                 loadSessionsList();
+                loadSessions();
             } else {
-                alert('Ошибка удаления');
+                alert('Ошибка удаления: ' + (data.error || 'Unknown'));
             }
         } catch (e) {
             alert('Ошибка: ' + e.message);
@@ -203,8 +205,10 @@
             
             if (response.ok) {
                 loadSessionsList();
+                loadSessions();
             } else {
-                alert('Ошибка переименования');
+                const data = await response.json();
+                alert('Ошибка переименования: ' + (data.error || 'Unknown'));
             }
         } catch (e) {
             alert('Ошибка: ' + e.message);
@@ -224,6 +228,7 @@
             
             if (response.ok) {
                 loadSessionsList();
+                loadSessions();
             } else {
                 const data = await response.json();
                 alert('Ошибка копирования: ' + (data.error || 'Unknown'));
@@ -918,6 +923,7 @@
             if (response.ok) {
                 alert('Сессия скопирована');
                 loadSessionsList();
+                loadSessions();
             } else {
                 const data = await response.json();
                 alert('Ошибка копирования: ' + (data.error || 'Unknown'));

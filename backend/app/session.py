@@ -113,10 +113,10 @@ class SessionManager:
             self._sessions[session_id].clear()
             self._sessions[session_id].save()
 
-    def delete_session(self, session_id: str) -> None:
+    def delete_session(self, session_id: str) -> bool:
         if session_id in self._sessions:
             del self._sessions[session_id]
-        storage.delete_session(session_id)
+        return storage.delete_session(session_id)
 
     def rename_session(self, old_id: str, new_id: str) -> bool:
         if old_id not in self._sessions:
