@@ -43,6 +43,8 @@ def summarize_messages(messages: list[Message], debug: bool = False) -> tuple[st
             "summarized_messages": formatted,
             "model": config.summarizer_model,
             "provider": config.summarizer_provider,
+            "request": response.debug_request if hasattr(response, 'debug_request') else {},
+            "response": response.debug_response if hasattr(response, 'debug_response') else {},
         }
 
     return response.content, debug_info

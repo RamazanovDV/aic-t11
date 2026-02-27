@@ -311,6 +311,7 @@
                 messageInput.disabled = false;
                 sendBtn.disabled = false;
                 sendBtn.textContent = 'Отправить';
+                messageInput.focus();
                 panels.forEach(p => {
                     p.isLoading = false;
                     p.abortController = null;
@@ -587,8 +588,9 @@
             actionsHtml += `<button class="message-copy-btn" onclick="copyMessage(this, '${role}')" data-content="${escapedContent}" title="Копировать">📋</button>`;
         }
         
-        if ((role === 'assistant' || role === 'error') && debugData) {
-            actionsHtml += `<button class="message-debug-btn" onclick="showDebugModal(${escapeHtml(JSON.stringify(debugData)).replace(/"/g, '&quot;')})" title="Debug">🔍</button>`;
+        if ((role === 'assistant' || role === 'error' || role === 'summary') && debugData) {
+            const debugJson = JSON.stringify(debugData).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+            actionsHtml += `<button class="message-debug-btn" data-debug='${debugJson}' title="Debug">🔍</button>`;
         }
         
         if (actionsHtml) {
@@ -871,7 +873,7 @@
 
                             if (data.type === 'summary') {
                                 hideSummarizationIndicator(panelIndex);
-                                addMessageToPanel(panelIndex, data.content, 'summary', null, null, null);
+                                addMessageToPanel(panelIndex, data.content, 'summary', data.debug || null, null, null);
                                 continue;
                             }
 
@@ -1012,21 +1014,32 @@
 
     function showDebugModal(debugData) {
         currentDebugData = debugData;
-        const hasRequest = debugData && debugData.request;
-        const hasResponse = debugData && debugData.response;
         
-        document.querySelectorAll('.debug-tab').forEach(t => {
-            t.style.display = (hasRequest && hasResponse) ? '' : 'none';
-        });
+        // Check if this is a summary debug (has summarized_messages)
+        const isSummary = debugData && debugData.summarized_messages;
         
-        if (hasResponse && !hasRequest) {
-            document.getElementById('debug-json').textContent = JSON.stringify(debugData.response, null, 2);
-            document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
-            document.querySelector('.debug-tab[data-tab="response"]').classList.add('active');
+        if (isSummary) {
+            // Show all summary debug info
+            document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
+            document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
         } else {
-            document.getElementById('debug-json').textContent = JSON.stringify(debugData ? debugData.request : {}, null, 2);
-            document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
-            document.querySelector('.debug-tab[data-tab="request"]').classList.add('active');
+            // Standard debug for LLM calls
+            const hasRequest = debugData && debugData.request;
+            const hasResponse = debugData && debugData.response;
+            
+            document.querySelectorAll('.debug-tab').forEach(t => {
+                t.style.display = (hasRequest && hasResponse) ? '' : 'none';
+            });
+            
+            if (hasResponse && !hasRequest) {
+                document.getElementById('debug-json').textContent = JSON.stringify(debugData.response, null, 2);
+                document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+                document.querySelector('.debug-tab[data-tab="response"]').classList.add('active');
+            } else {
+                document.getElementById('debug-json').textContent = JSON.stringify(debugData ? debugData.request : {}, null, 2);
+                document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
+                document.querySelector('.debug-tab[data-tab="request"]').classList.add('active');
+            }
         }
         document.getElementById('debug-modal').style.display = 'flex';
     }
@@ -1269,6 +1282,21 @@
     document.getElementById('debug-toggle')?.addEventListener('change', function() {
         debugMode = this.checked;
         localStorage.setItem('t6_debug', debugMode ? 'true' : 'false');
+    });
+
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.message-debug-btn');
+        if (btn) {
+            const debugJson = btn.dataset.debug;
+            if (debugJson) {
+                try {
+                    const debugData = JSON.parse(debugJson);
+                    showDebugModal(debugData);
+                } catch (err) {
+                    console.error('Failed to parse debug data:', err);
+                }
+            }
+        }
     });
 
     const urlParams = new URLSearchParams(window.location.search);

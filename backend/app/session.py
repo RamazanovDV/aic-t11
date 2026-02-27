@@ -127,7 +127,7 @@ class Session:
         return sum(1 for m in self.messages[last_summary_idx + 1:] if m.role == "user")
 
     def get_messages_before_last_user(self) -> list[Message]:
-        """Сообщения для суммаризации - все user/assistant ПОСЛЕ последнего summary (до последнего user)"""
+        """Сообщения для суммаризации - предыдущая summary + все user/assistant ПОСЛЕ неё (до последнего user)"""
         # Ищем последний summary
         last_summary_idx = None
         for i in range(len(self.messages) - 1, -1, -1):
@@ -135,8 +135,11 @@ class Session:
                 last_summary_idx = i
                 break
         
-        # Берем сообщения после summary
+        result = []
+        
+        # Добавляем предыдущую summary если есть
         if last_summary_idx is not None:
+            result.append(self.messages[last_summary_idx])
             msgs = self.messages[last_summary_idx + 1:]
         else:
             msgs = self.messages
@@ -144,7 +147,8 @@ class Session:
         # Фильтруем user/assistant
         active_msgs = [m for m in msgs if m.role in ("user", "assistant")]
         # Возвращаем все КРОМЕ последнего user
-        return active_msgs[:-1] if active_msgs else []
+        result.extend(active_msgs[:-1] if active_msgs else [])
+        return result
 
     def get_summarizable_messages(self) -> list[Message]:
         return [m for m in self.messages if m.role in ("user", "assistant")]

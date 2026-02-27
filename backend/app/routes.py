@@ -239,7 +239,14 @@ def chat_stream():
                         debug=debug_info if debug_mode else None,
                         model=config.summarizer_model,
                     )
-                    yield f"data: {json.dumps({'type': 'summary', 'content': summary_content})}\n\n"
+                    last_summary = None
+                    for i in range(len(session.messages) - 1, -1, -1):
+                        if session.messages[i].role == "summary" and session.messages[i] != session.messages[-1]:
+                            last_summary = session.messages[i]
+                            break
+                    debug_for_ui = debug_info if debug_mode else (last_summary.debug if last_summary else None)
+                    summary_event = {"type": "summary", "content": summary_content, "debug": debug_for_ui}
+                    yield f"data: {json.dumps(summary_event)}\n\n"
                 except Exception as e:
                     error_msg = f"Ошибка суммаризации: {str(e)}"
                     yield f"data: {json.dumps({'type': 'error', 'error': error_msg})}\n\n"
