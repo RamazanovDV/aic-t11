@@ -1223,6 +1223,7 @@
             const data = await response.json();
             if (response.ok) {
                 loadSessionsList();
+                loadSettingsSessionsList();
                 renderPanels();
             } else {
                 alert('Ошибка удаления: ' + (data.error || 'Unknown'));
@@ -1245,6 +1246,7 @@
             
             if (response.ok) {
                 loadSessionsList();
+                loadSettingsSessionsList();
                 renderPanels();
             } else {
                 const data = await response.json();
@@ -1268,6 +1270,7 @@
             
             if (response.ok) {
                 loadSessionsList();
+                loadSettingsSessionsList();
                 renderPanels();
             } else {
                 const data = await response.json();

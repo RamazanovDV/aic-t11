@@ -3,7 +3,6 @@ from datetime import datetime
 from pathlib import Path
 
 from app.config import config
-from app.llm.base import Message
 
 
 class FileStorage:
@@ -14,29 +13,6 @@ class FileStorage:
 
     def _ensure_directories(self) -> None:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
-        self._init_index()
-
-    def _init_index(self) -> None:
-        index_file = self.sessions_dir / "index.json"
-        if not index_file.exists():
-            self._save_index({"sessions": [], "last_modified": datetime.now().isoformat()})
-
-    def _get_index(self) -> dict:
-        index_file = self.sessions_dir / "index.json"
-        try:
-            with open(index_file, "r") as f:
-                data = f.read()
-                if not data.strip():
-                    return {"sessions": [], "last_modified": datetime.now().isoformat()}
-                return json.loads(data)
-        except (json.JSONDecodeError, FileNotFoundError):
-            return {"sessions": [], "last_modified": datetime.now().isoformat()}
-
-    def _save_index(self, index: dict) -> None:
-        index["last_modified"] = datetime.now().isoformat()
-        index_file = self.sessions_dir / "index.json"
-        with open(index_file, "w") as f:
-            json.dump(index, f, indent=2, ensure_ascii=False)
 
     def _session_file(self, session_id: str) -> Path:
         safe_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
@@ -71,11 +47,6 @@ class FileStorage:
         with open(session_file, "w") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-        index = self._get_index()
-        if session.session_id not in index["sessions"]:
-            index["sessions"].append(session.session_id)
-        self._save_index(index)
-
     def load_session(self, session_id: str) -> dict | None:
         session_file = self._session_file(session_id)
         if not session_file.exists():
@@ -85,14 +56,16 @@ class FileStorage:
             return json.load(f)
 
     def list_sessions(self) -> list[dict]:
-        index = self._get_index()
         sessions = []
         
-        for session_id in index["sessions"]:
-            session_data = self.load_session(session_id)
+        for session_file in self.sessions_dir.glob("*.json"):
+            if session_file.name == "index.json":
+                continue
+            session_data = self.load_session(session_file.stem)
             if session_data:
+                session_id = session_data.get("session_id") or session_file.stem
                 sessions.append({
-                    "session_id": session_data["session_id"],
+                    "session_id": session_id,
                     "message_count": len(session_data.get("messages", [])),
                     "created_at": session_data.get("created_at"),
                     "updated_at": session_data.get("updated_at"),
@@ -106,11 +79,6 @@ class FileStorage:
             return False
 
         session_file.unlink()
-
-        index = self._get_index()
-        if session_id in index["sessions"]:
-            index["sessions"].remove(session_id)
-        self._save_index(index)
 
         return True
 
@@ -138,19 +106,10 @@ class FileStorage:
         # Delete old file
         old_file.unlink()
         
-        # Update index
-        index = self._get_index()
-        if old_id in index["sessions"]:
-            index["sessions"].remove(old_id)
-            if new_id not in index["sessions"]:
-                index["sessions"].append(new_id)
-        self._save_index(index)
-        
         return True
 
     def export_all(self) -> dict:
         return {
-            "index": self._get_index(),
             "sessions": {s["session_id"]: self.load_session(s["session_id"]) 
                         for s in self.list_sessions()},
             "exported_at": datetime.now().isoformat(),
@@ -164,11 +123,6 @@ class FileStorage:
         
         with open(session_file, "w") as f:
             json.dump(session_data, f, indent=2, ensure_ascii=False)
-        
-        index = self._get_index()
-        if session_id not in index["sessions"]:
-            index["sessions"].append(session_id)
-        self._save_index(index)
         
         return session_id
 
