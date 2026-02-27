@@ -31,6 +31,7 @@ class FileStorage:
                     "debug": m.debug,
                     "model": m.model,
                     "created_at": m.created_at.isoformat(),
+                    "disabled": m.disabled,
                 }
                 for m in session.messages
             ],

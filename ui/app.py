@@ -398,6 +398,36 @@ def get_session_messages(session_id: str):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/sessions/<session_id>/messages/<int:index>", methods=["DELETE"])
+def delete_session_message(session_id: str, index: int):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/messages/{index}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.delete(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/messages/<int:index>/toggle", methods=["POST"])
+def toggle_session_message(session_id: str, index: int):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/messages/{index}/toggle"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.post(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/sessions/export", methods=["POST"])
 def export_sessions():
     url = f"{ui_config.backend_url}/sessions/export"

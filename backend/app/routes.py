@@ -470,6 +470,35 @@ def clear_session_debug(session_id: str):
     return jsonify({"status": "cleared", "session_id": session_id})
 
 
+@api_bp.route("/sessions/<session_id>/messages/<int:index>", methods=["DELETE"])
+@require_auth
+def delete_message(session_id: str, index: int):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+    
+    if session.delete_message(index):
+        session_manager.save_session(session_id)
+        return jsonify({"status": "deleted", "index": index})
+    
+    return jsonify({"error": "Invalid message index"}), 400
+
+
+@api_bp.route("/sessions/<session_id>/messages/<int:index>/toggle", methods=["POST"])
+@require_auth
+def toggle_message(session_id: str, index: int):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+    
+    if session.toggle_message(index):
+        session_manager.save_session(session_id)
+        msg = session.messages[index]
+        return jsonify({"status": "toggled", "index": index, "disabled": msg.disabled})
+    
+    return jsonify({"error": "Invalid message index"}), 400
+
+
 @api_bp.route("/sessions/<session_id>/summarization-settings", methods=["GET"])
 @require_auth
 def get_summarization_settings(session_id: str):

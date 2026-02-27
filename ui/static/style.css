@@ -702,8 +702,9 @@ body {
 }
 
 .message-actions {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
     gap: 0.25rem;
     align-items: center;
     flex-shrink: 0;
@@ -711,7 +712,9 @@ body {
 }
 
 .message-copy-btn,
-.message-debug-btn {
+.message-debug-btn,
+.message-delete-btn,
+.message-toggle-btn {
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -724,8 +727,19 @@ body {
 }
 
 .message-copy-btn:hover,
-.message-debug-btn:hover {
+.message-debug-btn:hover,
+.message-delete-btn:hover,
+.message-toggle-btn:hover {
     opacity: 1;
+}
+
+.message-disabled {
+    opacity: 0.4;
+}
+
+.message-disabled .message-content {
+    text-decoration: line-through;
+    color: var(--text-secondary);
 }
 
 .message-tokens {

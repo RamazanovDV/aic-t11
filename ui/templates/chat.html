@@ -515,6 +515,8 @@
             const container = panel.messagesContainer;
             if (!container) return;
             
+            const savedScrollTop = container.scrollTop;
+            
             container.innerHTML = '';
             
             if (panel.messages.length === 0) {
@@ -533,8 +535,9 @@
             panel.totalOutput = 0;
             panel.totalTokens = 0;
             
-            panel.messages.forEach(msg => {
-                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null);
+            panel.messages.forEach((msg, idx) => {
+                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx);
+                panel.messages[idx]._renderIndex = idx;
                 if (msg.usage && msg.role !== 'note' && msg.role !== 'info') {
                     panel.totalInput += msg.usage.input_tokens || 0;
                     panel.totalOutput += msg.usage.output_tokens || 0;
@@ -543,21 +546,23 @@
             });
             
             updatePanelStats(panelIndex, panel.totalInput, panel.totalOutput, panel.totalTokens);
+            
+            container.scrollTop = savedScrollTop;
         } catch (err) {
             console.error('Failed to load panel messages:', err);
         }
     }
 
-    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null) {
+    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1) {
         const panel = panels[panelIndex];
         const container = panel.messagesContainer;
         if (!container) return;
 
         const rowDiv = document.createElement('div');
-        rowDiv.className = `message-row message-${role}`;
+        rowDiv.className = `message-row message-${role}${disabled ? ' message-disabled' : ''}`;
         
         const div = document.createElement('div');
-        div.className = `message message-${role}`;
+        div.className = `message message-${role}${disabled ? ' message-disabled' : ''}`;
         
         let contentHtml = '';
         if (role === 'assistant') {
@@ -599,15 +604,32 @@
         rowDiv.appendChild(div);
         
         let actionsHtml = '';
+        
+        // 1. Copy (top-left)
         if (role === 'user' || role === 'assistant' || role === 'error') {
             const plainContent = role === 'assistant' ? content.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"') : content;
             const escapedContent = plainContent.replace(/'/g, "\\'").replace(/"/g, '&quot;');
             actionsHtml += `<button class="message-copy-btn" onclick="copyMessage(this, '${role}')" data-content="${escapedContent}" title="Копировать">📋</button>`;
         }
         
+        // 2. Toggle visibility (top-right)
+        if (role === 'user' || role === 'assistant' || role === 'error' || role === 'summary') {
+            const msgIndex = messageIndex >= 0 ? messageIndex : (panel.messages ? panel.messages.length - 1 : 0);
+            const toggleIcon = disabled ? '👁️' : '👁️‍🗨️';
+            const toggleTitle = disabled ? 'Включить в контекст' : 'Отключить из контекста';
+            actionsHtml += `<button class="message-toggle-btn" onclick="toggleMessage(${panelIndex}, ${msgIndex})" title="${toggleTitle}">${toggleIcon}</button>`;
+        }
+        
+        // 3. Debug (bottom-left)
         if ((role === 'assistant' || role === 'error' || role === 'summary') && debugData) {
             const debugJson = JSON.stringify(debugData).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
             actionsHtml += `<button class="message-debug-btn" data-debug='${debugJson}' title="Debug">🔍</button>`;
+        }
+        
+        // 4. Delete (bottom-right)
+        if (role === 'user' || role === 'assistant' || role === 'error' || role === 'summary' || role === 'note' || role === 'info') {
+            const msgIndex = messageIndex >= 0 ? messageIndex : (panel.messages ? panel.messages.length - 1 : 0);
+            actionsHtml += `<button class="message-delete-btn" onclick="deleteMessage(${panelIndex}, ${msgIndex})" title="Удалить">🗑️</button>`;
         }
         
         if (actionsHtml) {
@@ -618,7 +640,6 @@
         }
         
         container.appendChild(rowDiv);
-        container.scrollTop = container.scrollHeight;
     }
 
     function updatePanelStats(panelIndex, inputTokens, outputTokens, totalTokens) {
@@ -1027,6 +1048,50 @@
             btn.textContent = '✓';
             setTimeout(() => btn.textContent = original, 1000);
         });
+    }
+
+    async function deleteMessage(panelIndex, messageIndex) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.sessionId) return;
+        
+        if (!confirm('Удалить это сообщение?')) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${panel.sessionId}/messages/${messageIndex}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                await loadPanelMessages(panelIndex);
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Unknown error'));
+            }
+        } catch (err) {
+            console.error('Failed to delete message:', err);
+            alert('Ошибка удаления сообщения');
+        }
+    }
+
+    async function toggleMessage(panelIndex, messageIndex) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.sessionId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${panel.sessionId}/messages/${messageIndex}/toggle`, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                await loadPanelMessages(panelIndex);
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Unknown error'));
+            }
+        } catch (err) {
+            console.error('Failed to toggle message:', err);
+            alert('Ошибка переключения сообщения');
+        }
     }
 
     function showDebugModal(debugData) {

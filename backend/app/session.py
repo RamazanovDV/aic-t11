@@ -94,14 +94,14 @@ class Session:
                 break
 
         if last_summary_idx is None:
-            return self.messages
+            return [m for m in self.messages if not m.disabled]
 
         # summary всегда первым
         result = [self.messages[last_summary_idx]]
         
         # Ищем последний user message ПОСЛЕ summary
         for i in range(len(self.messages) - 1, last_summary_idx, -1):
-            if self.messages[i].role == "user":
+            if self.messages[i].role == "user" and not self.messages[i].disabled:
                 result.append(self.messages[i])
                 break
 
@@ -201,6 +201,22 @@ class Session:
 
         return (tokens / context_window) * 100
 
+    def delete_message(self, index: int) -> bool:
+        """Удалить сообщение по индексу"""
+        if 0 <= index < len(self.messages):
+            del self.messages[index]
+            self.updated_at = datetime.now()
+            return True
+        return False
+
+    def toggle_message(self, index: int) -> bool:
+        """Переключить состояние disabled сообщения"""
+        if 0 <= index < len(self.messages):
+            self.messages[index].disabled = not self.messages[index].disabled
+            self.updated_at = datetime.now()
+            return True
+        return False
+
     def to_markdown(self) -> str:
         lines = [f"# Session: {self.session_id}", f"Created: {self.created_at.isoformat()}", ""]
         
@@ -255,6 +271,7 @@ class SessionManager:
                         model=m.get("model"),
                         summary_of=m.get("summary_of"),
                         created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
+                        disabled=m.get("disabled", False),
                     )
                     for m in data.get("messages", [])
                 ]

@@ -13,6 +13,7 @@ class Message:
     model: str | None = None
     summary_of: list[int] | None = None
     created_at: datetime = field(default_factory=datetime.now)
+    disabled: bool = False
 
 
 @dataclass
