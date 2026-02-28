@@ -463,6 +463,149 @@ def import_session():
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/sessions/<session_id>/checkpoints", methods=["POST"])
+def create_checkpoint(session_id: str):
+    data = request.get_json() or {}
+    url = f"{ui_config.backend_url}/sessions/{session_id}/checkpoints"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/checkpoints/<checkpoint_id>/branch", methods=["POST"])
+def create_branch_from_checkpoint(session_id: str, checkpoint_id: str):
+    data = request.get_json() or {}
+    url = f"{ui_config.backend_url}/sessions/{session_id}/checkpoints/{checkpoint_id}/branch"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/branches/<branch_id>/switch", methods=["POST"])
+def switch_branch(session_id: str, branch_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/branches/{branch_id}/switch"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.post(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/branches/<branch_id>/rename", methods=["POST"])
+def rename_branch(session_id: str, branch_id: str):
+    data = request.get_json() or {}
+    url = f"{ui_config.backend_url}/sessions/{session_id}/branches/{branch_id}/rename"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/branches/<branch_id>", methods=["DELETE"])
+def delete_branch(session_id: str, branch_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/branches/{branch_id}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.delete(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/branches/<branch_id>/reset", methods=["POST"])
+def reset_branch(session_id: str, branch_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/branches/{branch_id}/reset"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.post(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/checkpoints/<checkpoint_id>/rename", methods=["POST"])
+def rename_checkpoint(session_id: str, checkpoint_id: str):
+    data = request.get_json() or {}
+    url = f"{ui_config.backend_url}/sessions/{session_id}/checkpoints/{checkpoint_id}/rename"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/checkpoints/<checkpoint_id>", methods=["DELETE"])
+def delete_checkpoint(session_id: str, checkpoint_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/checkpoints/{checkpoint_id}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.delete(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/tree", methods=["GET"])
+def get_session_tree(session_id: str):
+    url = f"{ui_config.backend_url}/sessions/{session_id}/tree"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/admin/config", methods=["GET"])
 def get_admin_config():
     url = f"{ui_config.backend_url}/admin/config"

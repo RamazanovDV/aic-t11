@@ -393,10 +393,55 @@ def list_sessions():
 @api_bp.route("/sessions/<session_id>", methods=["GET"])
 @require_auth
 def get_session(session_id: str):
-    session_data = session_manager.get_session_data(session_id)
-    if not session_data:
+    session = session_manager.get_session(session_id)
+    if not session:
         return jsonify({"error": "Session not found"}), 404
-    return jsonify(session_data)
+    
+    current_branch_messages = session.get_current_branch_messages()
+    
+    messages = [
+        {
+            "role": m.role,
+            "content": m.content,
+            "usage": m.usage,
+            "debug": m.debug,
+            "model": m.model,
+            "summary_of": m.summary_of,
+            "created_at": m.created_at.isoformat(),
+            "disabled": m.disabled,
+        }
+        for m in current_branch_messages
+    ]
+
+    return jsonify({
+        "session_id": session.session_id,
+        "messages": messages,
+        "created_at": session.created_at.isoformat(),
+        "updated_at": session.updated_at.isoformat(),
+        "provider": session.provider,
+        "model": session.model,
+        "total_tokens": session.total_tokens,
+        "input_tokens": session.input_tokens,
+        "output_tokens": session.output_tokens,
+        "user_settings": session.user_settings,
+        "branches": [
+            {
+                "id": b.id,
+                "name": b.name,
+            }
+            for b in session.branches
+        ],
+        "checkpoints": [
+            {
+                "id": cp.id,
+                "name": cp.name,
+                "branch_id": cp.branch_id,
+                "message_count": cp.message_count,
+            }
+            for cp in session.checkpoints
+        ],
+        "current_branch": session.current_branch,
+    })
 
 
 @api_bp.route("/sessions/<session_id>", methods=["DELETE"])
@@ -599,6 +644,198 @@ def manual_summarize(session_id: str):
     })
 
 
+@api_bp.route("/sessions/<session_id>/checkpoints", methods=["GET"])
+@require_auth
+def list_checkpoints(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    checkpoints = [
+        {
+            "id": cp.id,
+            "name": cp.name,
+            "branch_id": cp.branch_id,
+            "message_count": cp.message_count,
+            "created_at": cp.created_at.isoformat(),
+        }
+        for cp in session.checkpoints
+    ]
+
+    return jsonify({"checkpoints": checkpoints})
+
+
+@api_bp.route("/sessions/<session_id>/checkpoints", methods=["POST"])
+@require_auth
+def create_checkpoint(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    data = request.get_json() or {}
+    name = data.get("name")
+
+    checkpoint = session.create_checkpoint(name)
+    session_manager.save_session(session_id)
+
+    return jsonify({
+        "id": checkpoint.id,
+        "name": checkpoint.name,
+        "branch_id": checkpoint.branch_id,
+        "message_count": checkpoint.message_count,
+        "created_at": checkpoint.created_at.isoformat(),
+    })
+
+
+@api_bp.route("/sessions/<session_id>/checkpoints/<checkpoint_id>/rename", methods=["POST"])
+@require_auth
+def rename_checkpoint(session_id: str, checkpoint_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    data = request.get_json()
+    if not data or "name" not in data:
+        return jsonify({"error": "Missing 'name' field"}), 400
+
+    if session.rename_checkpoint(checkpoint_id, data["name"]):
+        session_manager.save_session(session_id)
+        return jsonify({"status": "renamed", "checkpoint_id": checkpoint_id, "name": data["name"]})
+
+    return jsonify({"error": "Checkpoint not found"}), 404
+
+
+@api_bp.route("/sessions/<session_id>/checkpoints/<checkpoint_id>", methods=["DELETE"])
+@require_auth
+def delete_checkpoint(session_id: str, checkpoint_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    if session.delete_checkpoint(checkpoint_id):
+        session_manager.save_session(session_id)
+        return jsonify({"status": "deleted", "checkpoint_id": checkpoint_id})
+
+    return jsonify({"error": "Checkpoint not found"}), 404
+
+
+@api_bp.route("/sessions/<session_id>/checkpoints/<checkpoint_id>/branch", methods=["POST"])
+@require_auth
+def create_branch_from_checkpoint(session_id: str, checkpoint_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    data = request.get_json() or {}
+    name = data.get("name")
+
+    branch = session.create_branch_from_checkpoint(checkpoint_id, name)
+    if not branch:
+        return jsonify({"error": "Checkpoint not found"}), 404
+
+    session_manager.save_session(session_id)
+
+    return jsonify({
+        "id": branch.id,
+        "name": branch.name,
+        "parent_branch": branch.parent_branch,
+        "parent_checkpoint": branch.parent_checkpoint,
+        "created_at": branch.created_at.isoformat(),
+    })
+
+
+@api_bp.route("/sessions/<session_id>/branches", methods=["GET"])
+@require_auth
+def list_branches(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    branches = [
+        {
+            "id": b.id,
+            "name": b.name,
+            "parent_branch": b.parent_branch,
+            "parent_checkpoint": b.parent_checkpoint,
+            "created_at": b.created_at.isoformat(),
+            "is_current": b.id == session.current_branch,
+        }
+        for b in session.branches
+    ]
+
+    return jsonify({"branches": branches, "current_branch": session.current_branch})
+
+
+@api_bp.route("/sessions/<session_id>/branches/<branch_id>/switch", methods=["POST"])
+@require_auth
+def switch_branch(session_id: str, branch_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    if session.switch_branch(branch_id):
+        session_manager.save_session(session_id)
+        return jsonify({"status": "switched", "current_branch": session.current_branch})
+
+    return jsonify({"error": "Branch not found"}), 404
+
+
+@api_bp.route("/sessions/<session_id>/branches/<branch_id>/rename", methods=["POST"])
+@require_auth
+def rename_branch(session_id: str, branch_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    data = request.get_json()
+    if not data or "name" not in data:
+        return jsonify({"error": "Missing 'name' field"}), 400
+
+    if session.rename_branch(branch_id, data["name"]):
+        session_manager.save_session(session_id)
+        return jsonify({"status": "renamed", "branch_id": branch_id, "name": data["name"]})
+
+    return jsonify({"error": "Branch not found"}), 404
+
+
+@api_bp.route("/sessions/<session_id>/branches/<branch_id>", methods=["DELETE"])
+@require_auth
+def delete_branch(session_id: str, branch_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    if session.delete_branch(branch_id):
+        session_manager.save_session(session_id)
+        return jsonify({"status": "deleted", "branch_id": branch_id})
+
+    return jsonify({"error": "Branch not found or cannot be deleted"}), 404
+
+
+@api_bp.route("/sessions/<session_id>/branches/<branch_id>/reset", methods=["POST"])
+@require_auth
+def reset_branch(session_id: str, branch_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    if session.reset_branch_to_checkpoint(branch_id):
+        session_manager.save_session(session_id)
+        return jsonify({"status": "reset", "branch_id": branch_id})
+
+    return jsonify({"error": "Branch not found or has no parent checkpoint"}), 404
+
+
+@api_bp.route("/sessions/<session_id>/tree", methods=["GET"])
+@require_auth
+def get_session_tree(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    return jsonify(session.get_tree())
+
+
 @api_bp.route("/sessions/export", methods=["POST"])
 @require_auth
 def export_sessions():
@@ -751,6 +988,28 @@ def fetch_models_from_providers():
         "results": results,
         "models": config.models,
     })
+
+
+@admin_bp.route("/providers/fetch-models", methods=["POST"])
+@require_auth
+def fetch_models_for_provider():
+    """Загрузить модели от конкретного провайдера"""
+    data = request.get_json()
+    if not data or "provider" not in data or "config" not in data:
+        return jsonify({"error": "Missing provider or config"}), 400
+
+    provider_name = data["provider"]
+    provider_config = data["config"]
+
+    try:
+        provider = ProviderFactory.create(provider_name, provider_config)
+        if hasattr(provider, "list_models"):
+            models = provider.list_models()
+            return jsonify({"models": models})
+        else:
+            return jsonify({"error": "Provider does not support listing models"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @admin_bp.route("/context", methods=["GET"])

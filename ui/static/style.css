@@ -125,6 +125,25 @@ body {
     margin-left: 0.5rem;
 }
 
+.branch-panel {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+}
+
+.branch-select {
+    padding: 0.3rem 0.6rem;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    min-width: 100px;
+}
+
 .panel-label {
     color: var(--text-secondary);
     font-size: 0.875rem;
@@ -853,4 +872,56 @@ body {
     border-radius: 8px;
     text-align: center;
     margin: 0.5rem 0;
+}
+
+.tree-view-container {
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+.tree-branch,
+.tree-checkpoint {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    border-radius: 4px;
+    margin: 0.25rem 0;
+}
+
+.tree-branch:hover,
+.tree-checkpoint:hover {
+    background: var(--bg-tertiary);
+}
+
+.tree-icon {
+    font-size: 1rem;
+}
+
+.tree-name {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.tree-info {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    margin-left: auto;
+    margin-right: 0.5rem;
+}
+
+.tree-branch .btn,
+.tree-checkpoint .btn {
+    padding: 0.2rem 0.4rem;
+    font-size: 0.75rem;
+    opacity: 0.7;
+}
+
+.tree-branch .btn:hover,
+.tree-checkpoint .btn:hover {
+    opacity: 1;
 }

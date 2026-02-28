@@ -32,6 +32,7 @@ class FileStorage:
                     "model": m.model,
                     "created_at": m.created_at.isoformat(),
                     "disabled": m.disabled,
+                    "branch_id": m.branch_id,
                 }
                 for m in session.messages
             ],
@@ -43,6 +44,27 @@ class FileStorage:
             "input_tokens": session.input_tokens,
             "output_tokens": session.output_tokens,
             "user_settings": session.user_settings,
+            "branches": [
+                {
+                    "id": b.id,
+                    "name": b.name,
+                    "parent_branch": b.parent_branch,
+                    "parent_checkpoint": b.parent_checkpoint,
+                    "created_at": b.created_at.isoformat(),
+                }
+                for b in session.branches
+            ],
+            "checkpoints": [
+                {
+                    "id": cp.id,
+                    "name": cp.name,
+                    "branch_id": cp.branch_id,
+                    "message_count": cp.message_count,
+                    "created_at": cp.created_at.isoformat(),
+                }
+                for cp in session.checkpoints
+            ],
+            "current_branch": session.current_branch,
         }
 
         with open(session_file, "w") as f:

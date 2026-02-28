@@ -144,6 +144,7 @@
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic</option>
                 <option value="ollama">Ollama</option>
+                <option value="generic">Generic (OpenAI-compatible)</option>
             </select>
         </div>
         
@@ -159,9 +160,12 @@
         
         <div class="form-group">
             <label for="provider-default-model">Модель по умолчанию</label>
-            <select id="provider-default-model" class="form-input">
-                <option value="">-- Выберите модель --</option>
-            </select>
+            <div style="display: flex; gap: 8px;">
+                <select id="provider-default-model" class="form-input" style="flex: 1;">
+                    <option value="">-- Выберите модель --</option>
+                </select>
+                <button type="button" class="btn btn-secondary" onclick="fetchModelsFromProvider()" title="Загрузить модели с API">↻</button>
+            </div>
         </div>
         
         <div class="form-group">
@@ -493,6 +497,63 @@
         }
     }
 
+    async function fetchModelsFromProvider() {
+        const type = document.getElementById('provider-type').value;
+        const url = document.getElementById('provider-url').value.trim();
+        const apiKey = document.getElementById('provider-api-key').value;
+        
+        if (!url || !apiKey) {
+            alert('Введите URL и API Key');
+            return;
+        }
+        
+        const select = document.getElementById('provider-default-model');
+        const originalContent = select.innerHTML;
+        select.innerHTML = '<option value="">Загрузка...</option>';
+        
+        try {
+            const response = await fetch('/admin/providers/fetch-models', {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: document.getElementById('provider-name').value.trim() || type,
+                    config: {
+                        type: type,
+                        url: url,
+                        api_key: apiKey,
+                    }
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                const models = data.models || [];
+                
+                if (models.length === 0) {
+                    alert('Модели не найдены. Проверьте URL и API Key.');
+                    select.innerHTML = originalContent;
+                    return;
+                }
+                
+                select.innerHTML = '<option value="">-- Выберите модель --</option>';
+                for (const model of models) {
+                    const option = document.createElement('option');
+                    option.value = model;
+                    option.textContent = model;
+                    select.appendChild(option);
+                }
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Не удалось загрузить модели'));
+                select.innerHTML = originalContent;
+            }
+        } catch (e) {
+            console.error('Failed to fetch models:', e);
+            alert('Ошибка при загрузке моделей: ' + e.message);
+            select.innerHTML = originalContent;
+        }
+    }
+
     function showAddProvider() {
         document.getElementById('modal-title').textContent = 'Добавить провайдера';
         document.getElementById('edit-provider-name').value = '';
@@ -533,7 +594,8 @@
         const placeholders = {
             'openai': 'https://api.openai.com/v1',
             'anthropic': 'https://api.anthropic.com',
-            'ollama': 'http://localhost:11434'
+            'ollama': 'http://localhost:11434',
+            'generic': 'https://api.minimax.chat/v1'
         };
         document.getElementById('provider-url').placeholder = placeholders[type] || placeholders['openai'];
     }

@@ -7,6 +7,24 @@ from app.storage import storage
 
 
 @dataclass
+class Checkpoint:
+    id: str
+    name: str
+    branch_id: str
+    message_count: int
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class Branch:
+    id: str
+    name: str
+    parent_branch: str | None = None
+    parent_checkpoint: str | None = None
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
 class Session:
     session_id: str
     messages: list[Message] = field(default_factory=list)
@@ -18,14 +36,24 @@ class Session:
     input_tokens: int = 0
     output_tokens: int = 0
     user_settings: dict[str, Any] = field(default_factory=dict)
+    branches: list[Branch] = field(default_factory=list)
+    checkpoints: list[Checkpoint] = field(default_factory=list)
+    current_branch: str = "main"
+
+    def _ensure_main_branch(self) -> None:
+        """Ensure main branch exists"""
+        if not any(b.id == "main" for b in self.branches):
+            self.branches.append(Branch(id="main", name="main"))
+        if self.current_branch not in [b.id for b in self.branches]:
+            self.current_branch = "main"
 
     def add_user_message(self, content: str, usage: dict[str, int] | None = None) -> None:
-        msg = Message(role="user", content=content, usage=usage or {})
+        msg = Message(role="user", content=content, usage=usage or {}, branch_id=self.current_branch)
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
     def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None) -> None:
-        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model)
+        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch)
         self.messages.append(msg)
         if usage:
             self.total_tokens += usage.get("total_tokens", 0)
@@ -34,7 +62,7 @@ class Session:
         self.updated_at = datetime.now()
 
     def add_error_message(self, content: str, debug: dict | None = None, model: str | None = None) -> None:
-        msg = Message(role="error", content=content, usage={}, debug=debug, model=model)
+        msg = Message(role="error", content=content, usage={}, debug=debug, model=model, branch_id=self.current_branch)
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
@@ -50,12 +78,12 @@ class Session:
         }
 
     def add_note_message(self, content: str, usage: dict[str, int] | None = None) -> None:
-        msg = Message(role="note", content=content, usage=usage or self.get_current_usage())
+        msg = Message(role="note", content=content, usage=usage or self.get_current_usage(), branch_id=self.current_branch)
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
     def add_info_message(self, content: str) -> None:
-        msg = Message(role="info", content=content, usage={})
+        msg = Message(role="info", content=content, usage={}, branch_id=self.current_branch)
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
@@ -74,6 +102,7 @@ class Session:
             debug=debug,
             model=model,
             summary_of=summarized_indices,
+            branch_id=self.current_branch,
         )
         self.messages.append(msg)
         if usage:
@@ -217,6 +246,223 @@ class Session:
             return True
         return False
 
+    def get_current_branch_messages(self) -> list[Message]:
+        """Получить сообщения только текущей ветки"""
+        return [m for m in self.messages if m.branch_id == self.current_branch]
+
+    def get_branch_messages(self, branch_id: str) -> list[Message]:
+        """Получить сообщения конкретной ветки"""
+        return [m for m in self.messages if m.branch_id == branch_id]
+
+    def create_checkpoint(self, name: str | None = None) -> Checkpoint:
+        """Создать чекпоинт на текущей ветке"""
+        import uuid
+
+        self._ensure_main_branch()
+        branch = self.get_branch(self.current_branch)
+        if not branch:
+            branch = self.branches[0]
+
+        current_messages = self.get_current_branch_messages()
+        checkpoint = Checkpoint(
+            id=str(uuid.uuid4())[:8],
+            name=name or f"v{len(self.checkpoints) + 1}",
+            branch_id=branch.id,
+            message_count=len(current_messages),
+        )
+        self.checkpoints.append(checkpoint)
+        self.updated_at = datetime.now()
+        return checkpoint
+
+    def get_checkpoint(self, checkpoint_id: str) -> Checkpoint | None:
+        """Получить чекпоинт по ID"""
+        for cp in self.checkpoints:
+            if cp.id == checkpoint_id:
+                return cp
+        return None
+
+    def rename_checkpoint(self, checkpoint_id: str, new_name: str) -> bool:
+        """Переименовать чекпоинт"""
+        for cp in self.checkpoints:
+            if cp.id == checkpoint_id:
+                cp.name = new_name
+                self.updated_at = datetime.now()
+                return True
+        return False
+
+    def delete_checkpoint(self, checkpoint_id: str) -> bool:
+        """Удалить чекпоинт и все ответвлённые ветки"""
+        checkpoint = self.get_checkpoint(checkpoint_id)
+        if not checkpoint:
+            return False
+
+        child_branches = [b for b in self.branches if b.parent_checkpoint == checkpoint_id]
+        for branch in child_branches:
+            self.delete_branch(branch.id)
+
+        self.checkpoints = [cp for cp in self.checkpoints if cp.id != checkpoint_id]
+        self.updated_at = datetime.now()
+        return True
+
+    def create_branch_from_checkpoint(self, checkpoint_id: str, name: str | None = None) -> Branch | None:
+        """Создать ветку от чекпоинта"""
+        import uuid
+
+        checkpoint = self.get_checkpoint(checkpoint_id)
+        if not checkpoint:
+            return None
+
+        self._ensure_main_branch()
+
+        branch_name = name or f"branch-{len(self.branches) + 1}"
+        new_branch = Branch(
+            id=str(uuid.uuid4())[:8],
+            name=branch_name,
+            parent_branch=checkpoint.branch_id,
+            parent_checkpoint=checkpoint_id,
+        )
+        self.branches.append(new_branch)
+
+        for msg in self.messages:
+            if msg.branch_id == checkpoint.branch_id:
+                msg_idx = self.messages.index(msg)
+                if msg_idx < checkpoint.message_count:
+                    msg.branch_id = new_branch.id
+
+        self.updated_at = datetime.now()
+        return new_branch
+
+    def get_branch(self, branch_id: str) -> Branch | None:
+        """Получить ветку по ID"""
+        for b in self.branches:
+            if b.id == branch_id:
+                return b
+        return None
+
+    def switch_branch(self, branch_id: str) -> bool:
+        """Переключиться на ветку"""
+        self._ensure_main_branch()
+        if any(b.id == branch_id for b in self.branches):
+            self.current_branch = branch_id
+            self.updated_at = datetime.now()
+            return True
+        return False
+
+    def rename_branch(self, branch_id: str, new_name: str) -> bool:
+        """Переименовать ветку"""
+        branch = self.get_branch(branch_id)
+        if not branch:
+            return False
+        branch.name = new_name
+        self.updated_at = datetime.now()
+        return True
+
+    def delete_branch(self, branch_id: str) -> bool:
+        """Удалить ветку"""
+        if branch_id == "main":
+            return False
+
+        branch = self.get_branch(branch_id)
+        if not branch:
+            return False
+
+        self.messages = [m for m in self.messages if m.branch_id != branch_id]
+        self.branches = [b for b in self.branches if b.id != branch_id]
+
+        if self.current_branch == branch_id:
+            self.current_branch = "main"
+
+        self.updated_at = datetime.now()
+        return True
+
+    def reset_branch_to_checkpoint(self, branch_id: str) -> bool:
+        """Сбросить ветку к состоянию чекпоинта"""
+        branch = self.get_branch(branch_id)
+        if not branch:
+            return False
+
+        if branch.parent_checkpoint:
+            checkpoint = self.get_checkpoint(branch.parent_checkpoint)
+            if checkpoint:
+                self.messages = [m for m in self.messages if m.branch_id != branch_id]
+                for msg in self.messages:
+                    if msg.branch_id == branch.parent_branch:
+                        msg_idx = self.messages.index(msg)
+                        if msg_idx < checkpoint.message_count:
+                            cloned = Message(
+                                role=msg.role,
+                                content=msg.content,
+                                usage=msg.usage.copy(),
+                                debug=msg.debug.copy() if msg.debug else None,
+                                model=msg.model,
+                                summary_of=msg.summary_of,
+                                created_at=msg.created_at,
+                                disabled=msg.disabled,
+                                branch_id=branch_id,
+                            )
+                            self.messages.append(cloned)
+                self.updated_at = datetime.now()
+                return True
+
+        return False
+
+    def get_tree(self) -> dict:
+        """Получить дерево чекпоинтов и веток"""
+        self._ensure_main_branch()
+
+        def get_branch_children(parent_branch_id: str, parent_checkpoint_id: str | None = None) -> list:
+            result = []
+
+            branch_checkpoints = [cp for cp in self.checkpoints if cp.branch_id == parent_branch_id]
+            for cp in branch_checkpoints:
+                child_branches = [b for b in self.branches if b.parent_checkpoint == cp.id]
+                result.append({
+                    "type": "checkpoint",
+                    "id": cp.id,
+                    "name": cp.name,
+                    "message_count": cp.message_count,
+                    "children": [get_branch_children(b.id, b.id) for b in child_branches]
+                })
+
+            other_branches = [b for b in self.branches 
+                            if b.parent_branch == parent_branch_id 
+                            and b.parent_checkpoint is None
+                            and b.id != "main"]
+            for b in other_branches:
+                result.append({
+                    "type": "branch",
+                    "id": b.id,
+                    "name": b.name,
+                    "children": get_branch_children(b.id)
+                })
+
+            return result
+
+        main_branch = self.get_branch("main")
+        if not main_branch:
+            main_branch = Branch(id="main", name="main")
+
+        main_msgs = self.get_branch_messages("main")
+        return {
+            "current_branch": self.current_branch,
+            "branches": [
+                {
+                    "id": b.id,
+                    "name": b.name,
+                    "is_current": b.id == self.current_branch,
+                }
+                for b in self.branches
+            ],
+            "tree": {
+                "type": "branch",
+                "id": main_branch.id,
+                "name": main_branch.name,
+                "is_current": main_branch.id == self.current_branch,
+                "message_count": len(main_msgs),
+                "children": get_branch_children("main")
+            }
+        }
+
     def to_markdown(self) -> str:
         lines = [f"# Session: {self.session_id}", f"Created: {self.created_at.isoformat()}", ""]
         
@@ -272,9 +518,33 @@ class SessionManager:
                         summary_of=m.get("summary_of"),
                         created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
                         disabled=m.get("disabled", False),
+                        branch_id=m.get("branch_id", "main"),
                     )
                     for m in data.get("messages", [])
                 ]
+
+                branches = [
+                    Branch(
+                        id=b["id"],
+                        name=b["name"],
+                        parent_branch=b.get("parent_branch"),
+                        parent_checkpoint=b.get("parent_checkpoint"),
+                        created_at=datetime.fromisoformat(b["created_at"]) if b.get("created_at") else datetime.now(),
+                    )
+                    for b in data.get("branches", [])
+                ]
+
+                checkpoints = [
+                    Checkpoint(
+                        id=cp["id"],
+                        name=cp["name"],
+                        branch_id=cp["branch_id"],
+                        message_count=cp["message_count"],
+                        created_at=datetime.fromisoformat(cp["created_at"]) if cp.get("created_at") else datetime.now(),
+                    )
+                    for cp in data.get("checkpoints", [])
+                ]
+
                 session = Session(
                     session_id=session_id,
                     messages=messages,
@@ -286,7 +556,11 @@ class SessionManager:
                     input_tokens=data.get("input_tokens", 0),
                     output_tokens=data.get("output_tokens", 0),
                     user_settings=data.get("user_settings", {}),
+                    branches=branches,
+                    checkpoints=checkpoints,
+                    current_branch=data.get("current_branch", "main"),
                 )
+                session._ensure_main_branch()
                 self._sessions[session_id] = session
 
     def get_session(self, session_id: str) -> Session:
@@ -342,9 +616,34 @@ class SessionManager:
                     model=m.get("model"),
                     summary_of=m.get("summary_of"),
                     created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
+                    disabled=m.get("disabled", False),
+                    branch_id=m.get("branch_id", "main"),
                 )
                 for m in data.get("messages", [])
             ]
+
+            branches = [
+                Branch(
+                    id=b["id"],
+                    name=b["name"],
+                    parent_branch=b.get("parent_branch"),
+                    parent_checkpoint=b.get("parent_checkpoint"),
+                    created_at=datetime.fromisoformat(b["created_at"]) if b.get("created_at") else datetime.now(),
+                )
+                for b in data.get("branches", [])
+            ]
+
+            checkpoints = [
+                Checkpoint(
+                    id=cp["id"],
+                    name=cp["name"],
+                    branch_id=cp["branch_id"],
+                    message_count=cp["message_count"],
+                    created_at=datetime.fromisoformat(cp["created_at"]) if cp.get("created_at") else datetime.now(),
+                )
+                for cp in data.get("checkpoints", [])
+            ]
+
             session = Session(
                 session_id=session_id,
                 messages=messages,
@@ -356,7 +655,11 @@ class SessionManager:
                 input_tokens=data.get("input_tokens", 0),
                 output_tokens=data.get("output_tokens", 0),
                 user_settings=data.get("user_settings", {}),
+                branches=branches,
+                checkpoints=checkpoints,
+                current_branch=data.get("current_branch", "main"),
             )
+            session._ensure_main_branch()
             self._sessions[session_id] = session
         return session_id
 

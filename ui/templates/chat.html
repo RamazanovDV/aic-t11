@@ -97,6 +97,18 @@
     </div>
 </div>
 
+<div id="tree-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3>Дерево веток</h3>
+        <div id="tree-modal-content" class="tree-view-container">
+            Загрузка...
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeTreeModal()">Закрыть</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const PANEL_MODE_KEY = 't6_panel_mode';
     const PANEL_0_SESSION_KEY = 't6_panel_0_session';
@@ -144,7 +156,10 @@
                 totalTokens: 0,
                 isLoading: false,
                 abortController: null,
-                messagesContainer: null
+                messagesContainer: null,
+                currentBranch: 'main',
+                branches: [],
+                checkpoints: [],
             });
         }
     }
@@ -172,6 +187,15 @@
                     <button class="btn btn-small" onclick="copySessionPanel(${index})" title="Копировать">📋</button>
                     <button class="btn btn-small" onclick="renameSessionPanel(${index})" title="Переименовать">✎</button>
                     ${panelMode === 'dual' ? `<span class="panel-label">#${index + 1}</span>` : ''}
+                </div>
+
+                <div class="branch-panel">
+                    <span class="panel-label">Ветка:</span>
+                    <select class="branch-select panel-branch-select" data-panel="${index}" onchange="onPanelBranchChange(${index}, this.value)">
+                        <option value="main">main</option>
+                    </select>
+                    <button class="btn btn-small" onclick="createCheckpointPanel(${index})" title="Создать чекпоинт">📸</button>
+                    <button class="btn btn-small" onclick="showTreeModal(${index})" title="Дерево веток">🌳</button>
                 </div>
 
                 <div class="chat-header">
@@ -433,6 +457,9 @@
                 const data = await response.json();
                 panel.provider = data.provider || '';
                 panel.model = data.model || '';
+                panel.currentBranch = data.current_branch || 'main';
+                panel.branches = data.branches || [];
+                panel.checkpoints = data.checkpoints || [];
             }
         } catch (e) {
             console.error('Failed to load panel settings:', e);
@@ -456,6 +483,33 @@
         }
 
         await loadPanelModels(panelIndex);
+        await loadPanelBranches(panelIndex);
+    }
+
+    async function loadPanelBranches(panelIndex) {
+        const panel = panels[panelIndex];
+        const branchSelect = document.querySelector(`.panel-branch-select[data-panel="${panelIndex}"]`);
+        
+        if (!branchSelect) return;
+
+        branchSelect.innerHTML = '';
+        
+        if (panel.branches && panel.branches.length > 0) {
+            panel.branches.forEach(branch => {
+                const option = document.createElement('option');
+                option.value = branch.id;
+                option.textContent = branch.name + (branch.id === panel.currentBranch ? ' (текущая)' : '');
+                if (branch.id === panel.currentBranch) {
+                    option.selected = true;
+                }
+                branchSelect.appendChild(option);
+            });
+        } else {
+            const option = document.createElement('option');
+            option.value = 'main';
+            option.textContent = 'main';
+            branchSelect.appendChild(option);
+        }
     }
 
     async function loadPanelModels(panelIndex) {
@@ -1417,6 +1471,248 @@
             openSettingsModal();
             window.history.replaceState({}, document.title, '/');
         });
+    }
+
+    async function createCheckpointPanel(panelIndex) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.sessionId) return;
+
+        const name = prompt('Имя чекпоинта (оставьте пустым для автоимени):');
+        
+        try {
+            const response = await fetch(`/api/sessions/${panel.sessionId}/checkpoints`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name || undefined })
+            });
+            
+            if (response.ok) {
+                const checkpoint = await response.json();
+                alert(`Чекпоинт создан: ${checkpoint.name}`);
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (err) {
+            console.error('Failed to create checkpoint:', err);
+            alert('Ошибка при создании чекпоинта');
+        }
+    }
+
+    async function onPanelBranchChange(panelIndex, branchId) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.sessionId) return;
+
+        try {
+            const response = await fetch(`/api/sessions/${panel.sessionId}/branches/${branchId}/switch`, {
+                method: 'POST',
+            });
+            
+            if (response.ok) {
+                await loadPanelMessages(panelIndex);
+                await loadPanelSettings(panelIndex);
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (err) {
+            console.error('Failed to switch branch:', err);
+            alert('Ошибка при переключении ветки');
+        }
+    }
+
+    async function showTreeModal(panelIndex) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.sessionId) return;
+
+        try {
+            const response = await fetch(`/api/sessions/${panel.sessionId}/tree`);
+            if (!response.ok) {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+                return;
+            }
+            
+            const tree = await response.json();
+            
+            let html = '<div class="tree-view">';
+            html += renderTreeNode(tree.tree, panel.sessionId);
+            html += '</div>';
+            
+            document.getElementById('tree-modal-content').innerHTML = html;
+            document.getElementById('tree-modal').dataset.panelIndex = panelIndex;
+            document.getElementById('tree-modal').style.display = 'flex';
+        } catch (err) {
+            console.error('Failed to load tree:', err);
+            alert('Ошибка при загрузке дерева');
+        }
+    }
+
+    function renderTreeNode(node, sessionId, indent = 0) {
+        let html = '';
+        const padding = indent * 20;
+        
+        if (node.type === 'branch') {
+            const isCurrent = node.is_current ? ' (текущая)' : '';
+            html += `<div class="tree-branch" style="padding-left: ${padding}px;">`;
+            html += `<span class="tree-icon">📁</span> <span class="tree-name">${node.name}</span>`;
+            html += `<span class="tree-info">${node.message_count || 0} сообщений${isCurrent}</span>`;
+            
+            if (!node.is_current) {
+                html += `<button class="btn btn-small" onclick="switchToBranch('${sessionId}', '${node.id}', ${indent})">Переключиться</button>`;
+            }
+            html += `<button class="btn btn-small" onclick="renameBranch('${sessionId}', '${node.id}', '${node.name}')">✎</button>`;
+            if (node.id !== 'main') {
+                html += `<button class="btn btn-small" onclick="deleteBranch('${sessionId}', '${node.id}')">🗑️</button>`;
+            }
+            html += '</div>';
+        } else if (node.type === 'checkpoint') {
+            html += `<div class="tree-checkpoint" style="padding-left: ${padding}px;">`;
+            html += `<span class="tree-icon">📸</span> <span class="tree-name">${node.name}</span>`;
+            html += `<span class="tree-info">${node.message_count} сообщений</span>`;
+            html += `<button class="btn btn-small" onclick="createBranchFromCheckpoint('${sessionId}', '${node.id}')">Ветвь</button>`;
+            html += `<button class="btn btn-small" onclick="renameCheckpoint('${sessionId}', '${node.id}', '${node.name}')">✎</button>`;
+            html += `<button class="btn btn-small" onclick="deleteCheckpoint('${sessionId}', '${node.id}')">🗑️</button>`;
+            html += '</div>';
+        }
+        
+        if (node.children) {
+            for (const child of node.children) {
+                html += renderTreeNode(child, sessionId, indent + 1);
+            }
+        }
+        
+        return html;
+    }
+
+    function closeTreeModal() {
+        document.getElementById('tree-modal').style.display = 'none';
+    }
+
+    async function switchToBranch(sessionId, branchId) {
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/branches/${branchId}/switch`, {
+                method: 'POST',
+            });
+            
+            if (response.ok) {
+                location.reload();
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (err) {
+            console.error('Failed to switch branch:', err);
+            alert('Ошибка при переключении ветки');
+        }
+    }
+
+    async function createBranchFromCheckpoint(sessionId, checkpointId) {
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/checkpoints/${checkpointId}/branch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            
+            if (response.ok) {
+                const branch = await response.json();
+                alert(`Ветка создана: ${branch.name}`);
+                location.reload();
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (err) {
+            console.error('Failed to create branch:', err);
+            alert('Ошибка при создании ветки');
+        }
+    }
+
+    async function renameBranch(sessionId, branchId, currentName) {
+        const newName = prompt('Новое имя ветки:', currentName);
+        if (!newName || newName === currentName) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/branches/${branchId}/rename`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName })
+            });
+            
+            if (response.ok) {
+                showTreeModal(0);
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (err) {
+            console.error('Failed to rename branch:', err);
+            alert('Ошибка при переименовании ветки');
+        }
+    }
+
+    async function deleteBranch(sessionId, branchId) {
+        if (!confirm('Удалить ветку? Все сообщения этой ветки будут потеряны.')) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/branches/${branchId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                showTreeModal(0);
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (err) {
+            console.error('Failed to delete branch:', err);
+            alert('Ошибка при удалении ветки');
+        }
+    }
+
+    async function renameCheckpoint(sessionId, checkpointId, currentName) {
+        const newName = prompt('Новое имя чекпоинта:', currentName);
+        if (!newName || newName === currentName) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/checkpoints/${checkpointId}/rename`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName })
+            });
+            
+            if (response.ok) {
+                showTreeModal(0);
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (err) {
+            console.error('Failed to rename checkpoint:', err);
+            alert('Ошибка при переименовании чекпоинта');
+        }
+    }
+
+    async function deleteCheckpoint(sessionId, checkpointId) {
+        if (!confirm('Удалить чекпоинт? Все ответвлённые ветки также будут удалены.')) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/checkpoints/${checkpointId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                showTreeModal(0);
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (err) {
+            console.error('Failed to delete checkpoint:', err);
+            alert('Ошибка при удалении чекпоинта');
+        }
     }
 
     initPanels();

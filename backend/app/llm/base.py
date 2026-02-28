@@ -14,6 +14,7 @@ class Message:
     summary_of: list[int] | None = None
     created_at: datetime = field(default_factory=datetime.now)
     disabled: bool = False
+    branch_id: str = "main"
 
 
 @dataclass
