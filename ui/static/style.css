@@ -33,11 +33,10 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     margin: 0;
-    overflow: hidden;
 }
 
 .header {
@@ -357,13 +356,13 @@ body {
     gap: 1rem;
     flex: 1;
     min-height: 0;
-    max-width: 60%;
+    max-width: 100%;
     margin: 0 auto;
     width: 100%;
 }
 
 .chat-panels-wrapper.dual {
-    max-width: 80%;
+    max-width: 100%;
 }
 
 .chat-panels {
@@ -407,13 +406,12 @@ body {
 .chat-input-area {
     flex-shrink: 0;
     padding: 0.5rem 1rem;
-    max-width: 60%;
+    max-width: 100%;
     margin: 0 auto;
     width: 100%;
 }
 
 .chat-input-area.dual {
-    max-width: 80%;
 }
 
 @media (max-height: 600px) {
@@ -773,6 +771,38 @@ body {
     .nav-link {
         padding: 0.5rem;
         font-size: 0.875rem;
+    }
+
+    .chat-panels-wrapper {
+        max-width: 100%;
+    }
+
+    .chat-panels-wrapper.dual {
+        max-width: 100%;
+    }
+
+    .chat-input-area {
+        max-width: 100%;
+    }
+
+    .chat-input-area.dual {
+        max-width: 100%;
+    }
+
+    .chat-panel .chat-messages {
+        min-height: 150px;
+    }
+
+    .session-panel {
+        flex-wrap: wrap;
+    }
+
+    .session-select {
+        min-width: 120px;
+    }
+
+    .model-select {
+        min-width: 150px;
     }
 }
 
