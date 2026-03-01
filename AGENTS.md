@@ -55,11 +55,24 @@ python main.py health
 
 ### Testing
 ```bash
-pytest                          # Run all tests
-pytest path/to/test_file.py    # Run single test file
-pytest -k test_name            # Run tests matching pattern
-pytest -v                      # Verbose output
-pytest --tb=short              # Shorter traceback format
+# Run all tests (from project root)
+pytest
+
+# Run tests for specific component
+cd backend && pytest
+cd ui && pytest
+
+# Run single test file
+pytest path/to/test_file.py
+
+# Run tests matching pattern
+pytest -k test_name
+
+# Run with verbose output
+pytest -v
+
+# Run with shorter traceback
+pytest --tb=short
 ```
 
 Tests should be placed in `tests/` directories within each component (e.g., `backend/tests/`, `ui/tests/`).
@@ -147,6 +160,31 @@ def chat(message: str): """Send a message""" ...
 {% block content %}{{ content|safe }}{% endblock %}
 ```
 
+### JavaScript (chat.html)
+- Use ES6+ syntax (async/await, arrow functions, template literals)
+- Use `const` by default, `let` when needed, avoid `var`
+- Always use strict equality (`===` and `!==`)
+- Use meaningful variable names
+- Prefer async/await over raw promises
+- Use backticks for string interpolation: `` `value: ${x}` ``
+- Add event listeners via `addEventListener`, not inline onclick unless necessary
+
+Example:
+```javascript
+async function loadPanelMessages(panelIndex) {
+    const panel = panels[panelIndex];
+    if (!panel?.sessionId) return;
+    
+    try {
+        const response = await fetch(`/api/sessions/${panel.sessionId}/messages`);
+        const data = await response.json();
+        panel.messages = data.messages || [];
+    } catch (err) {
+        console.error('Failed to load messages:', err);
+    }
+}
+```
+
 ### Debug Mode
 The UI includes a debug toggle to view raw LLM requests/responses. Debug data is stored in session files and can be cleared via API or UI.
 
@@ -173,3 +211,10 @@ llm:
 **Add API Endpoint** - Add route in `backend/app/routes.py`, use `@require_auth` if needed, return JSON.
 
 **Session Management** - Sessions are stored in `data/` directory. Use `session_manager` from `app/session.py` to manage session history.
+
+## Git Practices
+
+- Commit frequently with clear, concise messages describing the "why" not the "what"
+- Never commit secrets, keys, or credentials - use `.gitignore` for sensitive files
+- Run lint/typecheck before committing when possible
+- Ask before amending or force-pushing
