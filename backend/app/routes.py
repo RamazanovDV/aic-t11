@@ -25,7 +25,7 @@ def get_sticky_notes_prompt(facts: dict[str, str]) -> str:
         result += f"\n\n{facts_extraction}\n"
     
     if facts:
-        facts_text = "\nТекущие факты о пользователе и сессии:\n"
+        facts_text = "\nИзвлеченные ранее факты:\n"
         for key, value in facts.items():
             facts_text += f"- {key}: {value}\n"
         result += facts_text
