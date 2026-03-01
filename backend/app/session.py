@@ -157,7 +157,16 @@ class Session:
             return []
 
         if window_type == "messages":
-            window_messages = active_messages[-window_limit:]
+            user_messages = [m for m in self.messages if not m.disabled and m.role == "user"]
+            if not user_messages:
+                return []
+            last_n_users = user_messages[-window_limit:]
+            cutoff_index = self.messages.index(last_n_users[0])
+            window_messages = [m for i, m in enumerate(self.messages) if i >= cutoff_index]
+            
+            system_msg = next((m for m in self.messages if m.role == "system"), None)
+            if system_msg and system_msg not in window_messages:
+                window_messages.insert(0, system_msg)
         else:
             window_messages = self._get_messages_by_token_limit(active_messages, window_limit)
 

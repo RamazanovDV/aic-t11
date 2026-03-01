@@ -382,7 +382,8 @@
             sendBtn.textContent = 'Стоп';
 
             panels.forEach((panel, idx) => {
-                addMessageToPanel(idx, message, 'user');
+                const userMsgIndex = panel.messages.length;
+                addMessageToPanel(idx, message, 'user', null, null, null, false, userMsgIndex);
             });
 
             const messageText = message;
@@ -937,12 +938,18 @@
                 addMessageToPanel(panelIndex, 'Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
             } else {
                 const usage = data.usage || null;
-                addMessageToPanel(panelIndex, data.message, 'assistant', data.debug || null, usage, data.model || null);
+                const msgIndex = panel.messages.length;
+                addMessageToPanel(panelIndex, data.message, 'assistant', data.debug || null, usage, data.model || null, false, msgIndex);
                 if (data.usage) {
                     panel.totalInput += data.usage.input_tokens || 0;
                     panel.totalOutput += data.usage.output_tokens || 0;
                     panel.totalTokens += data.usage.total_tokens || 0;
                     updatePanelStats(panelIndex, panel.totalInput, panel.totalOutput, panel.totalTokens);
+                }
+                if (data.disabled_indices && data.disabled_indices.length > 0) {
+                    data.disabled_indices.forEach(idx => {
+                        updateMessageDisabledState(panelIndex, idx, true);
+                    });
                 }
             }
         } catch (err) {
@@ -1080,6 +1087,21 @@
                                 copyBtn.setAttribute('data-content', plainContent);
                                 actionsDiv.appendChild(copyBtn);
                                 
+                                const msgIndex = panel.messages.length;
+                                const toggleBtn = document.createElement('button');
+                                toggleBtn.className = 'message-toggle-btn';
+                                toggleBtn.textContent = '👁️‍🗨️';
+                                toggleBtn.title = 'Отключить из контекста';
+                                toggleBtn.onclick = function() { toggleMessage(panelIndex, msgIndex); };
+                                actionsDiv.appendChild(toggleBtn);
+                                
+                                const deleteBtn = document.createElement('button');
+                                deleteBtn.className = 'message-delete-btn';
+                                deleteBtn.textContent = '🗑️';
+                                deleteBtn.title = 'Удалить';
+                                deleteBtn.onclick = function() { deleteMessage(panelIndex, msgIndex); };
+                                actionsDiv.appendChild(deleteBtn);
+                                
                                 if (debugMode && data.debug) {
                                     const debugBtn = document.createElement('button');
                                     debugBtn.className = 'message-debug-btn';
@@ -1091,6 +1113,12 @@
                                 rowDiv.appendChild(actionsDiv);
                                 
                                 panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
+                                
+                                if (data.disabled_indices && data.disabled_indices.length > 0) {
+                                    data.disabled_indices.forEach(idx => {
+                                        updateMessageDisabledState(panelIndex, idx, true);
+                                    });
+                                }
                             }
                         } catch (e) {
                             console.error('Parse error:', e);
@@ -1182,7 +1210,8 @@
             });
             
             if (response.ok) {
-                await loadPanelMessages(panelIndex);
+                const data = await response.json();
+                updateMessageDisabledState(panelIndex, messageIndex, data.disabled);
             } else {
                 const data = await response.json();
                 alert('Ошибка: ' + (data.error || 'Unknown error'));
@@ -1190,6 +1219,43 @@
         } catch (err) {
             console.error('Failed to toggle message:', err);
             alert('Ошибка переключения сообщения');
+        }
+    }
+
+    function updateMessageDisabledState(panelIndex, messageIndex, disabled) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.messages) return;
+        
+        panel.messages[messageIndex].disabled = disabled;
+        
+        const container = document.getElementById(`panel-messages-${panelIndex}`);
+        if (!container) return;
+        
+        const messageElements = container.querySelectorAll('.message-row');
+        if (messageElements[messageIndex]) {
+            const row = messageElements[messageIndex];
+            if (disabled) {
+                row.classList.add('message-disabled');
+            } else {
+                row.classList.remove('message-disabled');
+            }
+            
+            const innerMessage = row.querySelector('.message');
+            if (innerMessage) {
+                if (disabled) {
+                    innerMessage.classList.add('message-disabled');
+                } else {
+                    innerMessage.classList.remove('message-disabled');
+                }
+            }
+            
+            const toggleBtn = row.querySelector('.message-toggle-btn');
+            if (toggleBtn) {
+                const newIcon = disabled ? '👁️' : '👁️‍🗨️';
+                const newTitle = disabled ? 'Включить в контекст' : 'Отключить из контекста';
+                toggleBtn.innerHTML = newIcon;
+                toggleBtn.title = newTitle;
+            }
         }
     }
 

@@ -160,12 +160,15 @@ def chat():
     session.add_assistant_message(response.content, response.usage, debug=debug_info, model=response.model)
     session_manager.save_session(session_id)
 
+    disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
+
     result = {
         "message": response.content,
         "session_id": session_id,
         "model": response.model,
         "usage": response.usage,
         "total_tokens": session.total_tokens,
+        "disabled_indices": disabled_indices,
     }
     
     if debug_info:
@@ -319,8 +322,6 @@ def chat_stream():
             if not full_content:
                 raise Exception("Empty response from provider")
 
-            yield f"data: {json.dumps({'content': full_content, 'done': True, 'usage': total_usage, 'debug': {'request': debug_request, 'response': debug_response}})}\n\n"
-
             debug_info = {"request": debug_request, "response": debug_response} if debug_mode else None
             
             # Сохраняем сообщения в сессию
@@ -329,6 +330,9 @@ def chat_stream():
                 session.add_user_message(user_msg_for_llm)
             session.add_assistant_message(full_content, total_usage, debug=debug_info, model=provider.model)
             session_manager.save_session(session_id)
+
+            disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
+            yield f"data: {json.dumps({'content': full_content, 'done': True, 'usage': total_usage, 'debug': {'request': debug_request, 'response': debug_response}, 'disabled_indices': disabled_indices})}\n\n"
 
         except ContextLengthExceededError as e:
             session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
