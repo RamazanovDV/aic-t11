@@ -33,19 +33,26 @@ def get_sticky_notes_prompt(facts: dict[str, str]) -> str:
     return result
 
 
-def extract_facts_from_response(content: str) -> str | None:
-    """Извлечь JSON с фактами из ответа модели"""
+def extract_facts_from_response(content: str) -> tuple[str | None, str]:
+    """Извлечь JSON с фактами из ответа модели и очистить контент от JSON блока"""
+    cleaned_content = content
+    
     json_pattern = r"```json\s*([\s\S]*?)\s*```"
     match = re.search(json_pattern, content)
     if match:
-        return match.group(1).strip()
-
-    json_pattern_short = r"^\s*\{.*\}\s*$"
+        facts = match.group(1).strip()
+        cleaned_content = content[:match.start()] + content[match.end():]
+        return facts, cleaned_content.strip()
+    
+    json_pattern_short = r"\{\s*[\"а-яА-Яa-zA-Z].*\}"
     for line in content.split("\n"):
-        if re.match(json_pattern_short, line.strip()):
-            return line.strip()
+        stripped = line.strip()
+        if re.match(json_pattern_short, stripped) and ":" in stripped:
+            facts = stripped
+            cleaned_content = content.replace(line, "").strip()
+            return facts, cleaned_content
 
-    return None
+    return None, cleaned_content
 
 
 @admin_bp.route("/")
@@ -196,17 +203,21 @@ def chat():
 
     session.add_assistant_message(response.content, response.usage, debug=debug_info, model=response.model)
 
+    message_for_user = response.content
+    
     if session.user_settings.get("context_optimization") == "sticky_notes":
-        facts_json = extract_facts_from_response(response.content)
+        facts_json, cleaned_content = extract_facts_from_response(response.content)
         if facts_json:
             session.update_facts(facts_json)
+        if cleaned_content:
+            message_for_user = cleaned_content
 
     session_manager.save_session(session_id)
 
     disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
 
     result = {
-        "message": response.content,
+        "message": message_for_user,
         "session_id": session_id,
         "model": response.model,
         "usage": response.usage,
@@ -376,15 +387,19 @@ def chat_stream():
                 session.add_user_message(user_msg_for_llm)
             session.add_assistant_message(full_content, total_usage, debug=debug_info, model=provider.model)
 
+            content_for_user = full_content
+            
             if session.user_settings.get("context_optimization") == "sticky_notes":
-                facts_json = extract_facts_from_response(full_content)
+                facts_json, cleaned_content = extract_facts_from_response(full_content)
                 if facts_json:
                     session.update_facts(facts_json)
+                if cleaned_content:
+                    content_for_user = cleaned_content
 
             session_manager.save_session(session_id)
 
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
-            yield f"data: {json.dumps({'content': full_content, 'done': True, 'usage': total_usage, 'debug': {'request': debug_request, 'response': debug_response}, 'disabled_indices': disabled_indices})}\n\n"
+            yield f"data: {json.dumps({'content': content_for_user, 'done': True, 'usage': total_usage, 'debug': {'request': debug_request, 'response': debug_response}, 'disabled_indices': disabled_indices})}\n\n"
 
         except ContextLengthExceededError as e:
             session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
