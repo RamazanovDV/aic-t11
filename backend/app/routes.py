@@ -231,8 +231,10 @@ def chat():
     
     if debug_info:
         result["debug"] = debug_info
-    elif session.user_settings.get("context_optimization") == "sticky_notes" and session.facts:
-        result["debug"] = {"facts": session.facts}
+    if session.user_settings.get("context_optimization") == "sticky_notes" and session.facts:
+        if "debug" not in result:
+            result["debug"] = {}
+        result["debug"]["facts"] = session.facts
     
     return jsonify(result)
 
