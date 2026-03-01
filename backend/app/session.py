@@ -344,7 +344,8 @@ class Session:
         current_messages = self.get_current_branch_messages()
         
         summary = None
-        if current_messages:
+        user_messages = [m for m in current_messages if m.role == "user"]
+        if len(user_messages) >= 2:
             try:
                 summary, _ = summarizer.summarize_messages(current_messages)
             except Exception as e:
@@ -516,7 +517,6 @@ class Session:
 
             other_branches = [b for b in self.branches 
                             if b.parent_branch == parent_branch_id 
-                            and b.parent_checkpoint is None
                             and b.id != "main"]
             for b in other_branches:
                 result.append({

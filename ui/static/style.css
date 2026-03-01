@@ -134,6 +134,16 @@ body {
     border-bottom: 1px solid var(--border);
 }
 
+.branch-select {
+    padding: 0.3rem 0.6rem;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    min-width: 100px;
+}
+
 .branch-name {
     padding: 0.3rem 0.6rem;
     background: var(--bg-tertiary);
@@ -147,16 +157,6 @@ body {
 .branch-name:hover {
     background: var(--bg-hover);
     border-color: var(--accent);
-}
-
-.branch-select {
-    padding: 0.3rem 0.6rem;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 0.8rem;
-    min-width: 100px;
 }
 
 .panel-label {
