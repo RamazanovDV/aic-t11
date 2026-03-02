@@ -32,4 +32,4 @@ summarizer:
   prompt_source: "SUMMARIZER.md"
 
 storage:
-  data_dir: "/home/eof/dev/aic/t6/data"
+  data_dir: "/home/eof/dev/aic/synth/data"

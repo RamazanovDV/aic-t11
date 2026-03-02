@@ -2,22 +2,22 @@
 
 ## Project Overview
 
-T6 is an AI agent with web interface and CLI. Backend is Flask (port 5000), UI is Flask + htmx (port 5001), CLI is Click-based.
+Synth is a multi-user AI agent with web interface and CLI. Backend is Flask (port 5000), UI is Flask + htmx (port 5001), CLI is Click-based.
 
 ## Project Structure
 
 ```
-t6/
-├── backend/           # Flask API
+synth/
+├── synth/              # Flask API
 │   ├── app/           # routes.py, config.py, session.py, storage.py, context.py, llm/
 │   ├── requirements.txt
 │   ├── config.yaml    # (gitignored)
 │   └── run.py
-├── ui/                # Flask + htmx web UI
+├── synth-ui/          # Flask + htmx web UI
 │   ├── app.py
 │   ├── static/, templates/
 │   └── requirements.txt
-├── cli/               # Click-based CLI
+├── synth-cli/         # Click-based CLI
 │   └── main.py
 ├── context/           # Markdown files for system prompt
 └── data/              # Session data (gitignored)
@@ -28,26 +28,26 @@ t6/
 ### Setup
 ```bash
 # All components
-for dir in backend ui cli; do
+for dir in synth synth-ui synth-cli; do
   cd $dir && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt && cd ..
 done
 
 # Copy config examples and edit with your API keys
-cp backend/config.example.yaml backend/config.yaml
-cp ui/config.example.yaml ui/config.yaml
-cp cli/config.example.yaml cli/config.yaml
+cp synth/config.example.yaml synth/config.yaml
+cp synth-ui/config.example.yaml synth-ui/config.yaml
+cp synth-cli/config.example.yaml synth-cli/config.yaml
 ```
 
 ### Running
 ```bash
 # Backend (port 5000)
-cd backend && source venv/bin/activate && python run.py
+cd synth && source venv/bin/activate && python run.py
 
 # UI (port 5001) - separate terminal
-cd ui && source venv/bin/activate && python run.py
+cd synth-ui && source venv/bin/activate && python run.py
 
 # CLI
-cd cli && source venv/bin/activate
+cd synth-cli && source venv/bin/activate
 python main.py chat "Hello"
 python main.py session list
 python main.py health
@@ -59,14 +59,14 @@ python main.py health
 pytest
 
 # Run tests for specific component
-cd backend && pytest
-cd ui && pytest
+cd synth && pytest
+cd synth-ui && pytest
 
 # Run single test file
-pytest backend/tests/test_session.py
+pytest synth/tests/test_session.py
 
 # Run specific test function
-pytest backend/tests/test_session.py::test_get_messages_for_llm
+pytest synth/tests/test_session.py::test_get_messages_for_llm
 
 # Run tests matching pattern
 pytest -k "test_name"
@@ -78,7 +78,7 @@ pytest -v
 pytest --tb=short
 ```
 
-Tests should be placed in `tests/` directories within each component (e.g., `backend/tests/`, `ui/tests/`).
+Tests should be placed in `tests/` directories within each component (e.g., `synth/tests/`, `synth-ui/tests/`).
 
 ### Linting & Formatting
 ```bash
@@ -88,7 +88,7 @@ black .                # Format
 mypy .                 # Type check
 
 # Lint specific file
-ruff check backend/app/routes.py
+ruff check synth/app/routes.py
 ```
 
 ## Code Style
@@ -157,7 +157,7 @@ def chat():
 import click
 
 @click.group()
-def cli(): """T6 CLI""" pass
+def cli(): """Synth CLI""" pass
 
 @cli.command()
 @click.argument("message")
@@ -195,7 +195,7 @@ async function loadPanelMessages(panelIndex) {
 
 ## Context Optimization
 
-T6 supports several context optimization strategies:
+Synth supports several context optimization strategies:
 
 1. **none** - No optimization, all messages sent to LLM
 2. **summarization** - Compresses old messages into summaries
@@ -225,7 +225,7 @@ The UI includes a debug toggle to view raw LLM requests/responses. Debug data is
 
 ## Common Tasks
 
-**Add LLM Provider** - Add to `backend/config.yaml`:
+**Add LLM Provider** - Add to `synth/config.yaml`:
 ```yaml
 llm:
   providers:
@@ -235,7 +235,7 @@ llm:
       model: "model-name"
 ```
 
-**Add API Endpoint** - Add route in `backend/app/routes.py`, use `@require_auth` if needed, return JSON.
+**Add API Endpoint** - Add route in `synth/app/routes.py`, use `@require_auth` if needed, return JSON.
 
 **Add Context File** - Create `.md` file in `data/context/`, enable in admin panel.
 
