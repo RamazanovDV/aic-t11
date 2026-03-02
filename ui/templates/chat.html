@@ -614,6 +614,8 @@
             
             panel.messages = data.messages || [];
             
+            console.log('Loaded messages, first with debug:', data.messages.filter(m => m.debug).length);
+            
             const container = panel.messagesContainer;
             if (!container) return;
             
@@ -724,8 +726,8 @@
         
         // 3. Debug (bottom-left)
         if ((role === 'assistant' || role === 'error' || role === 'summary') && debugData) {
-            const debugJson = JSON.stringify(debugData).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
-            actionsHtml += `<button class="message-debug-btn" data-debug='${debugJson}' title="Debug">🔍</button>`;
+            const debugJson = JSON.stringify(debugData).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/'/g, "\\'");
+            actionsHtml += `<button class="message-debug-btn" data-debug="${debugJson}" title="Debug">🔍</button>`;
         }
         
         // 4. Delete (bottom-right)
