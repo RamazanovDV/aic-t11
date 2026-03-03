@@ -644,7 +644,7 @@ def chat():
             "response": response.debug_response,
         }
 
-    session.add_assistant_message(response.content, response.usage, debug=debug_info, model=response.model)
+    session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model)
 
     session_manager.save_session(session_id)
 
@@ -866,7 +866,7 @@ def chat_stream():
             if needs_summarization:
                 # При суммаризации user message ещё не был добавлен
                 session.add_user_message(user_msg_for_llm, source=source)
-            session.add_assistant_message(full_content, total_usage, debug=debug_info, model=provider.model)
+            session.add_assistant_message(content_for_user, total_usage, debug=debug_info, model=provider.model)
 
             session_manager.save_session(session_id)
 
