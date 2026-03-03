@@ -36,6 +36,7 @@ class FileStorage:
                     "created_at": m.created_at.isoformat(),
                     "disabled": m.disabled,
                     "branch_id": m.branch_id,
+                    "source": m.source,
                 }
                 for m in session.messages
             ],

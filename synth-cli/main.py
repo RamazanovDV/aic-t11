@@ -135,7 +135,7 @@ def send_chat(message: str, provider: str | None, session_id: str):
     headers = get_headers()
     headers["X-Session-Id"] = session_id
     
-    payload = {"message": message}
+    payload = {"message": message, "source": "cli", "username": "cli"}
     if provider:
         payload["provider"] = provider
 

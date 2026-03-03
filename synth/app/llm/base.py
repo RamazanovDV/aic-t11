@@ -15,6 +15,7 @@ class Message:
     created_at: datetime = field(default_factory=datetime.now)
     disabled: bool = False
     branch_id: str = "main"
+    source: str | None = None
 
 
 @dataclass

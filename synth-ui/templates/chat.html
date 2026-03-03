@@ -379,9 +379,12 @@
             messageInput.disabled = true;
             sendBtn.textContent = 'Стоп';
 
+            const currentUser = getUser();
+            const username = currentUser ? currentUser.username : 'unknown';
+            
             panels.forEach((panel, idx) => {
                 const userMsgIndex = panel.messages.length;
-                addMessageToPanel(idx, message, 'user', null, null, null, false, userMsgIndex);
+                addMessageToPanel(idx, message, 'user', null, null, null, false, userMsgIndex, username + ' | web');
             });
 
             const messageText = message;
@@ -632,7 +635,7 @@
             panel.totalTokens = 0;
             
             panel.messages.forEach((msg, idx) => {
-                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx);
+                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null);
                 panel.messages[idx]._renderIndex = idx;
                 if (msg.usage && msg.role !== 'note' && msg.role !== 'info') {
                     panel.totalInput += msg.usage.input_tokens || 0;
@@ -649,7 +652,7 @@
         }
     }
 
-    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1) {
+    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null) {
         const panel = panels[panelIndex];
         const container = panel.messagesContainer;
         if (!container) return;
@@ -692,9 +695,18 @@
             }
         }
         
+        let sourceHtml = '';
+        if (role === 'user' && source) {
+            const username = source.split(' | ')[0];
+            sourceHtml = `<div class="message-tokens" style="cursor: pointer;" onclick="openProfileModal('${username}')">${source}</div>`;
+        }
+        
         let html = contentHtml;
         if (tokensHtml) {
             html += tokensHtml;
+        }
+        if (sourceHtml) {
+            html += sourceHtml;
         }
         div.innerHTML = html;
         rowDiv.appendChild(div);
@@ -926,7 +938,7 @@
                     'X-User-Id': user ? user.id : '',
                 },
                 signal: panel.abortController ? panel.abortController.signal : null,
-                body: JSON.stringify({ message, provider, model, debug: debugMode })
+                body: JSON.stringify({ message, provider, model, debug: debugMode, source: 'web' })
             });
 
             if (response.status === 401) {
@@ -978,7 +990,7 @@
                     'X-User-Id': user ? user.id : '',
                 },
                 signal: panel.abortController ? panel.abortController.signal : null,
-                body: JSON.stringify({ message, provider, model, debug: debugMode })
+                body: JSON.stringify({ message, provider, model, debug: debugMode, source: 'web' })
             });
 
             if (response.status === 401) {

@@ -16,7 +16,7 @@
             <h1 class="logo">Synth UI</h1>
             <div class="header-controls">
                 <span id="user-info" class="user-info" style="display: none;">
-                    <span id="username"></span>
+                    <span id="username" style="cursor: pointer;" onclick="openProfileModal()"></span>
                 </span>
                 <button class="btn btn-small" id="login-btn" onclick="showLogin()">Войти</button>
                 <button class="btn btn-small" id="logout-btn" onclick="logout()" style="display: none;">Выйти</button>
@@ -344,6 +344,146 @@
                     status.title = 'Бэкенд недоступен';
                 });
         });
+
+        async function openProfileModal(usernameToView = null) {
+            const currentUser = getUser();
+            const isOwnProfile = !usernameToView || usernameToView === (currentUser ? currentUser.username : null);
+            
+            try {
+                let user;
+                if (isOwnProfile) {
+                    const response = await fetch('/api/profile');
+                    if (!response.ok) throw new Error('Failed to load profile');
+                    user = await response.json();
+                } else {
+                    const response = await fetch('/api/users/by-username/' + encodeURIComponent(usernameToView));
+                    if (!response.ok) throw new Error('User not found');
+                    user = await response.json();
+                }
+                
+                const roleLabels = { 'user': 'Пользователь', 'admin': 'Администратор', 'viewer': 'Наблюдатель' };
+                const teamRoleLabels = {
+                    'developer': 'Разработчик', 'devops': 'DevOps', 'analyst': 'Аналитик',
+                    'security': 'Безопасность', 'qa': 'QA', 'admin_team': 'Админ команды',
+                    'manager': 'Менеджер', 'other': 'Другое'
+                };
+                const roleColors = { 'admin': '#e74c3c', 'user': '#3498db', 'viewer': '#95a5a6' };
+                const statusColor = user.is_active ? '#27ae60' : '#e74c3c';
+                const statusText = user.is_active ? 'Активен' : 'Неактивен';
+                
+                const html = `
+                    <div id="profile-modal" class="modal" onclick="if(event.target === this) closeProfileModal()">
+                        <div class="modal-content profile-modal-content">
+                            <button class="modal-close" onclick="closeProfileModal()">×</button>
+                            <div class="profile-header">
+                                <div class="profile-avatar">${user.username.charAt(0).toUpperCase()}</div>
+                                <div class="profile-title">
+                                    <h3>${escapeHtml(user.username)}</h3>
+                                    <span class="profile-role" style="background: ${roleColors[user.role] || '#3498db'}">${roleLabels[user.role] || user.role}</span>
+                                </div>
+                            </div>
+                            <div class="profile-body">
+                                <div class="profile-section">
+                                    <div class="profile-field">
+                                        <span class="profile-field-icon">📧</span>
+                                        <div class="profile-field-content">
+                                            <label>Email</label>
+                                            ${isOwnProfile 
+                                                ? `<input type="email" id="profile-email" class="form-input" value="${escapeHtml(user.email || '')}">`
+                                                : `<span class="profile-field-value">${escapeHtml(user.email || 'Не указан')}</span>`
+                                            }
+                                        </div>
+                                    </div>
+                                    <div class="profile-field">
+                                        <span class="profile-field-icon">👥</span>
+                                        <div class="profile-field-content">
+                                            <label>Роль в команде</label>
+                                            ${isOwnProfile
+                                                ? `<select id="profile-team-role" class="form-input">
+                                                    ${Object.entries(teamRoleLabels).map(([k, v]) => `<option value="${k}" ${user.team_role === k ? 'selected' : ''}>${v}</option>`).join('')}
+                                                   </select>`
+                                                : `<span class="profile-field-value">${teamRoleLabels[user.team_role] || user.team_role || 'Не указана'}</span>`
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="profile-section">
+                                    <div class="profile-field">
+                                        <span class="profile-field-icon">📝</span>
+                                        <div class="profile-field-content">
+                                            <label>Заметки</label>
+                                            ${isOwnProfile
+                                                ? `<textarea id="profile-notes" class="form-input" rows="3">${escapeHtml(user.notes || '')}</textarea>`
+                                                : `<span class="profile-field-value profile-notes-text">${escapeHtml(user.notes || 'Нет заметок')}</span>`
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                                ${!isOwnProfile ? `
+                                <div class="profile-section profile-info-section">
+                                    <div class="profile-status-row">
+                                        <span class="status-indicator" style="background: ${statusColor}"></span>
+                                        <span>${statusText}</span>
+                                    </div>
+                                    <div class="profile-status-row">
+                                        <span class="status-indicator" style="background: ${user.interview_completed ? '#27ae60' : '#e74c3c'}"></span>
+                                        <span>${user.interview_completed ? 'Прошёл интервью' : 'Не прошёл интервью'}</span>
+                                    </div>
+                                </div>
+                                ` : ''}
+                            </div>
+                            <div class="modal-actions profile-actions">
+                                ${isOwnProfile ? `
+                                    <button class="btn btn-secondary" onclick="closeProfileModal()">Отмена</button>
+                                    <button class="btn btn-primary" onclick="saveProfile()">Сохранить</button>
+                                ` : `
+                                    <button class="btn btn-secondary" onclick="closeProfileModal()">Закрыть</button>
+                                `}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                const existingModal = document.getElementById('profile-modal');
+                if (existingModal) existingModal.remove();
+                
+                document.body.insertAdjacentHTML('beforeend', html);
+                document.getElementById('profile-modal').style.display = 'flex';
+            } catch (e) {
+                alert('Ошибка: ' + e.message);
+            }
+        }
+
+        function closeProfileModal() {
+            const modal = document.getElementById('profile-modal');
+            if (modal) modal.remove();
+        }
+
+        async function saveProfile() {
+            const email = document.getElementById('profile-email').value;
+            const team_role = document.getElementById('profile-team-role').value;
+            const notes = document.getElementById('profile-notes').value;
+            
+            try {
+                const response = await fetch('/api/profile', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, team_role, notes })
+                });
+                
+                if (!response.ok) throw new Error('Failed to save');
+                
+                closeProfileModal();
+                alert('Профиль сохранён');
+            } catch (e) {
+                alert('Ошибка сохранения: ' + e.message);
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
     </script>
 </body>
 </html>

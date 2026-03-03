@@ -295,6 +295,90 @@ def reset_password(user_id):
     })
 
 
+@api_bp.route("/profile", methods=["GET"])
+@require_user
+def get_profile():
+    """Получить профиль текущего пользователя"""
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({"error": "User not found"}), 404
+    
+    return jsonify({
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "role": current_user.role,
+        "team_role": current_user.team_role,
+        "preferences": current_user.preferences,
+        "notes": current_user.notes,
+        "interview_completed": current_user.interview_completed,
+        "is_active": current_user.is_active,
+        "created_at": current_user.created_at.isoformat(),
+        "last_login": current_user.last_login.isoformat() if current_user.last_login else None,
+    })
+
+
+@api_bp.route("/profile", methods=["PUT"])
+@require_user
+def update_profile():
+    """Обновить профиль текущего пользователя"""
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({"error": "User not found"}), 404
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    from app.storage import storage
+    
+    if "email" in data:
+        current_user.email = data["email"]
+    if "team_role" in data:
+        current_user.team_role = data["team_role"]
+    if "notes" in data:
+        current_user.notes = data["notes"]
+    if "preferences" in data:
+        current_user.preferences = data["preferences"]
+    
+    storage.save_user(current_user)
+    
+    return jsonify({
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "role": current_user.role,
+        "team_role": current_user.team_role,
+        "preferences": current_user.preferences,
+        "notes": current_user.notes,
+        "interview_completed": current_user.interview_completed,
+        "is_active": current_user.is_active,
+    })
+
+
+@api_bp.route("/users/by-username/<username>", methods=["GET"])
+@require_user
+def get_user_by_username(username):
+    """Получить пользователя по username (для просмотра профилей других пользователей)"""
+    from app.storage import storage
+    user = storage.get_user_by_username(username)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    
+    return jsonify({
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "role": user.role,
+        "team_role": user.team_role,
+        "notes": user.notes,
+        "interview_completed": user.interview_completed,
+        "is_active": user.is_active,
+        "created_at": user.created_at.isoformat(),
+        "last_login": user.last_login.isoformat() if user.last_login else None,
+    })
+
+
 @api_bp.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
@@ -405,6 +489,14 @@ def chat():
     provider_name = data.get("provider")
     model = data.get("model")
     debug_mode = data.get("debug", False)
+    source_type = data.get("source", "web")
+    
+    current_user = get_current_user()
+    if current_user:
+        username = current_user.username
+    else:
+        username = data.get("username", "unknown")
+    source = f"{username} | {source_type}"
     
     if not provider_name:
         provider_name = config.default_provider
@@ -436,7 +528,7 @@ def chat():
     session = session_manager.get_session(session_id)
 
     current_count = session.get_active_message_count()
-    session.add_user_message(user_message)
+    session.add_user_message(user_message, source=source)
 
     should_summarize_result, summarize_reason = summarizer.should_summarize(session, current_count)
     if should_summarize_result:
@@ -550,6 +642,14 @@ def chat_stream():
     provider_name = data.get("provider")
     model = data.get("model")
     debug_mode = data.get("debug", False)
+    source_type = data.get("source", "web")
+    
+    current_user = get_current_user()
+    if current_user:
+        username = current_user.username
+    else:
+        username = data.get("username", "unknown")
+    source = f"{username} | {source_type}"
 
     if not provider_name:
         provider_name = config.default_provider
@@ -623,7 +723,7 @@ def chat_stream():
                     return
         else:
             # Без суммаризации - добавляем user message в сессию сейчас
-            session.add_user_message(user_message)
+            session.add_user_message(user_message, source=source)
 
         if provider_name and model:
             session.set_provider_model(provider_name, model)
@@ -722,7 +822,7 @@ def chat_stream():
             # Сохраняем сообщения в сессию
             if needs_summarization:
                 # При суммаризации user message ещё не был добавлен
-                session.add_user_message(user_msg_for_llm)
+                session.add_user_message(user_msg_for_llm, source=source)
             session.add_assistant_message(full_content, total_usage, debug=debug_info, model=provider.model)
 
             session_manager.save_session(session_id)
@@ -794,6 +894,7 @@ def get_session(session_id: str):
             "summary_of": m.summary_of,
             "created_at": m.created_at.isoformat(),
             "disabled": m.disabled,
+            "source": m.source,
         }
         for m in current_branch_messages
     ]

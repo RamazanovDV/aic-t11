@@ -85,8 +85,8 @@ class Session:
         if self.current_branch not in [b.id for b in self.branches]:
             self.current_branch = "main"
 
-    def add_user_message(self, content: str, usage: dict[str, int] | None = None) -> None:
-        msg = Message(role="user", content=content, usage=usage or {}, branch_id=self.current_branch)
+    def add_user_message(self, content: str, usage: dict[str, int] | None = None, source: str | None = None) -> None:
+        msg = Message(role="user", content=content, usage=usage or {}, branch_id=self.current_branch, source=source)
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
@@ -687,6 +687,7 @@ class SessionManager:
                         created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
                         disabled=m.get("disabled", False),
                         branch_id=m.get("branch_id", "main"),
+                        source=m.get("source"),
                     ))
 
                 branches = [

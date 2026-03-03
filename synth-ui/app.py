@@ -210,6 +210,50 @@ def health():
         return jsonify({"status": "ok", "backend": "disconnected"})
 
 
+@ui_bp.route("/api/profile", methods=["GET"])
+def get_profile():
+    url = f"{ui_config.backend_url}/api/profile"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/profile", methods=["PUT"])
+def update_profile():
+    url = f"{ui_config.backend_url}/api/profile"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+    data = request.get_json()
+    try:
+        response = requests.put(url, headers=headers, json=data, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/users/by-username/<username>", methods=["GET"])
+def get_user_by_username(username):
+    url = f"{ui_config.backend_url}/api/users/by-username/{username}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/config", methods=["GET"])
 def get_config():
     url = f"{ui_config.backend_url}/api/config"
