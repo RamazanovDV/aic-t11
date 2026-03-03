@@ -326,8 +326,8 @@ body {
 }
 
 .debug-modal-content {
-    width: 800px;
-    max-width: 90vw;
+    width: 1200px;
+    max-width: 95vw;
 }
 
 .debug-tabs {

@@ -69,7 +69,7 @@ class FileStorage:
                 for cp in session.checkpoints
             ],
             "current_branch": session.current_branch,
-            "facts": session.facts,
+            "status": session.status,
             "owner_id": session.owner_id,
             "access": session.access,
         }

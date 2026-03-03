@@ -10,6 +10,9 @@ from app.llm import ProviderFactory
 from app.llm.providers import ContextLengthExceededError
 from app.session import session_manager
 from app import summarizer
+from app import status_validator
+from app import project_manager
+from app import storage
 from app.auth import get_auth_provider, require_user, require_admin, get_current_user
 
 api_bp = Blueprint("api", __name__)
@@ -17,44 +20,77 @@ admin_bp = Blueprint("admin", __name__)
 auth_bp = Blueprint("auth", __name__)
 
 
-def get_sticky_notes_prompt(facts: dict[str, str]) -> str:
-    """Сформировать промпт с фактами для sticky notes"""
-    facts_extraction = config.get_context_file("FACTS_EXTRACTION.md") or ""
+def get_profile_prompt(session) -> str:
+    """Сформировать промпт с данными профиля пользователя"""
+    user = None
     
-    result = ""
+    if session and session.owner_id:
+        from app import storage as app_storage
+        user = app_storage.storage.load_user(session.owner_id)
     
-    if facts_extraction:
-        result += f"\n\n{facts_extraction}\n"
+    if not user:
+        try:
+            user = get_current_user()
+        except Exception:
+            user = None
     
-    if facts:
-        facts_text = "\nИзвлеченные ранее факты:\n"
-        for key, value in facts.items():
-            facts_text += f"- {key}: {value}\n"
-        result += facts_text
+    if not user:
+        return ""
+    
+    parts = []
+    if user.username:
+        parts.append(f"Имя: {user.username}")
+    if user.team_role:
+        parts.append(f"Роль: {user.team_role}")
+    if user.notes:
+        parts.append(f"Отметки: {user.notes}")
+    
+    if parts:
+        return f"\n\n[ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ]\n" + "\n".join(parts) + "\n"
+    
+    return ""
+
+
+def get_project_prompt(session) -> str:
+    """Сформировать промпт с данными проекта"""
+    project_name = session.status.get("project")
+    
+    if not project_name:
+        projects_list = project_manager.project_manager.get_projects_list()
+        projects_text = ", ".join(projects_list) if projects_list else "пока нет проектов"
+        
+        new_project_prompt = config.get_context_file("NEW_PROJECT.md") or "Если пользователь хочет начать новый проект - уточни название, укажи полученное название в поле project."
+        
+        return (
+            f"\n\n[ПРОЕКТ]\n"
+            f"Выясни у пользователя над каким проектом он хочет поработать.\n"
+            f"Существующие проекты: {projects_text}\n"
+            f"{new_project_prompt}\n"
+        )
+    
+    if not project_manager.project_manager.project_exists(project_name):
+        project_manager.project_manager.create_project(project_name)
+    
+    project_info = project_manager.project_manager.get_project_info(project_name)
+    current_task = project_manager.project_manager.get_current_task(project_name)
+    
+    result = f"\n\n[ПРОЕКТ: {project_name}]\n"
+    
+    if project_info:
+        result += f"{project_info}\n"
+    else:
+        result += "(Описание проекта отсутствует)\n"
+    
+    if current_task:
+        result += f"\n[ТЕКУЩАЯ ЗАДАЧА]\n{current_task}\n"
     
     return result
 
 
-def extract_facts_from_response(content: str) -> tuple[str | None, str]:
-    """Извлечь JSON с фактами из ответа модели и очистить контент от JSON блока"""
-    cleaned_content = content
-    
-    json_pattern = r"```json\s*([\s\S]*?)\s*```"
-    match = re.search(json_pattern, content)
-    if match:
-        facts = match.group(1).strip()
-        cleaned_content = content[:match.start()] + content[match.end():]
-        return facts, cleaned_content.strip()
-    
-    json_pattern_short = r"\{\s*[\"а-яА-Яa-zA-Z].*\}"
-    for line in content.split("\n"):
-        stripped = line.strip()
-        if re.match(json_pattern_short, stripped) and ":" in stripped:
-            facts = stripped
-            cleaned_content = content.replace(line, "").strip()
-            return facts, cleaned_content
-
-    return None, cleaned_content
+def get_status_prompt() -> str:
+    """Сформировать промпт с инструкцией по статусу задачи"""
+    status_prompt = config.get_context_file("STATUS.md") or ""
+    return status_prompt
 
 
 @admin_bp.route("/")
@@ -283,6 +319,77 @@ def add_note():
     })
 
 
+def _process_status_block(
+    provider,
+    llm_messages: list,
+    system_prompt: str,
+    session,
+    session_id: str,
+    debug_mode: bool,
+    max_retries: int = 3,
+):
+    """Обработать ответ LLM с валидацией статуса.
+    
+    Returns:
+        tuple: (response, message_for_user, status_error)
+            - response: LLMResponse
+            - message_for_user: очищенный контент без JSON блока
+            - status_error: строка с ошибкой если все попытки неудачны
+    """
+    status_reminder = (
+        "\n\nВАЖНО: Ты ОБЯЗАН добавить JSON-блок со статусом задачи в конце ответа! "
+        "Формат: {\"status\": {\"task_name\": \"...\", \"state\": \"...\", \"progress\": \"...\", "
+        "\"project\": \"название_проекта\", \"updated_project_info\": \"...\", \"current_task_info\": \"...\", "
+        "\"approved_plan\": \"...\", \"already_done\": \"...\", \"currently_doing\": \"...\"}}"
+    )
+
+    for attempt in range(max_retries):
+        try:
+            prompt_with_reminder = system_prompt + status_reminder if attempt > 0 else system_prompt
+            response = provider.chat(llm_messages, prompt_with_reminder, debug=debug_mode)
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            continue
+
+        parsed_status, cleaned_content = status_validator.validate_status_block(response.content)
+
+        if parsed_status:
+            session.update_status(parsed_status)
+            
+            _handle_project_updates(session)
+            
+            return response, cleaned_content, None
+
+        if attempt < max_retries - 1:
+            llm_messages = session.get_messages_for_llm()
+            llm_messages.append(
+                {"role": "user", "content": "Пожалуйста, добавь в конце своего ответа JSON-блок со статусом задачи в формате: {\"status\": {\"task_name\": \"название\", \"state\": \"состояние\", \"progress\": \"прогресс\", \"project\": \"проект\", \"updated_project_info\": \"обновлённое описание проекта\", \"current_task_info\": \"текущая задача\", \"approved_plan\": \"план\", \"already_done\": \"сделано\", \"currently_doing\": \"текущее\"}}"}
+            )
+
+    return response, response.content, "Модель не формирует блок статуса в ответе"
+
+
+def _handle_project_updates(session) -> None:
+    """Обработать обновления проекта из статуса"""
+    status = session.status
+    
+    project_name = status.get("project")
+    if not project_name:
+        return
+    
+    if not project_manager.project_manager.project_exists(project_name):
+        project_manager.project_manager.create_project(project_name)
+    
+    updated_info = status.get("updated_project_info")
+    if updated_info:
+        project_manager.project_manager.update_project_info(project_name, updated_info)
+    
+    current_task = status.get("current_task_info")
+    if current_task:
+        project_manager.project_manager.save_current_task(project_name, current_task)
+
+
 @api_bp.route("/chat", methods=["POST"])
 @require_auth
 def chat():
@@ -350,14 +457,39 @@ def chat():
         session.set_provider_model(provider_name, config.get_default_model(provider_name))
 
     system_prompt = get_system_prompt()
-
-    if session.user_settings.get("context_optimization") == "sticky_notes":
-        system_prompt += get_sticky_notes_prompt(session.facts)
+    system_prompt += get_profile_prompt(session)
+    system_prompt += get_project_prompt(session)
+    system_prompt += get_status_prompt()
 
     try:
         llm_messages = session.get_messages_for_llm()
         session_manager.save_session(session_id)
-        response = provider.chat(llm_messages, system_prompt, debug=debug_mode)
+    except ContextLengthExceededError as e:
+        session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
+        session_manager.save_session(session_id)
+        result = {"error": str(e), "error_type": "context_length_exceeded", "model": provider.model}
+        if debug_mode and e.debug_response:
+            result["debug"] = {"response": e.debug_response}
+        return jsonify(result), 400
+    except Exception as e:
+        session.add_error_message(f"[Ошибка] {str(e)}", None, model=provider.model)
+        session_manager.save_session(session_id)
+        result = {"error": f"LLM error: {str(e)}", "model": provider.model}
+        return jsonify(result), 500
+
+    try:
+        response, message_for_user, status_error = _process_status_block(
+            provider, llm_messages, system_prompt, session, session_id, debug_mode
+        )
+        if status_error:
+            result = {
+                "error": status_error,
+                "model_error": status_error,
+                "model": provider.model,
+            }
+            if debug_mode:
+                result["debug"] = {"status_error": status_error}
+            return jsonify(result), 500
     except ContextLengthExceededError as e:
         session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
         session_manager.save_session(session_id)
@@ -380,22 +512,6 @@ def chat():
 
     session.add_assistant_message(response.content, response.usage, debug=debug_info, model=response.model)
 
-    message_for_user = response.content
-    
-    raw_facts = None
-    
-    if session.user_settings.get("context_optimization") == "sticky_notes":
-        facts_json, cleaned_content = extract_facts_from_response(response.content)
-        if facts_json:
-            raw_facts = facts_json
-            session.update_facts(facts_json)
-            if debug_info is None:
-                debug_info = {}
-            debug_info["raw_facts"] = facts_json
-            session.messages[-1].debug = debug_info
-        if cleaned_content:
-            message_for_user = cleaned_content
-
     session_manager.save_session(session_id)
 
     disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
@@ -411,13 +527,10 @@ def chat():
     
     if debug_info:
         result["debug"] = debug_info
-    if session.user_settings.get("context_optimization") == "sticky_notes":
+    if session.status:
         if "debug" not in result:
             result["debug"] = {}
-        if raw_facts:
-            result["debug"]["raw_facts"] = raw_facts
-        if session.facts:
-            result["debug"]["facts"] = session.facts
+        result["debug"]["status"] = session.status
     
     return jsonify(result)
 
@@ -512,9 +625,9 @@ def chat_stream():
             session.set_provider_model(provider_name, config.get_default_model(provider_name))
 
         system_prompt = get_system_prompt()
-
-        if session.user_settings.get("context_optimization") == "sticky_notes":
-            system_prompt += get_sticky_notes_prompt(session.facts)
+        system_prompt += get_profile_prompt(session)
+        system_prompt += get_project_prompt(session)
+        system_prompt += get_status_prompt()
 
         # Используем get_messages_for_llm() для поддержки скользящего окна
         llm_messages = session.get_messages_for_llm()
@@ -572,34 +685,49 @@ def chat_stream():
 
             debug_info = {"request": debug_request, "response": debug_response} if debug_mode else None
             
+            content_for_user = full_content
+            status_error = None
+
+            parsed_status, cleaned_content = status_validator.validate_status_block(full_content)
+            
+            if parsed_status:
+                session.update_status(parsed_status)
+                _handle_project_updates(session)
+                content_for_user = cleaned_content
+            else:
+                for retryAttempt in range(3):
+                        retry_msgs = session.get_messages_for_llm()
+                        retry_msgs.append(Message(role="user", content="Пожалуйста, добавь в конце своего ответа JSON-блок со статусом задачи в формате: {\"status\": {\"task_name\": \"название\", \"state\": \"состояние\", \"progress\": \"прогресс\", \"project\": \"проект\", \"updated_project_info\": \"обновлённое описание\", \"current_task_info\": \"текущая задача\", \"approved_plan\": \"план\", \"already_done\": \"сделано\", \"currently_doing\": \"текущее\"}}", usage={}))
+                        retry_system = system_prompt + "\n\nВАЖНО: Ты ОБЯЗАН добавить JSON-блок со статусом задачи в конце ответа!"
+                        
+                        try:
+                            retry_response = provider.chat(retry_msgs, retry_system, debug=debug_mode)
+                            retry_status, retry_cleaned = status_validator.validate_status_block(retry_response.content)
+                            
+                            if retry_status:
+                                session.update_status(retry_status)
+                                _handle_project_updates(session)
+                                content_for_user = retry_cleaned
+                                break
+                        except Exception:
+                            if retryAttempt == 2:
+                                status_error = "Модель не формирует блок статуса в ответе"
+            
             # Сохраняем сообщения в сессию
             if needs_summarization:
                 # При суммаризации user message ещё не был добавлен
                 session.add_user_message(user_msg_for_llm)
             session.add_assistant_message(full_content, total_usage, debug=debug_info, model=provider.model)
 
-            content_for_user = full_content
-            raw_facts = None
-            
-            if session.user_settings.get("context_optimization") == "sticky_notes":
-                facts_json, cleaned_content = extract_facts_from_response(full_content)
-                if facts_json:
-                    raw_facts = facts_json
-                    session.update_facts(facts_json)
-                    if session.messages:
-                        session.messages[-1].debug = {"raw_facts": facts_json}
-                if cleaned_content:
-                    content_for_user = cleaned_content
-
             session_manager.save_session(session_id)
 
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
             debug_data = {'request': debug_request, 'response': debug_response}
-            if session.user_settings.get("context_optimization") == "sticky_notes":
-                if raw_facts:
-                    debug_data['raw_facts'] = raw_facts
-                if session.facts:
-                    debug_data['facts'] = session.facts
+            if session.status:
+                debug_data['status'] = session.status
+            if status_error:
+                debug_data['status_error'] = status_error
+                
             yield f"data: {json.dumps({'content': content_for_user, 'done': True, 'usage': total_usage, 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
 
         except ContextLengthExceededError as e:
@@ -857,8 +985,6 @@ def get_context_settings(session_id: str):
     sliding_window_type = session.user_settings.get("sliding_window_type", "messages")
     sliding_window_limit = session.user_settings.get("sliding_window_limit", 10)
 
-    sticky_notes_limit = session.user_settings.get("sticky_notes_limit", 6)
-
     return jsonify({
         "context_optimization": optimization,
         "summarization_enabled": summarization_enabled,
@@ -867,7 +993,6 @@ def get_context_settings(session_id: str):
         "summarize_context_percent": summarize_context_percent,
         "sliding_window_type": sliding_window_type,
         "sliding_window_limit": sliding_window_limit,
-        "sticky_notes_limit": sticky_notes_limit,
         "default_interval": config.default_messages_interval,
     })
 
@@ -885,9 +1010,7 @@ def set_context_settings(session_id: str):
 
     if "context_optimization" in data:
         opt = data["context_optimization"]
-        if opt in ("none", "summarization", "sliding_window", "sticky_notes"):
-            if opt != "sticky_notes":
-                session.facts = {}
+        if opt in ("none", "summarization", "sliding_window"):
             session.user_settings["context_optimization"] = opt
 
     if "summarization_enabled" in data:
@@ -929,14 +1052,6 @@ def set_context_settings(session_id: str):
         if limit > 1000:
             limit = 1000
         session.user_settings["sliding_window_limit"] = limit
-
-    if "sticky_notes_limit" in data:
-        limit = int(data["sticky_notes_limit"])
-        if limit < 1:
-            limit = 1
-        if limit > 50:
-            limit = 50
-        session.user_settings["sticky_notes_limit"] = limit
 
     session_manager.save_session(session_id)
 

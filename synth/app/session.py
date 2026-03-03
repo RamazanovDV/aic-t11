@@ -6,6 +6,19 @@ from app.llm.base import Message
 from app.storage import storage
 
 
+def _clean_message_content(content: str) -> str:
+    """Удалить JSON-блок статуса из содержимого сообщения"""
+    if not content:
+        return content
+    
+    try:
+        from app import status_validator
+        _, cleaned = status_validator.validate_status_block(content)
+        return cleaned if cleaned else content
+    except Exception:
+        return content
+
+
 @dataclass
 class Checkpoint:
     id: str
@@ -40,7 +53,17 @@ class Session:
     branches: list[Branch] = field(default_factory=list)
     checkpoints: list[Checkpoint] = field(default_factory=list)
     current_branch: str = "main"
-    facts: dict[str, str] = field(default_factory=dict)
+    status: dict[str, Any] = field(default_factory=lambda: {
+        "task_name": "разговор на свободную тему",
+        "state": None,
+        "progress": None,
+        "project": None,
+        "updated_project_info": None,
+        "current_task_info": None,
+        "approved_plan": None,
+        "already_done": None,
+        "currently_doing": None
+    })
     owner_id: str | None = None
     access: str = "owner"
 
@@ -76,20 +99,25 @@ class Session:
             self.output_tokens += usage.get("output_tokens", 0)
         self.updated_at = datetime.now()
 
-    def update_facts(self, facts_text: str) -> None:
-        """Обновить facts из текста, полученного от модели"""
-        if not facts_text:
+    def update_status(self, status_data: dict[str, Any]) -> None:
+        """Обновить статус задачи из данных, полученных от модели"""
+        if not status_data:
             return
 
-        import json
+        valid_states = {"planning", "execution", "validation", "done"}
 
-        try:
-            facts_dict = json.loads(facts_text)
-            if isinstance(facts_dict, dict):
-                self.facts = facts_dict
-                self.updated_at = datetime.now()
-        except (json.JSONDecodeError, TypeError):
-            pass
+        self.status = {
+            "task_name": status_data.get("task_name", "разговор на свободную тему"),
+            "state": status_data.get("state") if status_data.get("state") in valid_states else None,
+            "progress": status_data.get("progress"),
+            "project": status_data.get("project"),
+            "updated_project_info": status_data.get("updated_project_info"),
+            "current_task_info": status_data.get("current_task_info"),
+            "approved_plan": status_data.get("approved_plan"),
+            "already_done": status_data.get("already_done"),
+            "currently_doing": status_data.get("currently_doing"),
+        }
+        self.updated_at = datetime.now()
 
     def add_error_message(self, content: str, debug: dict | None = None, model: str | None = None) -> None:
         msg = Message(role="error", content=content, usage={}, debug=debug, model=model, branch_id=self.current_branch)
@@ -644,10 +672,14 @@ class SessionManager:
             session_id = session_info["session_id"]
             data = storage.load_session(session_id)
             if data:
-                messages = [
-                    Message(
+                messages = []
+                for m in data.get("messages", []):
+                    content = m.get("content", "")
+                    if m.get("role") == "assistant":
+                        content = _clean_message_content(content)
+                    messages.append(Message(
                         role=m["role"],
-                        content=m["content"],
+                        content=content,
                         usage=m.get("usage", {}),
                         debug=m.get("debug"),
                         model=m.get("model"),
@@ -655,9 +687,7 @@ class SessionManager:
                         created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
                         disabled=m.get("disabled", False),
                         branch_id=m.get("branch_id", "main"),
-                    )
-                    for m in data.get("messages", [])
-                ]
+                    ))
 
                 branches = [
                     Branch(
@@ -696,7 +726,17 @@ class SessionManager:
                     branches=branches,
                     checkpoints=checkpoints,
                     current_branch=data.get("current_branch", "main"),
-                    facts=data.get("facts", {}),
+                    status=data.get("status", {
+                        "task_name": "разговор на свободную тему",
+                        "state": None,
+                        "progress": None,
+                        "project": None,
+                        "updated_project_info": None,
+                        "current_task_info": None,
+                        "approved_plan": None,
+                        "already_done": None,
+                        "currently_doing": None
+                    }),
                     owner_id=data.get("owner_id"),
                     access=data.get("access", "owner"),
                 )
@@ -801,7 +841,17 @@ class SessionManager:
                 branches=branches,
                 checkpoints=checkpoints,
                 current_branch=data.get("current_branch", "main"),
-                facts=data.get("facts", {}),
+                status=data.get("status", {
+                    "task_name": "разговор на свободную тему",
+                    "state": None,
+                    "progress": None,
+                    "project": None,
+                    "updated_project_info": None,
+                    "current_task_info": None,
+                    "approved_plan": None,
+                    "already_done": None,
+                    "currently_doing": None
+                }),
             )
             session._ensure_main_branch()
             self._sessions[session_id] = session
