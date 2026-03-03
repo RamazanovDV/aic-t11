@@ -62,7 +62,8 @@ class Session:
         "current_task_info": None,
         "approved_plan": None,
         "already_done": None,
-        "currently_doing": None
+        "currently_doing": None,
+        "user_info": None,
     })
     owner_id: str | None = None
     access: str = "owner"
@@ -116,6 +117,7 @@ class Session:
             "approved_plan": status_data.get("approved_plan"),
             "already_done": status_data.get("already_done"),
             "currently_doing": status_data.get("currently_doing"),
+            "user_info": status_data.get("user_info"),
         }
         self.updated_at = datetime.now()
 

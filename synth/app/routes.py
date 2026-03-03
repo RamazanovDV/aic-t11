@@ -20,6 +20,11 @@ admin_bp = Blueprint("admin", __name__)
 auth_bp = Blueprint("auth", __name__)
 
 
+def get_interview_prompt() -> str:
+    """Получить промт для интервью пользователя"""
+    return config.get_context_file("INTERVIEW.md") or ""
+
+
 def get_profile_prompt(session, user_id: str | None = None) -> str:
     """Сформировать промпт с данными профиля пользователя"""
     user = None
@@ -414,6 +419,7 @@ def _process_status_block(
     session,
     session_id: str,
     debug_mode: bool,
+    user_id: str | None = None,
     max_retries: int = 3,
 ):
     """Обработать ответ LLM с валидацией статуса.
@@ -447,6 +453,8 @@ def _process_status_block(
             
             _handle_project_updates(session)
             
+            _handle_user_info_update(parsed_status, user_id)
+            
             return response, cleaned_content, None
 
         if attempt < max_retries - 1:
@@ -456,6 +464,34 @@ def _process_status_block(
             )
 
     return response, response.content, "Модель не формирует блок статуса в ответе"
+
+
+def _handle_user_info_update(parsed_status: dict, user_id: str | None) -> None:
+    """Обработать обновление user_info из статуса и сохранить в профиль пользователя"""
+    user_info = parsed_status.get("user_info")
+    if not user_info or not user_id:
+        return
+    
+    try:
+        from app import storage as app_storage
+        user = app_storage.storage.load_user(user_id)
+        if not user:
+            return
+        
+        if user.interview_completed:
+            return
+        
+        existing_notes = user.notes or ""
+        if existing_notes:
+            new_notes = f"{existing_notes}\n\n[ИНТЕРВЬЮ]\n{user_info}"
+        else:
+            new_notes = f"[ИНТЕРВЬЮ]\n{user_info}"
+        
+        user.notes = new_notes
+        user.interview_completed = True
+        app_storage.storage.save_user(user)
+    except Exception as e:
+        pass
 
 
 def _handle_project_updates(session) -> None:
@@ -527,10 +563,10 @@ def chat():
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
 
-    current_count = session.get_active_message_count()
+    is_first_message = session.get_active_message_count() == 0
     session.add_user_message(user_message, source=source)
 
-    should_summarize_result, summarize_reason = summarizer.should_summarize(session, current_count)
+    should_summarize_result, summarize_reason = summarizer.should_summarize(session, session.get_active_message_count())
     if should_summarize_result:
         messages_to_summarize = session.get_messages_before_last_user()
         if messages_to_summarize:
@@ -556,6 +592,8 @@ def chat():
     system_prompt += get_profile_prompt(session, request.headers.get("X-User-Id"))
     system_prompt += get_project_prompt(session)
     system_prompt += get_status_prompt()
+    if is_first_message:
+        system_prompt += get_interview_prompt()
 
     try:
         llm_messages = session.get_messages_for_llm()
@@ -575,7 +613,7 @@ def chat():
 
     try:
         response, message_for_user, status_error = _process_status_block(
-            provider, llm_messages, system_prompt, session, session_id, debug_mode
+            provider, llm_messages, system_prompt, session, session_id, debug_mode, request.headers.get("X-User-Id")
         )
         if status_error:
             result = {
@@ -681,6 +719,7 @@ def chat_stream():
     session = session_manager.get_session(session_id)
 
     user_id = request.headers.get("X-User-Id")
+    is_first_message = session.get_active_message_count() == 0
 
     needs_summarization, summarize_reason = summarizer.should_summarize(session, 0)
 
@@ -734,6 +773,8 @@ def chat_stream():
         system_prompt += get_profile_prompt(session, user_id)
         system_prompt += get_project_prompt(session)
         system_prompt += get_status_prompt()
+        if is_first_message:
+            system_prompt += get_interview_prompt()
 
         # Используем get_messages_for_llm() для поддержки скользящего окна
         llm_messages = session.get_messages_for_llm()
@@ -799,6 +840,7 @@ def chat_stream():
             if parsed_status:
                 session.update_status(parsed_status)
                 _handle_project_updates(session)
+                _handle_user_info_update(parsed_status, user_id)
                 content_for_user = cleaned_content
             else:
                 for retryAttempt in range(3):
@@ -813,6 +855,7 @@ def chat_stream():
                             if retry_status:
                                 session.update_status(retry_status)
                                 _handle_project_updates(session)
+                                _handle_user_info_update(retry_status, user_id)
                                 content_for_user = retry_cleaned
                                 break
                         except Exception:
