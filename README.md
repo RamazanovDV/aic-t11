@@ -122,6 +122,78 @@ synth/
 └── README.md
 ```
 
+## API Endpoints
+
+### Chat
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/chat` | Send a message |
+| POST | `/api/chat/stream` | Stream response |
+| POST | `/api/chat/reset` | Reset session |
+
+### Sessions
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/sessions` | List all sessions |
+| POST | `/api/sessions` | Create session |
+| GET | `/api/sessions/<id>` | Get session |
+| DELETE | `/api/sessions/<id>` | Delete session |
+| POST | `/api/sessions/<id>/rename` | Rename session |
+| POST | `/api/sessions/<id>/copy` | Copy session |
+| POST | `/api/sessions/<id>/clear-debug` | Clear debug info |
+| POST | `/api/sessions/export` | Export session |
+| POST | `/api/sessions/import` | Import session |
+
+### Messages
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| DELETE | `/api/sessions/<id>/messages/<index>` | Delete message |
+| POST | `/api/sessions/<id>/messages/<index>/toggle` | Toggle message |
+
+### Context
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/sessions/<id>/context-settings` | Get context settings |
+| POST | `/api/sessions/<id>/context-settings` | Update context settings |
+| POST | `/api/sessions/<id>/summarize` | Summarize messages |
+
+### Checkpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/sessions/<id>/checkpoints` | List checkpoints |
+| POST | `/api/sessions/<id>/checkpoints` | Create checkpoint |
+| POST | `/api/sessions/<id>/checkpoints/<cp_id>/rename` | Rename checkpoint |
+| DELETE | `/api/sessions/<id>/checkpoints/<cp_id>` | Delete checkpoint |
+| POST | `/api/sessions/<id>/checkpoints/<cp_id>/branch` | Branch from checkpoint |
+
+### Branches
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/sessions/<id>/branches` | List branches |
+| POST | `/api/sessions/<id>/branches/<branch_id>/switch` | Switch branch |
+| POST | `/api/sessions/<id>/branches/<branch_id>/rename` | Rename branch |
+| DELETE | `/api/sessions/<id>/branches/<branch_id>` | Delete branch |
+| POST | `/api/sessions/<id>/branches/<branch_id>/reset` | Reset branch |
+| GET | `/api/sessions/<id>/tree` | Get session tree |
+
+### Admin
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/admin/config` | Get config |
+| POST | `/admin/config` | Update config |
+| POST | `/admin/config/validate` | Validate config |
+| GET | `/admin/providers/<name>/models` | Get provider models |
+| POST | `/admin/models/fetch` | Fetch models |
+| POST | `/admin/providers/fetch-models` | Fetch all models |
+| GET | `/admin/context` | List context files |
+| POST | `/admin/context` | Add context file |
+| POST | `/admin/context/enabled` | Toggle context |
+| GET/POST/DELETE | `/admin/context/<filename>` | Manage context file |
+| GET | `/admin/models` | List models |
+| GET | `/admin/models/available` | Available models |
+| POST | `/admin/models` | Add model |
+| DELETE | `/admin/models/<name>` | Delete model |
+
 ## Требования
 
 - Python 3.13+

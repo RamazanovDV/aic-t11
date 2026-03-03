@@ -60,6 +60,10 @@ class Config:
         return self.auth.get("api_key", "")
 
     @property
+    def secret_key(self) -> str:
+        return self.auth.get("secret_key", "dev-secret-key-change-in-production")
+
+    @property
     def default_provider(self) -> str:
         return self._config.get("default_provider", "openai")
 

@@ -1,13 +1,14 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="admin-container">
+<div class="admin-container" style="padding: 20px;">
     <div class="admin-tabs">
         <button class="tab-btn active" data-tab="auth" onclick="switchTab('auth')">Аутентификация</button>
         <button class="tab-btn" data-tab="providers" onclick="switchTab('providers')">Провайдеры</button>
         <button class="tab-btn" data-tab="context" onclick="switchTab('context')">Контекст</button>
         <button class="tab-btn" data-tab="summarization" onclick="switchTab('summarization')">Суммаризация</button>
         <button class="tab-btn" data-tab="models" onclick="switchTab('models')">Модели</button>
+        <button class="tab-btn" data-tab="users" onclick="switchTab('users')">Пользователи</button>
     </div>
 
     <div class="tab-content active" id="tab-auth">
@@ -256,6 +257,21 @@
     </div>
 </div>
 
+<div class="tab-content" id="tab-users">
+    <div class="settings-section">
+        <h3>Пользователи</h3>
+        <p class="help-text">Управление пользователями системы.</p>
+        
+        <div class="users-actions" style="margin-bottom: 1rem;">
+            <button class="btn btn-primary" onclick="showAddUser()">Добавить пользователя</button>
+        </div>
+        
+        <div id="users-list">
+            <div class="loading">Загрузка пользователей...</div>
+        </div>
+    </div>
+</div>
+
 <script>
     let config = {};
     let contextFiles = [];
@@ -303,8 +319,19 @@
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
         
-        document.querySelector(`.tab-btn[data-tab="${tabName}"]`).classList.add('active');
-        document.getElementById('tab-' + tabName).classList.add('active');
+        const btn = document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
+        const content = document.getElementById('tab-' + tabName);
+        
+        if (!btn || !content) {
+            return;
+        }
+        
+        btn.classList.add('active');
+        content.classList.add('active');
+        
+        if (tabName === 'users') {
+            loadUsers();
+        }
     }
 
     async function loadConfig() {
@@ -333,6 +360,302 @@
         loadContextFileList();
         loadSummarizerConfig();
         loadModelList();
+        loadUsers();
+    }
+
+    async function loadUsers() {
+        const container = document.getElementById('users-list');
+        if (!container) {
+            return;
+        }
+        try {
+            const response = await fetch('/api/users', { headers: getAuthHeaders() });
+            if (response.status === 401 || response.status === 403) {
+                container.innerHTML = '<div class="error">Нет доступа</div>';
+                return;
+            }
+            const users = await response.json();
+            renderUsers(users);
+        } catch (e) {
+            console.error('Failed to load users:', e);
+            container.innerHTML = '<div class="error">Ошибка загрузки пользователей</div>';
+        }
+    }
+
+    function renderUsers(users) {
+        const container = document.getElementById('users-list');
+        
+        if (!users || users.length === 0) {
+            container.innerHTML = '<p>Нет пользователей</p>';
+            return;
+        }
+        
+        let html = '<table class="users-table" style="width: 100%; border-collapse: collapse;">';
+        html += '<thead><tr>';
+        html += '<th>Имя</th>';
+        html += '<th>Email</th>';
+        html += '<th>Роль</th>';
+        html += '<th>Команда</th>';
+        html += '<th>Интервью</th>';
+        html += '<th>Активен</th>';
+        html += '<th>Действия</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const user of users) {
+            const interviewBadge = user.interview_completed ? '✓' : '✗';
+            const activeBadge = user.is_active ? '✓' : '✗';
+            
+            html += '<tr>';
+            html += '<td>' + escapeHtml(user.username) + '</td>';
+            html += '<td>' + escapeHtml(user.email) + '</td>';
+            html += '<td>' + escapeHtml(user.role) + '</td>';
+            html += '<td>' + escapeHtml(user.team_role) + '</td>';
+            html += '<td>' + interviewBadge + '</td>';
+            html += '<td>' + activeBadge + '</td>';
+            html += '<td><button class="btn btn-small" onclick="editUser(\'' + escapeHtml(user.id) + '\')">Ред.</button> <button class="btn btn-small btn-danger" onclick="deleteUser(\'' + escapeHtml(user.id) + '\')">Удалить</button></td>';
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function showAddUser() {
+        const html = `
+            <div id="user-modal" class="modal">
+                <div class="modal-content">
+                    <h3>Добавить пользователя</h3>
+                    <div class="form-group">
+                        <label for="user-username">Имя пользователя</label>
+                        <input type="text" id="user-username" class="form-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="user-email">Email</label>
+                        <input type="email" id="user-email" class="form-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="user-password">Пароль</label>
+                        <input type="password" id="user-password" class="form-input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="user-role">Роль</label>
+                        <select id="user-role" class="form-input">
+                            <option value="user">Пользователь</option>
+                            <option value="admin">Администратор</option>
+                            <option value="viewer">Наблюдатель</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="user-team-role">Роль в команде</label>
+                        <select id="user-team-role" class="form-input">
+                            <option value="developer">Разработчик</option>
+                            <option value="devops">DevOps</option>
+                            <option value="analyst">Аналитик</option>
+                            <option value="security">Безопасность</option>
+                            <option value="qa">QA</option>
+                            <option value="admin_team">Админ команды</option>
+                            <option value="manager">Менеджер</option>
+                            <option value="other">Другое</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="user-notes">Заметки</label>
+                        <textarea id="user-notes" class="form-input" rows="3"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="user-interview"> Прошёл интервью
+                        </label>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+                        <button class="btn btn-primary" onclick="createUser()">Создать</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', html);
+    }
+
+    async function createUser() {
+        const username = document.getElementById('user-username').value;
+        const email = document.getElementById('user-email').value;
+        const password = document.getElementById('user-password').value;
+        const role = document.getElementById('user-role').value;
+        const team_role = document.getElementById('user-team-role').value;
+        const notes = document.getElementById('user-notes').value;
+        const interview_completed = document.getElementById('user-interview').checked;
+
+        if (!username || !email || !password) {
+            alert('Заполните обязательные поля');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/users', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ username, email, password, role, team_role, notes, interview_completed })
+            });
+
+            if (response.ok) {
+                closeModal();
+                loadUsers();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Ошибка создания пользователя');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function editUser(userId) {
+        try {
+            const response = await fetch('/api/users/' + userId, { headers: getAuthHeaders() });
+            const user = await response.json();
+
+            const html = `
+                <div id="user-modal" class="modal">
+                    <div class="modal-content">
+                        <h3>Редактировать пользователя</h3>
+                        <div class="form-group">
+                            <label for="user-username">Имя пользователя</label>
+                            <input type="text" id="user-username" class="form-input" value="${escapeHtml(user.username)}" disabled>
+                        </div>
+                        <div class="form-group">
+                            <label for="user-email">Email</label>
+                            <input type="email" id="user-email" class="form-input" value="${escapeHtml(user.email)}">
+                        </div>
+                        <div class="form-group">
+                            <label for="user-password">Новый пароль (оставьте пустым)</label>
+                            <input type="password" id="user-password" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="user-role">Роль</label>
+                            <select id="user-role" class="form-input">
+                                <option value="user" ${user.role === 'user' ? 'selected' : ''}>Пользователь</option>
+                                <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Администратор</option>
+                                <option value="viewer" ${user.role === 'viewer' ? 'selected' : ''}>Наблюдатель</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="user-team-role">Роль в команде</label>
+                            <select id="user-team-role" class="form-input">
+                                <option value="developer" ${user.team_role === 'developer' ? 'selected' : ''}>Разработчик</option>
+                                <option value="devops" ${user.team_role === 'devops' ? 'selected' : ''}>DevOps</option>
+                                <option value="analyst" ${user.team_role === 'analyst' ? 'selected' : ''}>Аналитик</option>
+                                <option value="security" ${user.team_role === 'security' ? 'selected' : ''}>Безопасность</option>
+                                <option value="qa" ${user.team_role === 'qa' ? 'selected' : ''}>QA</option>
+                                <option value="admin_team" ${user.team_role === 'admin_team' ? 'selected' : ''}>Админ команды</option>
+                                <option value="manager" ${user.team_role === 'manager' ? 'selected' : ''}>Менеджер</option>
+                                <option value="other" ${user.team_role === 'other' ? 'selected' : ''}>Другое</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="user-notes">Заметки</label>
+                            <textarea id="user-notes" class="form-input" rows="3">${escapeHtml(user.notes || '')}</textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="user-interview" ${user.interview_completed ? 'checked' : ''}> Прошёл интервью
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="user-active" ${user.is_active ? 'checked' : ''}> Активен
+                            </label>
+                        </div>
+                        <div class="modal-actions">
+                            <button class="btn btn-secondary" onclick="closeModal()">Отмена</button>
+                            <button class="btn btn-primary" onclick="updateUser('${userId}')">Сохранить</button>
+                            <button class="btn btn-danger" onclick="resetUserPassword('${userId}')">Сбросить пароль</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', html);
+        } catch (e) {
+            alert('Ошибка загрузки пользователя: ' + e.message);
+        }
+    }
+
+    async function updateUser(userId) {
+        const email = document.getElementById('user-email').value;
+        const password = document.getElementById('user-password').value;
+        const role = document.getElementById('user-role').value;
+        const team_role = document.getElementById('user-team-role').value;
+        const notes = document.getElementById('user-notes').value;
+        const interview_completed = document.getElementById('user-interview').checked;
+        const is_active = document.getElementById('user-active').checked;
+
+        try {
+            const response = await fetch('/api/users/' + userId, {
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ email, password: password || null, role, team_role, notes, interview_completed, is_active })
+            });
+
+            if (response.ok) {
+                closeModal();
+                loadUsers();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Ошибка обновления пользователя');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function deleteUser(userId) {
+        if (!confirm('Вы уверены, что хотите удалить этого пользователя?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/users/' + userId, {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+
+            if (response.ok) {
+                loadUsers();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Ошибка удаления пользователя');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function resetUserPassword(userId) {
+        if (!confirm('Вы уверены, что хотите сбросить пароль этого пользователя?')) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/users/' + userId + '/reset-password', {
+                method: 'POST',
+                headers: getAuthHeaders()
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                alert('Новый пароль: ' + data.new_password + '\nСкопируйте его, так как оно будет показано только один раз!');
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Ошибка сброса пароля');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     function loadSummarizerConfig() {
@@ -588,7 +911,10 @@
     }
 
     function closeModal() {
-        document.getElementById('provider-modal').style.display = 'none';
+        const providerModal = document.getElementById('provider-modal');
+        const userModal = document.getElementById('user-modal');
+        if (providerModal) providerModal.style.display = 'none';
+        if (userModal) userModal.remove();
     }
 
     function updateUrlPlaceholder() {
@@ -1163,12 +1489,6 @@
             alert('Ошибка: ' + e.message);
         }
     }
-
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
 </script>
 
 <style>
@@ -1286,6 +1606,40 @@
 
     .btn-danger:hover {
         background: #c82333;
+    }
+
+    .btn-small {
+        padding: 4px 8px;
+        font-size: 12px;
+    }
+
+    .users-table {
+        margin-top: 1rem;
+        border-collapse: collapse;
+        width: 100%;
+    }
+
+    .users-table th {
+        background: var(--bg-secondary);
+        padding: 12px;
+        text-align: left;
+        border-bottom: 2px solid var(--border);
+        font-weight: 600;
+    }
+
+    .users-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .users-table tr:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .users-table .btn {
+        margin-right: 4px;
+        padding: 4px 8px;
+        font-size: 12px;
     }
 
     .loading {

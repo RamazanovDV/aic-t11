@@ -15,6 +15,11 @@
         <div class="header-content">
             <h1 class="logo">T6 UI</h1>
             <div class="header-controls">
+                <span id="user-info" class="user-info" style="display: none;">
+                    <span id="username"></span>
+                </span>
+                <button class="btn btn-small" id="login-btn" onclick="showLogin()">Войти</button>
+                <button class="btn btn-small" id="logout-btn" onclick="logout()" style="display: none;">Выйти</button>
                 <button class="btn btn-small" id="panel-mode-btn" onclick="togglePanelMode()" title="Переключить режим (одна/две панели)">
                     <span id="panel-mode-icon">⧉</span> <span id="panel-mode-text">Split</span>
                 </button>
@@ -45,6 +50,131 @@
     </main>
 
     <script>
+        const USER_KEY = 't6_user';
+
+        function getUser() {
+            const userStr = localStorage.getItem(USER_KEY);
+            return userStr ? JSON.parse(userStr) : null;
+        }
+
+        function setUser(user) {
+            localStorage.setItem(USER_KEY, JSON.stringify(user));
+            updateUserUI();
+        }
+
+        function clearUser() {
+            localStorage.removeItem(USER_KEY);
+            updateUserUI();
+        }
+
+        function updateUserUI() {
+            const user = getUser();
+            const loginBtn = document.getElementById('login-btn');
+            const logoutBtn = document.getElementById('logout-btn');
+            const userInfo = document.getElementById('user-info');
+            const username = document.getElementById('username');
+
+            if (user) {
+                loginBtn.style.display = 'none';
+                logoutBtn.style.display = 'inline-block';
+                userInfo.style.display = 'inline';
+                username.textContent = user.username;
+            } else {
+                loginBtn.style.display = 'inline-block';
+                logoutBtn.style.display = 'none';
+                userInfo.style.display = 'none';
+            }
+        }
+
+        function showLogin() {
+            const html = `
+                <div id="login-modal" class="modal">
+                    <div class="modal-content">
+                        <h3>Вход</h3>
+                        <div class="form-group">
+                            <label for="login-username">Имя пользователя</label>
+                            <input type="text" id="login-username" class="form-input" autofocus>
+                        </div>
+                        <div class="form-group">
+                            <label for="login-password">Пароль</label>
+                            <input type="password" id="login-password" class="form-input">
+                        </div>
+                        <div id="login-error" class="error" style="display: none;"></div>
+                        <div class="modal-actions">
+                            <button class="btn btn-secondary" onclick="closeLoginModal()">Отмена</button>
+                            <button class="btn btn-primary" onclick="login()">Войти</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', html);
+            
+            document.getElementById('login-password').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') login();
+            });
+        }
+
+        function closeLoginModal() {
+            const modal = document.getElementById('login-modal');
+            if (modal) modal.remove();
+        }
+
+        async function login() {
+            const username = document.getElementById('login-username').value;
+            const password = document.getElementById('login-password').value;
+            const errorDiv = document.getElementById('login-error');
+
+            if (!username || !password) {
+                errorDiv.textContent = 'Заполните все поля';
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    setUser(data.user);
+                    closeLoginModal();
+                } else {
+                    const data = await response.json();
+                    errorDiv.textContent = data.error || 'Ошибка входа';
+                    errorDiv.style.display = 'block';
+                }
+            } catch (e) {
+                errorDiv.textContent = 'Ошибка: ' + e.message;
+                errorDiv.style.display = 'block';
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch (e) {
+                console.error('Logout error:', e);
+            }
+            clearUser();
+        }
+
+        async function checkAuth() {
+            try {
+                const response = await fetch('/api/auth/me');
+                if (response.ok) {
+                    const user = await response.json();
+                    setUser(user);
+                } else {
+                    clearUser();
+                }
+            } catch (e) {
+                clearUser();
+            }
+        }
+
         // Configure marked
         marked.setOptions({
             highlight: function(code, lang) {
@@ -168,6 +298,9 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            updateUserUI();
+            checkAuth();
+            
             const urlParams = new URLSearchParams(window.location.search);
             if (urlParams.get('mode') === 'dual') {
                 localStorage.setItem('t6_panel_mode', 'dual');

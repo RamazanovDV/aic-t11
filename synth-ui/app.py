@@ -3,7 +3,7 @@ from pathlib import Path
 
 import requests
 import yaml
-from flask import Blueprint, Flask, Response, jsonify, render_template, request
+from flask import Blueprint, Flask, Response, jsonify, make_response, render_template, request
 
 ui_bp = Blueprint("ui", __name__)
 
@@ -82,7 +82,7 @@ def add_note():
 
     session_id = get_session_id()
 
-    url = f"{ui_config.backend_url}/note"
+    url = f"{ui_config.backend_url}/api/note"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "X-Session-Id": session_id,
@@ -109,7 +109,7 @@ def chat():
     debug_mode = data.get("debug", False)
     session_id = get_session_id()
 
-    url = f"{ui_config.backend_url}/chat"
+    url = f"{ui_config.backend_url}/api/chat"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "X-Session-Id": session_id,
@@ -144,7 +144,7 @@ def chat_stream():
     debug_mode = data.get("debug", False)
     session_id = get_session_id()
 
-    url = f"{ui_config.backend_url}/chat/stream"
+    url = f"{ui_config.backend_url}/api/chat/stream"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "X-Session-Id": session_id,
@@ -174,7 +174,7 @@ def chat_stream():
 def reset_chat():
     session_id = get_session_id()
 
-    url = f"{ui_config.backend_url}/chat/reset"
+    url = f"{ui_config.backend_url}/api/chat/reset"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "X-Session-Id": session_id,
@@ -190,7 +190,7 @@ def reset_chat():
 
 @ui_bp.route("/api/health", methods=["GET"])
 def health():
-    url = f"{ui_config.backend_url}/health"
+    url = f"{ui_config.backend_url}/api/health"
     try:
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
@@ -203,7 +203,7 @@ def health():
 
 @ui_bp.route("/api/config", methods=["GET"])
 def get_config():
-    url = f"{ui_config.backend_url}/config"
+    url = f"{ui_config.backend_url}/api/config"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -223,7 +223,7 @@ def get_config():
 
 @ui_bp.route("/api/sessions", methods=["GET"])
 def list_sessions():
-    url = f"{ui_config.backend_url}/sessions"
+    url = f"{ui_config.backend_url}/api/sessions"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -238,7 +238,7 @@ def list_sessions():
 
 @ui_bp.route("/api/sessions/<session_id>", methods=["DELETE"])
 def delete_session(session_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -257,7 +257,7 @@ def rename_session(session_id: str):
     if not data or "new_name" not in data:
         return jsonify({"error": "Missing 'new_name' field"}), 400
 
-    url = f"{ui_config.backend_url}/sessions/{session_id}/rename"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/rename"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "Content-Type": "application/json",
@@ -277,7 +277,7 @@ def copy_session(session_id: str):
     if not data or "new_session_id" not in data:
         return jsonify({"error": "Missing 'new_session_id' field"}), 400
 
-    url = f"{ui_config.backend_url}/sessions/{session_id}/copy"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/copy"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "Content-Type": "application/json",
@@ -293,7 +293,7 @@ def copy_session(session_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>", methods=["GET"])
 def get_session(session_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -310,7 +310,7 @@ def get_session(session_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>/context-settings", methods=["GET"])
 def get_context_settings(session_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/context-settings"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/context-settings"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -340,7 +340,7 @@ def set_context_settings(session_id: str):
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    url = f"{ui_config.backend_url}/sessions/{session_id}/context-settings"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/context-settings"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "Content-Type": "application/json",
@@ -356,7 +356,7 @@ def set_context_settings(session_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>/summarize", methods=["POST"])
 def manual_summarize(session_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/summarize"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/summarize"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -371,7 +371,7 @@ def manual_summarize(session_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>/clear-debug", methods=["POST"])
 def clear_session_debug(session_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/clear-debug"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/clear-debug"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -386,7 +386,7 @@ def clear_session_debug(session_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>/messages", methods=["GET"])
 def get_session_messages(session_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -403,7 +403,7 @@ def get_session_messages(session_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>/messages/<int:index>", methods=["DELETE"])
 def delete_session_message(session_id: str, index: int):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/messages/{index}"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/messages/{index}"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -418,7 +418,7 @@ def delete_session_message(session_id: str, index: int):
 
 @ui_bp.route("/api/sessions/<session_id>/messages/<int:index>/toggle", methods=["POST"])
 def toggle_session_message(session_id: str, index: int):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/messages/{index}/toggle"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/messages/{index}/toggle"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -433,7 +433,7 @@ def toggle_session_message(session_id: str, index: int):
 
 @ui_bp.route("/api/sessions/export", methods=["POST"])
 def export_sessions():
-    url = f"{ui_config.backend_url}/sessions/export"
+    url = f"{ui_config.backend_url}/api/sessions/export"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -452,7 +452,7 @@ def import_session():
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    url = f"{ui_config.backend_url}/sessions/import"
+    url = f"{ui_config.backend_url}/api/sessions/import"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "Content-Type": "application/json",
@@ -469,7 +469,7 @@ def import_session():
 @ui_bp.route("/api/sessions/<session_id>/checkpoints", methods=["POST"])
 def create_checkpoint(session_id: str):
     data = request.get_json() or {}
-    url = f"{ui_config.backend_url}/sessions/{session_id}/checkpoints"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/checkpoints"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "Content-Type": "application/json",
@@ -486,7 +486,7 @@ def create_checkpoint(session_id: str):
 @ui_bp.route("/api/sessions/<session_id>/checkpoints/<checkpoint_id>/branch", methods=["POST"])
 def create_branch_from_checkpoint(session_id: str, checkpoint_id: str):
     data = request.get_json() or {}
-    url = f"{ui_config.backend_url}/sessions/{session_id}/checkpoints/{checkpoint_id}/branch"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/checkpoints/{checkpoint_id}/branch"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "Content-Type": "application/json",
@@ -502,7 +502,7 @@ def create_branch_from_checkpoint(session_id: str, checkpoint_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>/branches/<branch_id>/switch", methods=["POST"])
 def switch_branch(session_id: str, branch_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/branches/{branch_id}/switch"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/branches/{branch_id}/switch"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -518,7 +518,7 @@ def switch_branch(session_id: str, branch_id: str):
 @ui_bp.route("/api/sessions/<session_id>/branches/<branch_id>/rename", methods=["POST"])
 def rename_branch(session_id: str, branch_id: str):
     data = request.get_json() or {}
-    url = f"{ui_config.backend_url}/sessions/{session_id}/branches/{branch_id}/rename"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/branches/{branch_id}/rename"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "Content-Type": "application/json",
@@ -534,7 +534,7 @@ def rename_branch(session_id: str, branch_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>/branches/<branch_id>", methods=["DELETE"])
 def delete_branch(session_id: str, branch_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/branches/{branch_id}"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/branches/{branch_id}"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -549,7 +549,7 @@ def delete_branch(session_id: str, branch_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>/branches/<branch_id>/reset", methods=["POST"])
 def reset_branch(session_id: str, branch_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/branches/{branch_id}/reset"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/branches/{branch_id}/reset"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -565,7 +565,7 @@ def reset_branch(session_id: str, branch_id: str):
 @ui_bp.route("/api/sessions/<session_id>/checkpoints/<checkpoint_id>/rename", methods=["POST"])
 def rename_checkpoint(session_id: str, checkpoint_id: str):
     data = request.get_json() or {}
-    url = f"{ui_config.backend_url}/sessions/{session_id}/checkpoints/{checkpoint_id}/rename"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/checkpoints/{checkpoint_id}/rename"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "Content-Type": "application/json",
@@ -581,7 +581,7 @@ def rename_checkpoint(session_id: str, checkpoint_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>/checkpoints/<checkpoint_id>", methods=["DELETE"])
 def delete_checkpoint(session_id: str, checkpoint_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/checkpoints/{checkpoint_id}"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/checkpoints/{checkpoint_id}"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -596,7 +596,7 @@ def delete_checkpoint(session_id: str, checkpoint_id: str):
 
 @ui_bp.route("/api/sessions/<session_id>/tree", methods=["GET"])
 def get_session_tree(session_id: str):
-    url = f"{ui_config.backend_url}/sessions/{session_id}/tree"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/tree"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -835,7 +835,7 @@ def rename_context_file(filename: str):
 @ui_bp.route("/api/user/settings", methods=["GET"])
 def get_user_settings():
     session_id = get_session_id()
-    url = f"{ui_config.backend_url}/sessions/{session_id}"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -861,7 +861,7 @@ def save_user_settings():
         return jsonify({"error": "No data provided"}), 400
 
     session_id = get_session_id()
-    url = f"{ui_config.backend_url}/sessions/{session_id}"
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
     }
@@ -878,7 +878,7 @@ def save_user_settings():
         session_data["user_settings"] = data
         
         response = requests.post(
-            f"{ui_config.backend_url}/sessions/import",
+            f"{ui_config.backend_url}/api/sessions/import",
             headers={"X-API-Key": ui_config.backend_api_key, "Content-Type": "application/json"},
             json=session_data,
             timeout=10,
@@ -887,6 +887,175 @@ def save_user_settings():
         return jsonify({"status": "saved"})
     except requests.RequestException as e:
         print(f"[ERROR] save_user_settings: {e}")
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/auth/login", methods=["POST"])
+def login():
+    data = request.get_json()
+    if not data or "username" not in data or "password" not in data:
+        return jsonify({"error": "Missing username or password"}), 400
+
+    try:
+        response = requests.post(
+            f"{ui_config.backend_url}/api/auth/login",
+            json=data,
+            timeout=10,
+        )
+        if response.status_code == 200:
+            result = jsonify(response.json()), 200
+            resp = make_response(result)
+            for cookie in response.cookies:
+                if cookie.value:
+                    resp.set_cookie(cookie.name, cookie.value, httponly=True, path='/')
+            return resp
+        elif response.status_code == 401:
+            return jsonify(response.json().get("error", "Unauthorized")), 401
+        return jsonify({"error": f"Backend error: {response.status_code}"}), response.status_code
+    except requests.RequestException as e:
+        print(f"[ERROR] login: {e}")
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/auth/logout", methods=["POST"])
+def logout():
+    try:
+        response = requests.post(
+            f"{ui_config.backend_url}/api/auth/logout",
+            cookies=request.cookies,
+            timeout=10,
+        )
+        result = jsonify({"message": "Logged out"})
+        resp = make_response(result)
+        resp.set_cookie('session', '', expires=0, httponly=True, path='/')
+        return resp
+    except requests.RequestException as e:
+        print(f"[ERROR] logout: {e}")
+        result = jsonify({"message": "Logged out"})
+        resp = make_response(result)
+        resp.set_cookie('session', '', expires=0, httponly=True, path='/')
+        return resp
+
+
+@ui_bp.route("/api/auth/me", methods=["GET"])
+def me():
+    try:
+        response = requests.get(
+            f"{ui_config.backend_url}/api/auth/me",
+            cookies=request.cookies,
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
+        return jsonify({"error": "Not authenticated"}), response.status_code
+    except requests.RequestException as e:
+        print(f"[ERROR] me: {e}")
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/users", methods=["GET"])
+def list_users():
+    try:
+        response = requests.get(
+            f"{ui_config.backend_url}/api/users",
+            headers={"X-API-Key": ui_config.backend_api_key},
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
+        return jsonify({"error": "Access denied"}), response.status_code
+    except requests.RequestException as e:
+        print(f"[ERROR] list_users: {e}")
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/users", methods=["POST"])
+def create_user():
+    data = request.get_json()
+    try:
+        response = requests.post(
+            f"{ui_config.backend_url}/api/users",
+            headers={
+                "X-API-Key": ui_config.backend_api_key,
+                "Content-Type": "application/json"
+            },
+            json=data,
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
+        return jsonify(response.json().get("error", "Error")), response.status_code
+    except requests.RequestException as e:
+        print(f"[ERROR] create_user: {e}")
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/users/<user_id>", methods=["GET"])
+def get_user(user_id):
+    try:
+        response = requests.get(
+            f"{ui_config.backend_url}/api/users/{user_id}",
+            headers={"X-API-Key": ui_config.backend_api_key},
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
+        return jsonify({"error": "Not found"}), response.status_code
+    except requests.RequestException as e:
+        print(f"[ERROR] get_user: {e}")
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/users/<user_id>", methods=["PUT"])
+def update_user(user_id):
+    data = request.get_json()
+    try:
+        response = requests.put(
+            f"{ui_config.backend_url}/api/users/{user_id}",
+            headers={
+                "X-API-Key": ui_config.backend_api_key,
+                "Content-Type": "application/json"
+            },
+            json=data,
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
+        return jsonify(response.json().get("error", "Error")), response.status_code
+    except requests.RequestException as e:
+        print(f"[ERROR] update_user: {e}")
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/users/<user_id>", methods=["DELETE"])
+def delete_user(user_id):
+    try:
+        response = requests.delete(
+            f"{ui_config.backend_url}/api/users/{user_id}",
+            headers={"X-API-Key": ui_config.backend_api_key},
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
+        return jsonify({"error": "Error"}), response.status_code
+    except requests.RequestException as e:
+        print(f"[ERROR] delete_user: {e}")
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/users/<user_id>/reset-password", methods=["POST"])
+def reset_user_password(user_id):
+    try:
+        response = requests.post(
+            f"{ui_config.backend_url}/api/users/{user_id}/reset-password",
+            headers={"X-API-Key": ui_config.backend_api_key},
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return jsonify(response.json()), 200
+        return jsonify(response.json().get("error", "Error")), response.status_code
+    except requests.RequestException as e:
+        print(f"[ERROR] reset_user_password: {e}")
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 

@@ -3,7 +3,8 @@ from pathlib import Path
 
 from flask import Flask
 
-from app.routes import api_bp, admin_bp
+from app.routes import api_bp, admin_bp, auth_bp
+from app.config import config
 
 BASE_DIR = Path(__file__).parent
 
@@ -14,6 +15,8 @@ def create_app() -> Flask:
         template_folder=str(BASE_DIR / "templates"),
         static_folder=str(BASE_DIR / "static"),
     )
-    app.register_blueprint(api_bp)
+    app.secret_key = config.secret_key
+    app.register_blueprint(api_bp, url_prefix="/api")
     app.register_blueprint(admin_bp, url_prefix="/admin")
+    app.register_blueprint(auth_bp, url_prefix="/api/auth")
     return app

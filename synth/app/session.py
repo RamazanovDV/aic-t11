@@ -41,6 +41,19 @@ class Session:
     checkpoints: list[Checkpoint] = field(default_factory=list)
     current_branch: str = "main"
     facts: dict[str, str] = field(default_factory=dict)
+    owner_id: str | None = None
+    access: str = "owner"
+
+    def can_access(self, user_id: str | None, user_role: str = "user") -> bool:
+        if user_role == "admin":
+            return True
+        if self.access == "public":
+            return True
+        if self.access == "team":
+            return True
+        if self.access == "owner" and self.owner_id == user_id:
+            return True
+        return False
 
     def _ensure_main_branch(self) -> None:
         """Ensure main branch exists"""
@@ -684,6 +697,8 @@ class SessionManager:
                     checkpoints=checkpoints,
                     current_branch=data.get("current_branch", "main"),
                     facts=data.get("facts", {}),
+                    owner_id=data.get("owner_id"),
+                    access=data.get("access", "owner"),
                 )
                 session._ensure_main_branch()
                 self._sessions[session_id] = session
@@ -719,8 +734,10 @@ class SessionManager:
         if session_id in self._sessions:
             self._sessions[session_id].save()
 
-    def list_sessions(self) -> list[dict]:
-        return storage.list_sessions()
+    def list_sessions(self, user_id: str | None = None, user_role: str = "user") -> list[dict]:
+        if user_id is None and user_role != "admin":
+            return storage.list_sessions()
+        return storage.list_sessions_filtered(user_id, user_role)
 
     def get_session_data(self, session_id: str) -> Optional[dict]:
         return storage.load_session(session_id)

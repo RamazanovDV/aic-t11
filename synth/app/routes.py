@@ -10,9 +10,11 @@ from app.llm import ProviderFactory
 from app.llm.providers import ContextLengthExceededError
 from app.session import session_manager
 from app import summarizer
+from app.auth import get_auth_provider, require_user, require_admin, get_current_user
 
 api_bp = Blueprint("api", __name__)
 admin_bp = Blueprint("admin", __name__)
+auth_bp = Blueprint("auth", __name__)
 
 
 def get_sticky_notes_prompt(facts: dict[str, str]) -> str:
@@ -76,6 +78,181 @@ def get_session_id() -> str:
     if not session_id:
         session_id = request.cookies.get("session_id", "default")
     return session_id
+
+
+@auth_bp.route("/login", methods=["POST"])
+def login():
+    data = request.get_json()
+    if not data or "username" not in data or "password" not in data:
+        return jsonify({"error": "Missing username or password"}), 400
+
+    auth_provider = get_auth_provider()
+    user, error = auth_provider.login(data["username"], data["password"])
+
+    if error:
+        return jsonify({"error": error}), 401
+
+    return jsonify({
+        "message": "Login successful",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "team_role": user.team_role,
+        }
+    })
+
+
+@auth_bp.route("/logout", methods=["POST"])
+def logout():
+    auth_provider = get_auth_provider()
+    auth_provider.logout()
+    return jsonify({"message": "Logged out"})
+
+
+@auth_bp.route("/me", methods=["GET"])
+def me():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    return jsonify({
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "role": user.role,
+        "team_role": user.team_role,
+        "preferences": user.preferences,
+        "interview_completed": user.interview_completed,
+        "is_active": user.is_active,
+    })
+
+
+@api_bp.route("/users", methods=["GET"])
+@require_admin
+def list_users():
+    from app.storage import storage
+    users = storage.list_users()
+    return jsonify(users)
+
+
+@api_bp.route("/users", methods=["POST"])
+@require_admin
+def create_user():
+    data = request.get_json()
+    if not data or "username" not in data or "email" not in data or "password" not in data:
+        return jsonify({"error": "Missing required fields"}), 400
+
+    auth_provider = get_auth_provider()
+    user, error = auth_provider.create_user(
+        username=data["username"],
+        email=data["email"],
+        password=data["password"],
+        role=data.get("role", "user"),
+        team_role=data.get("team_role", "developer"),
+        notes=data.get("notes", ""),
+        interview_completed=data.get("interview_completed", False),
+    )
+
+    if error:
+        return jsonify({"error": error}), 400
+
+    return jsonify({
+        "message": "User created",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "role": user.role,
+            "team_role": user.team_role,
+        }
+    })
+
+
+@api_bp.route("/users/<user_id>", methods=["GET"])
+@require_admin
+def get_user(user_id):
+    from app.storage import storage
+    user = storage.load_user(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify({
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "role": user.role,
+        "team_role": user.team_role,
+        "preferences": user.preferences,
+        "notes": user.notes,
+        "interview_completed": user.interview_completed,
+        "is_active": user.is_active,
+        "created_at": user.created_at.isoformat(),
+        "last_login": user.last_login.isoformat() if user.last_login else None,
+    })
+
+
+@api_bp.route("/users/<user_id>", methods=["PUT"])
+@require_admin
+def update_user(user_id):
+    from app.storage import storage
+    user = storage.load_user(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    data = request.get_json()
+
+    if "email" in data:
+        user.email = data["email"]
+    if "role" in data:
+        user.role = data["role"]
+    if "team_role" in data:
+        user.team_role = data["team_role"]
+    if "notes" in data:
+        user.notes = data["notes"]
+    if "interview_completed" in data:
+        user.interview_completed = data["interview_completed"]
+    if "is_active" in data:
+        user.is_active = data["is_active"]
+    if "preferences" in data:
+        user.preferences = data["preferences"]
+
+    if "password" in data and data["password"]:
+        user.set_password(data["password"])
+
+    storage.save_user(user)
+
+    return jsonify({"message": "User updated"})
+
+
+@api_bp.route("/users/<user_id>", methods=["DELETE"])
+@require_admin
+def delete_user(user_id):
+    from app.storage import storage
+    if not storage.delete_user(user_id):
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify({"message": "User deleted"})
+
+
+@api_bp.route("/users/<user_id>/reset-password", methods=["POST"])
+@require_admin
+def reset_password(user_id):
+    from app.storage import storage
+    from app.models import User
+    user = storage.load_user(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    new_password = User.generate_temp_password()
+    user.set_password(new_password)
+    storage.save_user(user)
+
+    return jsonify({
+        "message": "Password reset",
+        "new_password": new_password,
+    })
 
 
 @api_bp.route("/health", methods=["GET"])
@@ -574,6 +751,50 @@ def copy_session(session_id: str):
     session_manager.import_session(session_data)
     
     return jsonify({"status": "copied", "session_id": new_session_id})
+
+
+@api_bp.route("/sessions/<session_id>/access", methods=["GET"])
+@require_auth
+def get_session_access(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+    
+    return jsonify({
+        "owner_id": session.owner_id,
+        "access": session.access,
+    })
+
+
+@api_bp.route("/sessions/<session_id>/access", methods=["POST"])
+@require_auth
+def update_session_access(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing data"}), 400
+    
+    from app.auth import get_current_user
+    user = get_current_user()
+    
+    if session.owner_id and session.owner_id != (user.id if user else None):
+        if not user or user.role != "admin":
+            return jsonify({"error": "Not authorized to change access"}), 403
+    
+    access = data.get("access", "owner")
+    if access not in ["owner", "team", "public"]:
+        return jsonify({"error": "Invalid access value"}), 400
+    
+    session.access = access
+    if user:
+        session.owner_id = user.id
+    
+    session_manager.save_session(session_id)
+    
+    return jsonify({"status": "updated", "access": access})
 
 
 @api_bp.route("/sessions/<session_id>/clear-debug", methods=["POST"])
