@@ -318,6 +318,103 @@ body {
     margin-bottom: 1rem;
 }
 
+.modal-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    line-height: 1;
+    border-radius: 4px;
+}
+
+.modal-close:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.login-modal-content {
+    max-width: 380px;
+    text-align: center;
+    animation: modalFadeIn 0.2s ease-out;
+}
+
+.login-modal-content .login-icon {
+    font-size: 3rem;
+    margin-bottom: 0.5rem;
+}
+
+.login-modal-content h3 {
+    margin-bottom: 1.5rem;
+    font-size: 1.5rem;
+}
+
+.login-modal-content .form-group {
+    text-align: left;
+    margin-bottom: 1rem;
+}
+
+.login-modal-content .form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+}
+
+.login-modal-content .form-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    border-radius: 8px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.login-modal-content .form-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.login-modal-content .form-input::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
+.login-modal-content .btn-primary {
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 1rem;
+    font-weight: 600;
+    margin-top: 0.5rem;
+}
+
+.login-modal-content .btn-secondary {
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 1rem;
+    margin-top: 0.5rem;
+}
+
+.login-modal-content .modal-actions {
+    flex-direction: column;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 .modal-actions {
     display: flex;
     gap: 0.5rem;
@@ -326,8 +423,14 @@ body {
 }
 
 .debug-modal-content {
-    width: 1200px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    width: 80%;
     max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
 }
 
 .debug-tabs {

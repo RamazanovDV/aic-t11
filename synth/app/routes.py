@@ -20,13 +20,17 @@ admin_bp = Blueprint("admin", __name__)
 auth_bp = Blueprint("auth", __name__)
 
 
-def get_profile_prompt(session) -> str:
+def get_profile_prompt(session, user_id: str | None = None) -> str:
     """Сформировать промпт с данными профиля пользователя"""
     user = None
     
     if session and session.owner_id:
         from app import storage as app_storage
         user = app_storage.storage.load_user(session.owner_id)
+    
+    if not user and user_id:
+        from app import storage as app_storage
+        user = app_storage.storage.load_user(user_id)
     
     if not user:
         try:
@@ -297,7 +301,7 @@ def health():
 
 
 @api_bp.route("/note", methods=["POST"])
-@require_auth
+@require_user
 def add_note():
     data = request.get_json()
     if not data or "content" not in data:
@@ -391,7 +395,7 @@ def _handle_project_updates(session) -> None:
 
 
 @api_bp.route("/chat", methods=["POST"])
-@require_auth
+@require_user
 def chat():
     data = request.get_json()
     if not data or "message" not in data:
@@ -457,7 +461,7 @@ def chat():
         session.set_provider_model(provider_name, config.get_default_model(provider_name))
 
     system_prompt = get_system_prompt()
-    system_prompt += get_profile_prompt(session)
+    system_prompt += get_profile_prompt(session, request.headers.get("X-User-Id"))
     system_prompt += get_project_prompt(session)
     system_prompt += get_status_prompt()
 
@@ -536,7 +540,7 @@ def chat():
 
 
 @api_bp.route("/chat/stream", methods=["POST"])
-@require_auth
+@require_user
 def chat_stream():
     data = request.get_json()
     if not data or "message" not in data:
@@ -575,6 +579,8 @@ def chat_stream():
 
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
+
+    user_id = request.headers.get("X-User-Id")
 
     needs_summarization, summarize_reason = summarizer.should_summarize(session, 0)
 
@@ -625,7 +631,7 @@ def chat_stream():
             session.set_provider_model(provider_name, config.get_default_model(provider_name))
 
         system_prompt = get_system_prompt()
-        system_prompt += get_profile_prompt(session)
+        system_prompt += get_profile_prompt(session, user_id)
         system_prompt += get_project_prompt(session)
         system_prompt += get_status_prompt()
 
@@ -751,7 +757,7 @@ def chat_stream():
 
 
 @api_bp.route("/chat/reset", methods=["POST"])
-@require_auth
+@require_user
 def reset_chat():
     session_id = get_session_id()
     session_manager.reset_session(session_id)
@@ -763,14 +769,14 @@ def reset_chat():
 
 
 @api_bp.route("/sessions", methods=["GET"])
-@require_auth
+@require_user
 def list_sessions():
     sessions = session_manager.list_sessions()
     return jsonify({"sessions": sessions})
 
 
 @api_bp.route("/sessions/<session_id>", methods=["GET"])
-@require_auth
+@require_user
 def get_session(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -824,7 +830,7 @@ def get_session(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>", methods=["DELETE"])
-@require_auth
+@require_user
 def delete_session(session_id: str):
     if session_id == "default":
         return jsonify({"error": "Cannot delete default session"}), 400
@@ -837,7 +843,7 @@ def delete_session(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/rename", methods=["POST"])
-@require_auth
+@require_user
 def rename_session(session_id: str):
     if session_id == "default":
         return jsonify({"error": "Cannot rename default session"}), 400
@@ -858,7 +864,7 @@ def rename_session(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/copy", methods=["POST"])
-@require_auth
+@require_user
 def copy_session(session_id: str):
     session_data = session_manager.get_session_data(session_id)
     if not session_data:
@@ -882,7 +888,7 @@ def copy_session(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/access", methods=["GET"])
-@require_auth
+@require_user
 def get_session_access(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -895,7 +901,7 @@ def get_session_access(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/access", methods=["POST"])
-@require_auth
+@require_user
 def update_session_access(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -926,7 +932,7 @@ def update_session_access(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/clear-debug", methods=["POST"])
-@require_auth
+@require_user
 def clear_session_debug(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -939,7 +945,7 @@ def clear_session_debug(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/messages/<int:index>", methods=["DELETE"])
-@require_auth
+@require_user
 def delete_message(session_id: str, index: int):
     session = session_manager.get_session(session_id)
     if not session:
@@ -953,7 +959,7 @@ def delete_message(session_id: str, index: int):
 
 
 @api_bp.route("/sessions/<session_id>/messages/<int:index>/toggle", methods=["POST"])
-@require_auth
+@require_user
 def toggle_message(session_id: str, index: int):
     session = session_manager.get_session(session_id)
     if not session:
@@ -969,7 +975,7 @@ def toggle_message(session_id: str, index: int):
 
 
 @api_bp.route("/sessions/<session_id>/context-settings", methods=["GET"])
-@require_auth
+@require_user
 def get_context_settings(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -998,7 +1004,7 @@ def get_context_settings(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/context-settings", methods=["POST"])
-@require_auth
+@require_user
 def set_context_settings(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1059,7 +1065,7 @@ def set_context_settings(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/summarize", methods=["POST"])
-@require_auth
+@require_user
 def manual_summarize(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1095,7 +1101,7 @@ def manual_summarize(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/checkpoints", methods=["GET"])
-@require_auth
+@require_user
 def list_checkpoints(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1116,7 +1122,7 @@ def list_checkpoints(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/checkpoints", methods=["POST"])
-@require_auth
+@require_user
 def create_checkpoint(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1141,7 +1147,7 @@ def create_checkpoint(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/checkpoints/<checkpoint_id>/rename", methods=["POST"])
-@require_auth
+@require_user
 def rename_checkpoint(session_id: str, checkpoint_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1159,7 +1165,7 @@ def rename_checkpoint(session_id: str, checkpoint_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/checkpoints/<checkpoint_id>", methods=["DELETE"])
-@require_auth
+@require_user
 def delete_checkpoint(session_id: str, checkpoint_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1173,7 +1179,7 @@ def delete_checkpoint(session_id: str, checkpoint_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/checkpoints/<checkpoint_id>/branch", methods=["POST"])
-@require_auth
+@require_user
 def create_branch_from_checkpoint(session_id: str, checkpoint_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1198,7 +1204,7 @@ def create_branch_from_checkpoint(session_id: str, checkpoint_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/branches", methods=["GET"])
-@require_auth
+@require_user
 def list_branches(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1220,7 +1226,7 @@ def list_branches(session_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/branches/<branch_id>/switch", methods=["POST"])
-@require_auth
+@require_user
 def switch_branch(session_id: str, branch_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1234,7 +1240,7 @@ def switch_branch(session_id: str, branch_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/branches/<branch_id>/rename", methods=["POST"])
-@require_auth
+@require_user
 def rename_branch(session_id: str, branch_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1252,7 +1258,7 @@ def rename_branch(session_id: str, branch_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/branches/<branch_id>", methods=["DELETE"])
-@require_auth
+@require_user
 def delete_branch(session_id: str, branch_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1266,7 +1272,7 @@ def delete_branch(session_id: str, branch_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/branches/<branch_id>/reset", methods=["POST"])
-@require_auth
+@require_user
 def reset_branch(session_id: str, branch_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1280,7 +1286,7 @@ def reset_branch(session_id: str, branch_id: str):
 
 
 @api_bp.route("/sessions/<session_id>/tree", methods=["GET"])
-@require_auth
+@require_user
 def get_session_tree(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:
@@ -1290,7 +1296,7 @@ def get_session_tree(session_id: str):
 
 
 @api_bp.route("/sessions/export", methods=["POST"])
-@require_auth
+@require_user
 def export_sessions():
     data = session_manager.export_all()
     return Response(
@@ -1301,7 +1307,7 @@ def export_sessions():
 
 
 @api_bp.route("/sessions/import", methods=["POST"])
-@require_auth
+@require_user
 def import_session():
     data = request.get_json()
     if not data or "session_id" not in data:
@@ -1315,7 +1321,7 @@ def import_session():
 
 
 @admin_bp.route("/config", methods=["GET"])
-@require_auth
+@require_user
 def get_config():
     default_models = {}
     for name, cfg in config.providers.items():
@@ -1333,7 +1339,7 @@ def get_config():
 
 
 @admin_bp.route("/config", methods=["POST"])
-@require_auth
+@require_user
 def save_config():
     data = request.get_json()
     if not data:
@@ -1360,7 +1366,7 @@ def save_config():
 
 
 @admin_bp.route("/config/validate", methods=["POST"])
-@require_auth
+@require_user
 def validate_provider():
     data = request.get_json()
     if not data or "provider" not in data:
@@ -1386,7 +1392,7 @@ def validate_provider():
 
 
 @admin_bp.route("/providers/<provider_name>/models", methods=["GET"])
-@require_auth
+@require_user
 def list_provider_models_from_catalog(provider_name: str):
     """Список доступных моделей для конкретного провайдера из справочника"""
     models = config.models
@@ -1398,7 +1404,7 @@ def list_provider_models_from_catalog(provider_name: str):
 
 
 @admin_bp.route("/models/fetch", methods=["POST"])
-@require_auth
+@require_user
 def fetch_models_from_providers():
     """Загрузить модели от всех настроенных провайдеров"""
     results = {}
@@ -1444,7 +1450,7 @@ def fetch_models_from_providers():
 
 
 @admin_bp.route("/providers/fetch-models", methods=["POST"])
-@require_auth
+@require_user
 def fetch_models_for_provider():
     """Загрузить модели от конкретного провайдера"""
     data = request.get_json()
@@ -1466,7 +1472,7 @@ def fetch_models_for_provider():
 
 
 @admin_bp.route("/context", methods=["GET"])
-@require_auth
+@require_user
 def list_context_files():
     files = config.get_context_files()
     enabled = config.get_enabled_context_files()
@@ -1474,7 +1480,7 @@ def list_context_files():
 
 
 @admin_bp.route("/context", methods=["POST"])
-@require_auth
+@require_user
 def create_context_file():
     data = request.get_json()
     if not data or "filename" not in data:
@@ -1493,14 +1499,14 @@ def create_context_file():
 
 
 @admin_bp.route("/context/enabled", methods=["GET"])
-@require_auth
+@require_user
 def get_enabled_context_files():
     enabled = config.get_enabled_context_files()
     return jsonify({"enabled_files": enabled})
 
 
 @admin_bp.route("/context/enabled", methods=["POST"])
-@require_auth
+@require_user
 def set_enabled_context_files():
     data = request.get_json()
     if not data or "enabled_files" not in data:
@@ -1514,7 +1520,7 @@ def set_enabled_context_files():
 
 
 @admin_bp.route("/context/<filename>", methods=["GET"])
-@require_auth
+@require_user
 def get_context_file(filename: str):
     content = config.get_context_file(filename)
     if content is None:
@@ -1523,7 +1529,7 @@ def get_context_file(filename: str):
 
 
 @admin_bp.route("/context/<filename>", methods=["POST"])
-@require_auth
+@require_user
 def save_context_file(filename: str):
     data = request.get_json()
     if not data or "content" not in data:
@@ -1537,7 +1543,7 @@ def save_context_file(filename: str):
 
 
 @admin_bp.route("/context/<filename>", methods=["DELETE"])
-@require_auth
+@require_user
 def delete_context_file(filename: str):
     try:
         config.delete_context_file(filename)
@@ -1549,7 +1555,7 @@ def delete_context_file(filename: str):
 
 
 @admin_bp.route("/context/<filename>/rename", methods=["POST"])
-@require_auth
+@require_user
 def rename_context_file(filename: str):
     data = request.get_json()
     if not data or "new_name" not in data:
@@ -1572,14 +1578,14 @@ def rename_context_file(filename: str):
 
 
 @admin_bp.route("/models", methods=["GET"])
-@require_auth
+@require_user
 def list_model_catalog():
     models = config.models
     return jsonify({"models": models})
 
 
 @admin_bp.route("/models/available", methods=["GET"])
-@require_auth
+@require_user
 def list_available_models():
     """Список доступных (включённых) моделей для выбора"""
     models = config.models
@@ -1588,7 +1594,7 @@ def list_available_models():
 
 
 @admin_bp.route("/models", methods=["POST"])
-@require_auth
+@require_user
 def add_or_update_model():
     data = request.get_json()
     if not data or "name" not in data:
@@ -1613,7 +1619,7 @@ def add_or_update_model():
 
 
 @admin_bp.route("/models/<model_name>", methods=["DELETE"])
-@require_auth
+@require_user
 def delete_model(model_name: str):
     if config.delete_model(model_name):
         return jsonify({"status": "deleted", "model": model_name})

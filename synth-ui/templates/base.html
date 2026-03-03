@@ -30,36 +30,11 @@
     </header>
 
     <script>
-        function openSettings() {
-            window.location.href = '/?settings=1';
-        }
-
-        document.addEventListener('click', function(e) {
-            if (typeof isRequestInProgress !== 'undefined' && isRequestInProgress) {
-                const link = e.target.closest('.nav-link');
-                if (link) {
-                    e.preventDefault();
-                    alert('Дождитесь ответа перед переходом');
-                }
-            }
-        });
-    </script>
-
-    <main class="main">
-        {% block content %}{% endblock %}
-    </main>
-
-    <script>
         const USER_KEY = 't6_user';
 
         function getUser() {
             const userStr = localStorage.getItem(USER_KEY);
             return userStr ? JSON.parse(userStr) : null;
-        }
-
-        function setUser(user) {
-            localStorage.setItem(USER_KEY, JSON.stringify(user));
-            updateUserUI();
         }
 
         function clearUser() {
@@ -89,20 +64,22 @@
         function showLogin() {
             const html = `
                 <div id="login-modal" class="modal">
-                    <div class="modal-content">
-                        <h3>Вход</h3>
+                    <div class="modal-content login-modal-content">
+                        <button class="modal-close" onclick="closeLoginModal()">×</button>
+                        <div class="login-icon">👤</div>
+                        <h3>Вход в систему</h3>
                         <div class="form-group">
                             <label for="login-username">Имя пользователя</label>
-                            <input type="text" id="login-username" class="form-input" autofocus>
+                            <input type="text" id="login-username" class="form-input" placeholder="Введите имя пользователя" autofocus>
                         </div>
                         <div class="form-group">
                             <label for="login-password">Пароль</label>
-                            <input type="password" id="login-password" class="form-input">
+                            <input type="password" id="login-password" class="form-input" placeholder="Введите пароль">
                         </div>
                         <div id="login-error" class="error" style="display: none;"></div>
                         <div class="modal-actions">
-                            <button class="btn btn-secondary" onclick="closeLoginModal()">Отмена</button>
                             <button class="btn btn-primary" onclick="login()">Войти</button>
+                            <button class="btn btn-secondary" onclick="closeLoginModal()">Отмена</button>
                         </div>
                     </div>
                 </div>
@@ -112,11 +89,45 @@
             document.getElementById('login-password').addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') login();
             });
+            
+            document.getElementById('login-modal').addEventListener('click', function(e) {
+                if (e.target === this) closeLoginModal();
+            });
         }
 
         function closeLoginModal() {
             const modal = document.getElementById('login-modal');
             if (modal) modal.remove();
+        }
+
+        function checkAuthAndLoad() {
+            const user = getUser();
+            if (!user) {
+                showLogin();
+                return false;
+            }
+            return true;
+        }
+
+        async function authFetch(url, options = {}) {
+            const response = await fetch(url, options);
+            if (response.status === 401) {
+                clearUser();
+                showLogin();
+                throw new Error('Unauthorized');
+            }
+            return response;
+        }
+    </script>
+
+    <main class="main">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        function setUser(user) {
+            localStorage.setItem(USER_KEY, JSON.stringify(user));
+            updateUserUI();
         }
 
         async function login() {
@@ -141,6 +152,7 @@
                     const data = await response.json();
                     setUser(data.user);
                     closeLoginModal();
+                    window.location.reload();
                 } else {
                     const data = await response.json();
                     errorDiv.textContent = data.error || 'Ошибка входа';
@@ -159,6 +171,7 @@
                 console.error('Logout error:', e);
             }
             clearUser();
+            window.location.reload();
         }
 
         async function checkAuth() {
@@ -173,6 +186,10 @@
             } catch (e) {
                 clearUser();
             }
+        }
+
+        function openSettings() {
+            window.location.href = '/?settings=1';
         }
 
         // Configure marked

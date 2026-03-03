@@ -15,7 +15,7 @@
 </div>
 
 <div id="debug-modal" class="modal" style="display: none;">
-    <div class="modal-content debug-modal-content">
+    <div class="debug-modal-content">
         <h3>Debug Info</h3>
         <div class="debug-tabs">
             <button class="debug-tab active" data-tab="request" onclick="switchDebugTab('request')">Request</button>
@@ -413,6 +413,8 @@
     }
 
     async function loadAllData() {
+        if (!checkAuthAndLoad()) return;
+        
         await loadSessionsList();
         await loadProviders();
         
@@ -429,17 +431,19 @@
 
     async function loadSessionsList() {
         try {
-            const response = await fetch('/api/sessions');
+            const response = await authFetch('/api/sessions');
             const data = await response.json();
             allSessions = data.sessions || [];
         } catch (e) {
-            console.error('Failed to load sessions:', e);
+            if (e.message !== 'Unauthorized') {
+                console.error('Failed to load sessions:', e);
+            }
         }
     }
 
     async function loadProviders() {
         try {
-            const response = await fetch('/api/admin/config');
+            const response = await authFetch('/api/admin/config');
             if (response.ok) {
                 const data = await response.json();
                 availableProviders = Object.keys(data.providers || {});
@@ -496,7 +500,7 @@
         const panel = panels[panelIndex];
         
         try {
-            const response = await fetch(`/api/sessions/${panel.sessionId}`);
+            const response = await authFetch(`/api/sessions/${panel.sessionId}`);
             if (response.ok) {
                 const data = await response.json();
                 panel.provider = data.provider || '';
@@ -506,7 +510,9 @@
                 panel.checkpoints = data.checkpoints || [];
             }
         } catch (e) {
-            console.error('Failed to load panel settings:', e);
+            if (e.message !== 'Unauthorized') {
+                console.error('Failed to load panel settings:', e);
+            }
         }
 
         const providerSelect = document.querySelector(`.panel-provider-select[data-panel="${panelIndex}"]`);
@@ -516,7 +522,7 @@
             let selectedProvider = panel.provider;
             if (!selectedProvider) {
                 try {
-                    const configResp = await fetch('/api/admin/config');
+                    const configResp = await authFetch('/api/admin/config');
                     if (configResp.ok) {
                         const configData = await configResp.json();
                         selectedProvider = configData.default_provider || '';
@@ -595,7 +601,7 @@
         const panel = panels[panelIndex];
         
         try {
-            const response = await fetch(`/api/sessions/${panel.sessionId}/messages`);
+            const response = await authFetch(`/api/sessions/${panel.sessionId}/messages`);
             const data = await response.json();
             
             panel.messages = data.messages || [];
@@ -910,16 +916,24 @@
     }
 
     async function sendRegularToPanel(panel, message, provider, model, sessionId, panelIndex) {
+        const user = getUser();
         try {
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Session-Id': sessionId,
+                    'X-User-Id': user ? user.id : '',
                 },
                 signal: panel.abortController ? panel.abortController.signal : null,
                 body: JSON.stringify({ message, provider, model, debug: debugMode })
             });
+
+            if (response.status === 401) {
+                clearUser();
+                showLogin();
+                return;
+            }
 
             const data = await response.json();
 
@@ -952,6 +966,7 @@
     }
 
     async function sendStreamToPanel(panel, message, provider, model, sessionId, panelIndex) {
+        const user = getUser();
         let assistantRow = null;
 
         try {
@@ -960,10 +975,17 @@
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Session-Id': sessionId,
+                    'X-User-Id': user ? user.id : '',
                 },
                 signal: panel.abortController ? panel.abortController.signal : null,
                 body: JSON.stringify({ message, provider, model, debug: debugMode })
             });
+
+            if (response.status === 401) {
+                clearUser();
+                showLogin();
+                return;
+            }
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();

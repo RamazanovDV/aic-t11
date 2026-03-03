@@ -69,6 +69,13 @@ def get_session_id() -> str:
     return session_id
 
 
+def get_auth_cookies() -> dict:
+    cookies = {}
+    for name in request.cookies:
+        cookies[name] = request.cookies[name]
+    return cookies
+
+
 @ui_bp.route("/")
 def index():
     return render_template("chat.html")
@@ -90,7 +97,7 @@ def add_note():
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -113,6 +120,7 @@ def chat():
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "X-Session-Id": session_id,
+        "X-User-Id": request.headers.get("X-User-Id", ""),
         "Content-Type": "application/json",
     }
 
@@ -123,7 +131,7 @@ def chat():
         payload["model"] = model
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=payload, timeout=60)
         response.raise_for_status()
         result = response.json()
         result["session_id"] = session_id
@@ -148,6 +156,7 @@ def chat_stream():
     headers = {
         "X-API-Key": ui_config.backend_api_key,
         "X-Session-Id": session_id,
+        "X-User-Id": request.headers.get("X-User-Id", ""),
         "Content-Type": "application/json",
     }
 
@@ -158,7 +167,7 @@ def chat_stream():
         payload["model"] = model
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=120, stream=True)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=payload, timeout=120, stream=True)
         response.raise_for_status()
 
         def generate():
@@ -181,7 +190,7 @@ def reset_chat():
     }
 
     try:
-        response = requests.post(url, headers=headers, timeout=30)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), timeout=30)
         response.raise_for_status()
         return jsonify({"status": "reset", "session_id": session_id})
     except requests.RequestException as e:
@@ -209,7 +218,7 @@ def get_config():
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         if response.status_code == 200:
             return jsonify(response.json())
     except requests.RequestException:
@@ -229,7 +238,7 @@ def list_sessions():
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -244,7 +253,7 @@ def delete_session(session_id: str):
     }
 
     try:
-        response = requests.delete(url, headers=headers, timeout=10)
+        response = requests.delete(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -264,7 +273,7 @@ def rename_session(session_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -284,7 +293,7 @@ def copy_session(session_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -299,7 +308,7 @@ def get_session(session_id: str):
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         if response.status_code == 404:
             return jsonify({"provider": "", "model": "", "messages": []})
         response.raise_for_status()
@@ -316,7 +325,7 @@ def get_context_settings(session_id: str):
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         if response.status_code == 404:
             return jsonify({
                 "context_optimization": "none",
@@ -347,7 +356,7 @@ def set_context_settings(session_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -362,7 +371,7 @@ def manual_summarize(session_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, timeout=120)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), timeout=120)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -377,7 +386,7 @@ def clear_session_debug(session_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -392,7 +401,7 @@ def get_session_messages(session_id: str):
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         if response.status_code == 404:
             return jsonify({"messages": []})
         response.raise_for_status()
@@ -409,7 +418,7 @@ def delete_session_message(session_id: str, index: int):
     }
 
     try:
-        response = requests.delete(url, headers=headers, timeout=10)
+        response = requests.delete(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -424,7 +433,7 @@ def toggle_session_message(session_id: str, index: int):
     }
 
     try:
-        response = requests.post(url, headers=headers, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -439,7 +448,7 @@ def export_sessions():
     }
 
     try:
-        response = requests.post(url, headers=headers, timeout=30)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), timeout=30)
         response.raise_for_status()
         return response.json()
     except requests.RequestException as e:
@@ -459,7 +468,7 @@ def import_session():
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=30)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=30)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -476,7 +485,7 @@ def create_checkpoint(session_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -493,7 +502,7 @@ def create_branch_from_checkpoint(session_id: str, checkpoint_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -508,7 +517,7 @@ def switch_branch(session_id: str, branch_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -525,7 +534,7 @@ def rename_branch(session_id: str, branch_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -540,7 +549,7 @@ def delete_branch(session_id: str, branch_id: str):
     }
 
     try:
-        response = requests.delete(url, headers=headers, timeout=10)
+        response = requests.delete(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -555,7 +564,7 @@ def reset_branch(session_id: str, branch_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -572,7 +581,7 @@ def rename_checkpoint(session_id: str, checkpoint_id: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -587,7 +596,7 @@ def delete_checkpoint(session_id: str, checkpoint_id: str):
     }
 
     try:
-        response = requests.delete(url, headers=headers, timeout=10)
+        response = requests.delete(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -602,7 +611,7 @@ def get_session_tree(session_id: str):
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -617,7 +626,7 @@ def get_admin_config():
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -637,7 +646,7 @@ def save_admin_config():
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -657,7 +666,7 @@ def validate_provider():
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=30)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=30)
         if response.status_code == 200:
             return jsonify(response.json())
         return jsonify({"error": response.json().get("error", "Validation failed")}), 400
@@ -673,7 +682,7 @@ def get_provider_models(provider_name: str):
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=30)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=30)
         if response.status_code == 200:
             return jsonify(response.json())
         else:
@@ -690,7 +699,7 @@ def list_context_files():
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -710,7 +719,7 @@ def create_context_file():
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         if response.status_code == 400:
             return jsonify({"error": response.json().get("error", "File already exists")}), 400
         response.raise_for_status()
@@ -727,7 +736,7 @@ def get_enabled_context_files():
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -747,7 +756,7 @@ def set_enabled_context_files():
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -762,7 +771,7 @@ def get_context_file(filename: str):
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         if response.status_code == 404:
             return jsonify({"error": "File not found"}), 404
         response.raise_for_status()
@@ -784,7 +793,7 @@ def save_context_file(filename: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:
@@ -799,7 +808,7 @@ def delete_context_file(filename: str):
     }
 
     try:
-        response = requests.delete(url, headers=headers, timeout=10)
+        response = requests.delete(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         if response.status_code == 404:
             return jsonify({"error": response.json().get("error", "File not found")}), 404
         response.raise_for_status()
@@ -821,7 +830,7 @@ def rename_context_file(filename: str):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         if response.status_code == 400:
             return jsonify({"error": response.json().get("error", "File already exists")}), 400
         if response.status_code == 404:
@@ -841,7 +850,7 @@ def get_user_settings():
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         if response.status_code == 404:
             return jsonify({"provider": "", "model": ""})
         response.raise_for_status()
@@ -867,7 +876,7 @@ def save_user_settings():
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         session_data = {}
         if response.status_code == 200:
             session_data = response.json()
@@ -905,9 +914,8 @@ def login():
         if response.status_code == 200:
             result = jsonify(response.json()), 200
             resp = make_response(result)
-            for cookie in response.cookies:
-                if cookie.value:
-                    resp.set_cookie(cookie.name, cookie.value, httponly=True, path='/')
+            for name, value in response.cookies.items():
+                resp.set_cookie(name, value, httponly=True, path='/')
             return resp
         elif response.status_code == 401:
             return jsonify(response.json().get("error", "Unauthorized")), 401

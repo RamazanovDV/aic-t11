@@ -115,6 +115,14 @@ def set_auth_provider(provider: AuthProvider) -> None:
 def require_user(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
+        from flask import request
+        from app.config import config
+        
+        api_key = request.headers.get("X-API-Key")
+        if api_key and api_key == config.api_key:
+            g.current_user = None
+            return f(*args, **kwargs)
+        
         user = auth_provider.get_current_user()
         if not user:
             return jsonify({"error": "Authentication required"}), 401
