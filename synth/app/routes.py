@@ -84,7 +84,9 @@ def get_profile_prompt(session, user_id: str | None = None) -> str:
     if user.team_role:
         parts.append(f"Роль: {user.team_role}")
     if user.notes:
-        parts.append(f"Отметки: {user.notes}")
+        notes_without_interview = user.notes.split("[ИНТЕРВЬЮ]")[0].strip()
+        if notes_without_interview:
+            parts.append(f"Отметки: {notes_without_interview}")
     
     if parts:
         return f"\n\n[ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ]\n" + "\n".join(parts) + "\n"
@@ -740,6 +742,8 @@ def chat():
                 "request": response.debug_request,
                 "response": response.debug_response,
             }
+        if session.status:
+            debug_info['status'] = session.status
 
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model)
 
@@ -944,6 +948,13 @@ def chat_stream():
             
             # Сохраняем в сессию (user_message уже добавлен в get_messages_for_llm)
             session.add_assistant_message(final_content, usage, debug=debug_info, model="orchestrator")
+            
+            # Добавляем статус в debug_info для сохранения в сессии
+            if debug_info is None:
+                debug_info = {}
+            if session.status:
+                debug_info['status'] = session.status
+                
             session_manager.save_session(session_id)
             
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
@@ -1023,6 +1034,12 @@ def chat_stream():
                         except Exception:
                             if retryAttempt == 2:
                                 status_error = "Модель не формирует блок статуса в ответе"
+            
+            # Добавляем статус в debug_info для сохранения в сессии
+            if debug_info is None:
+                debug_info = {}
+            if session.status:
+                debug_info['status'] = session.status
             
             # Сохраняем сообщения в сессию
             if needs_summarization:

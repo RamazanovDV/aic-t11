@@ -665,7 +665,7 @@ body {
 .input-wrapper {
     display: flex;
     gap: 0.5rem;
-    align-items: stretch;
+    align-items: center;
 }
 
 .message-input {
@@ -679,7 +679,7 @@ body {
     font-family: inherit;
     resize: none;
     min-height: 44px;
-    max-height: 150px;
+    max-height: 200px;
 }
 
 .message-input:focus {
@@ -694,6 +694,11 @@ body {
 .input-wrapper .btn-primary {
     min-height: 44px;
     padding: 0.75rem 1.5rem;
+}
+
+.input-wrapper .btn-note {
+    min-height: 44px;
+    padding: 0.75rem 1rem;
 }
 
 .message {
