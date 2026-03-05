@@ -380,6 +380,7 @@
                     addMessageToPanel(idx, results[idx].content, results[idx].role, null, results[idx].usage, null);
                 });
                 messageInput.value = '';
+                messageInput.style.height = 'auto';
             } catch (err) {
                 console.error('Failed to create note:', err);
             }
@@ -430,6 +431,7 @@
 
             const messageText = message;
             messageInput.value = '';
+            messageInput.style.height = 'auto';
 
             try {
                 const promises = panels.map((panel, idx) => 
