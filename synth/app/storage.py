@@ -47,7 +47,7 @@ class FileStorage:
             "total_tokens": session.total_tokens,
             "input_tokens": session.input_tokens,
             "output_tokens": session.output_tokens,
-            "user_settings": session.user_settings,
+            "session_settings": session.session_settings,
             "branches": [
                 {
                     "id": b.id,

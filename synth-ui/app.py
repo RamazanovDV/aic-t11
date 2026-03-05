@@ -407,6 +407,56 @@ def set_context_settings(session_id: str):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/sessions/<session_id>/tsm-settings", methods=["GET"])
+def get_tsm_settings(session_id: str):
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/tsm-settings"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        if response.status_code == 404:
+            return jsonify({
+                "tsm_mode": "simple",
+                "mode_name": "Simple Prompt",
+                "task_name": "разговор на свободную тему",
+                "state": None,
+                "allowed_transitions": [],
+                "transition_log": [],
+                "available_modes": ["simple", "orchestrator", "deterministic"],
+                "mode_descriptions": {
+                    "simple": "Базовый системный промпт с инструкцией по статусу задачи.",
+                    "orchestrator": "Отдельный system prompt-оркестратор с подзадачами.",
+                    "deterministic": "Детерминированный переход с жёсткой валидацией.",
+                }
+            })
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/tsm-settings", methods=["POST"])
+def set_tsm_settings(session_id: str):
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/tsm-settings"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/sessions/<session_id>/summarize", methods=["POST"])
 def manual_summarize(session_id: str):
     url = f"{ui_config.backend_url}/api/sessions/{session_id}/summarize"

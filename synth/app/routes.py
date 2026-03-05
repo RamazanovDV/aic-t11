@@ -13,6 +13,7 @@ from app import summarizer
 from app import status_validator
 from app import project_manager
 from app import storage
+from app import tsm
 from app.auth import get_auth_provider, require_user, require_admin, get_current_user
 
 api_bp = Blueprint("api", __name__)
@@ -23,6 +24,37 @@ auth_bp = Blueprint("auth", __name__)
 def get_interview_prompt() -> str:
     """Получить промт для интервью пользователя"""
     return config.get_context_file("INTERVIEW.md") or ""
+
+
+def should_show_interview(session, user_id: str | None = None) -> bool:
+    """Проверить нужно ли показывать интервью.
+    
+    Интервью показывается только если:
+    1. Это первое сообщение в сессии
+    2. Пользователь еще не прошел интервью
+    """
+    if session.get_active_message_count() != 0:
+        return False
+    
+    user = None
+    if session.owner_id:
+        from app import storage as app_storage
+        user = app_storage.storage.load_user(session.owner_id)
+    
+    if not user and user_id:
+        from app import storage as app_storage
+        user = app_storage.storage.load_user(user_id)
+    
+    if not user:
+        try:
+            user = get_current_user()
+        except:
+            pass
+    
+    if user:
+        return not user.interview_completed
+    
+    return False
 
 
 def get_profile_prompt(session, user_id: str | None = None) -> str:
@@ -96,10 +128,9 @@ def get_project_prompt(session) -> str:
     return result
 
 
-def get_status_prompt() -> str:
+def get_status_prompt(session) -> str:
     """Сформировать промпт с инструкцией по статусу задачи"""
-    status_prompt = config.get_context_file("STATUS.md") or ""
-    return status_prompt
+    return tsm.get_tsm_prompt(session)
 
 
 @admin_bp.route("/")
@@ -425,11 +456,21 @@ def _process_status_block(
     """Обработать ответ LLM с валидацией статуса.
     
     Returns:
-        tuple: (response, message_for_user, status_error)
-            - response: LLMResponse
+        tuple: (response, message_for_user, status_error, debug_info)
+            - response: LLMResponse или dict с content/usage для orchestrator
             - message_for_user: очищенный контент без JSON блока
             - status_error: строка с ошибкой если все попытки неудачны
+            - debug_info: отладочная информация
     """
+    tsm_mode = tsm.get_tsm_mode(session)
+    print(f"[ROUTES] TSM mode: {tsm_mode}, session_id: {session_id}")
+    
+    if tsm_mode == "orchestrator":
+        print(f"[ROUTES] Using orchestrator mode for session {session_id}")
+        return _process_orchestrator_mode(
+            provider, llm_messages, system_prompt, session, session_id, debug_mode, user_id
+        )
+    
     status_reminder = (
         "\n\nВАЖНО: Ты ОБЯЗАН добавить JSON-блок со статусом задачи в конце ответа! "
         "Формат: {\"status\": {\"task_name\": \"...\", \"state\": \"...\", \"progress\": \"...\", "
@@ -449,13 +490,15 @@ def _process_status_block(
         parsed_status, cleaned_content = status_validator.validate_status_block(response.content)
 
         if parsed_status:
+            parsed_status = tsm.process_state_transition(session, parsed_status)
+            
             session.update_status(parsed_status)
             
             _handle_project_updates(session)
             
             _handle_user_info_update(parsed_status, user_id)
             
-            return response, cleaned_content, None
+            return response, cleaned_content, None, None
 
         if attempt < max_retries - 1:
             llm_messages = session.get_messages_for_llm()
@@ -463,7 +506,58 @@ def _process_status_block(
                 {"role": "user", "content": "Пожалуйста, добавь в конце своего ответа JSON-блок со статусом задачи в формате: {\"status\": {\"task_name\": \"название\", \"state\": \"состояние\", \"progress\": \"прогресс\", \"project\": \"проект\", \"updated_project_info\": \"обновлённое описание проекта\", \"current_task_info\": \"текущая задача\", \"approved_plan\": \"план\", \"already_done\": \"сделано\", \"currently_doing\": \"текущее\"}}"}
             )
 
-    return response, response.content, "Модель не формирует блок статуса в ответе"
+    return response, response.content, "Модель не формирует блок статуса в ответе", None
+
+
+def _process_orchestrator_mode(
+    provider,
+    llm_messages: list,
+    system_prompt: str,
+    session,
+    session_id: str,
+    debug_mode: bool,
+    user_id: str | None = None,
+):
+    """Обработать ответ в режиме оркестратора с поддержкой сабагентов."""
+    print(f"[ORCHESTRATOR] Starting orchestrator mode, debug_mode: {debug_mode}")
+    try:
+        result = tsm.process_orchestrator_response(
+            session=session,
+            llm_messages=llm_messages,
+            provider=provider,
+            system_prompt=system_prompt,
+            debug_prompt=system_prompt,
+            debug_mode=debug_mode
+        )
+        print(f"[ORCHESTRATOR] Result keys: {result.keys() if result else 'None'}")
+    except Exception as e:
+        return None, f"Ошибка при обработке оркестратора: {str(e)}", str(e), None
+    
+    final_content = result.get("final_content", "")
+    final_status = result.get("final_status", {})
+    debug_info = result.get("debug")
+    usage = result.get("usage", {})
+    
+    if final_status:
+        session.update_status(final_status)
+        _handle_project_updates(session)
+        _handle_user_info_update(final_status, user_id)
+    
+    cleaned_content, _ = status_validator.validate_status_block(final_content)
+    if cleaned_content:
+        final_content = cleaned_content
+    
+    class MockResponse:
+        def __init__(self, content, usage, debug_info):
+            self.content = content
+            self.usage = usage
+            self.debug_request = debug_info.get("orchestrator_request", {}) if debug_info else {}
+            self.debug_response = debug_info
+            self.model = "orchestrator"
+    
+    mock_response = MockResponse(final_content, usage, debug_info)
+    
+    return mock_response, final_content, None, debug_info
 
 
 def _handle_user_info_update(parsed_status: dict, user_id: str | None) -> None:
@@ -591,8 +685,8 @@ def chat():
     system_prompt = get_system_prompt()
     system_prompt += get_profile_prompt(session, request.headers.get("X-User-Id"))
     system_prompt += get_project_prompt(session)
-    system_prompt += get_status_prompt()
-    if is_first_message:
+    system_prompt += get_status_prompt(session)
+    if should_show_interview(session, request.headers.get("X-User-Id")):
         system_prompt += get_interview_prompt()
 
     try:
@@ -612,7 +706,7 @@ def chat():
         return jsonify(result), 500
 
     try:
-        response, message_for_user, status_error = _process_status_block(
+        response, message_for_user, status_error, orchestrator_debug = _process_status_block(
             provider, llm_messages, system_prompt, session, session_id, debug_mode, request.headers.get("X-User-Id")
         )
         if status_error:
@@ -639,10 +733,13 @@ def chat():
 
     debug_info = None
     if debug_mode:
-        debug_info = {
-            "request": response.debug_request,
-            "response": response.debug_response,
-        }
+        if orchestrator_debug:
+            debug_info = orchestrator_debug
+        else:
+            debug_info = {
+                "request": response.debug_request,
+                "response": response.debug_response,
+            }
 
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model)
 
@@ -772,15 +869,15 @@ def chat_stream():
         system_prompt = get_system_prompt()
         system_prompt += get_profile_prompt(session, user_id)
         system_prompt += get_project_prompt(session)
-        system_prompt += get_status_prompt()
-        if is_first_message:
+        system_prompt += get_status_prompt(session)
+        if should_show_interview(session, user_id):
             system_prompt += get_interview_prompt()
 
         # Используем get_messages_for_llm() для поддержки скользящего окна
         llm_messages = session.get_messages_for_llm()
         session_manager.save_session(session_id)
 
-        # Формируем сообщения для LLM
+        # Формируем сообщения для LLM (до проверки tsm_mode)
         formatted_messages = []
         if system_prompt:
             formatted_messages.append({"role": "system", "content": system_prompt})
@@ -794,6 +891,69 @@ def chat_stream():
                     formatted_messages.insert(0, {"role": "system", "content": summary_text})
             elif msg.role in ("user", "assistant"):
                 formatted_messages.append({"role": msg.role, "content": msg.content})
+
+        # Проверяем режим TSM для orchestrator
+        tsm_mode = tsm.get_tsm_mode(session)
+        print(f"[CHAT_STREAM] TSM mode: {tsm_mode}")
+        
+        if tsm_mode == "orchestrator":
+            print(f"[CHAT_STREAM] Using orchestrator mode, will process with subagents")
+            # Для orchestrator используем non-streaming режим
+            from app.llm.base import Message
+            llm_msgs = [Message(role=m["role"], content=m["content"], usage={}) for m in formatted_messages]
+            
+            # Проверим есть ли system message в списке
+            has_system = any(m.role == "system" for m in llm_msgs)
+            # Если system уже в сообщениях - передаем None в provider, но сохраняем для debug
+            orchestrator_system = None if has_system else system_prompt
+            
+            try:
+                result = tsm.process_orchestrator_response(
+                    session=session,
+                    llm_messages=llm_msgs,
+                    provider=provider,
+                    system_prompt=orchestrator_system,
+                    debug_prompt=system_prompt,  # Для debug показываем полный промт
+                    debug_mode=debug_mode
+                )
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'error': f'Orchestrator error: {str(e)}'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            
+            final_content = result.get("final_content", "")
+            debug_info = result.get("debug") if debug_mode else None
+            usage = result.get("usage", {})
+            
+            print(f"[ORCHESTRATOR] Usage: {usage}")
+            print(f"[ORCHESTRATOR] Model: orchestrator")
+            
+            # Очищаем JSON-блок из ответа
+            if final_content and isinstance(final_content, str):
+                from app.status_validator import validate_status_block
+                _, cleaned_content = validate_status_block(final_content)
+                if cleaned_content and isinstance(cleaned_content, str) and cleaned_content != final_content:
+                    final_content = cleaned_content
+            else:
+                final_content = str(final_content) if final_content else ""
+            
+            # Отправляем контент частями для имитации streaming
+            for i in range(0, len(final_content), 50):
+                chunk = final_content[i:i+50]
+                yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+            
+            # Сохраняем в сессию (user_message уже добавлен в get_messages_for_llm)
+            session.add_assistant_message(final_content, usage, debug=debug_info, model="orchestrator")
+            session_manager.save_session(session_id)
+            
+            disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
+            debug_data = debug_info or {}
+            if session.status:
+                debug_data['status'] = session.status
+            
+            yield f"data: {json.dumps({'content': final_content, 'done': True, 'usage': usage, 'model': 'orchestrator', 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
         full_content = ""
         total_usage = {}
@@ -821,6 +981,8 @@ def chat_stream():
             for chunk in provider.stream_chat(llm_msgs, None, debug=debug_mode):
                 if chunk.is_final:
                     total_usage = chunk.usage
+                    print(f"[STREAM] Usage: {total_usage}")
+                    print(f"[STREAM] Model: {provider.model}")
                     debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
                     break
 
@@ -877,7 +1039,7 @@ def chat_stream():
             if status_error:
                 debug_data['status_error'] = status_error
                 
-            yield f"data: {json.dumps({'content': content_for_user, 'done': True, 'usage': total_usage, 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
+            yield f"data: {json.dumps({'content': content_for_user, 'done': True, 'usage': total_usage, 'model': provider.model, 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
 
         except ContextLengthExceededError as e:
             session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
@@ -952,7 +1114,7 @@ def get_session(session_id: str):
         "total_tokens": session.total_tokens,
         "input_tokens": session.input_tokens,
         "output_tokens": session.output_tokens,
-        "user_settings": session.user_settings,
+        "session_settings": session.session_settings,
         "branches": [
             {
                 "id": b.id,
@@ -1125,15 +1287,15 @@ def get_context_settings(session_id: str):
     if not session:
         return jsonify({"error": "Session not found"}), 404
 
-    optimization = session.user_settings.get("context_optimization", "none")
+    optimization = session.session_settings.get("context_optimization", "none")
     
-    summarization_enabled = session.user_settings.get("summarization_enabled", False)
-    summarize_after_n = session.user_settings.get("summarize_after_n", config.default_messages_interval)
-    summarize_after_minutes = session.user_settings.get("summarize_after_minutes", 0)
-    summarize_context_percent = session.user_settings.get("summarize_context_percent", 0)
+    summarization_enabled = session.session_settings.get("summarization_enabled", False)
+    summarize_after_n = session.session_settings.get("summarize_after_n", config.default_messages_interval)
+    summarize_after_minutes = session.session_settings.get("summarize_after_minutes", 0)
+    summarize_context_percent = session.session_settings.get("summarize_context_percent", 0)
 
-    sliding_window_type = session.user_settings.get("sliding_window_type", "messages")
-    sliding_window_limit = session.user_settings.get("sliding_window_limit", 10)
+    sliding_window_type = session.session_settings.get("sliding_window_type", "messages")
+    sliding_window_limit = session.session_settings.get("sliding_window_limit", 10)
 
     return jsonify({
         "context_optimization": optimization,
@@ -1161,10 +1323,10 @@ def set_context_settings(session_id: str):
     if "context_optimization" in data:
         opt = data["context_optimization"]
         if opt in ("none", "summarization", "sliding_window"):
-            session.user_settings["context_optimization"] = opt
+            session.session_settings["context_optimization"] = opt
 
     if "summarization_enabled" in data:
-        session.user_settings["summarization_enabled"] = bool(data["summarization_enabled"])
+        session.session_settings["summarization_enabled"] = bool(data["summarization_enabled"])
 
     if "summarize_after_n" in data:
         interval = int(data["summarize_after_n"])
@@ -1172,7 +1334,7 @@ def set_context_settings(session_id: str):
             interval = 5
         if interval > 100:
             interval = 100
-        session.user_settings["summarize_after_n"] = interval
+        session.session_settings["summarize_after_n"] = interval
 
     if "summarize_after_minutes" in data:
         minutes = int(data["summarize_after_minutes"])
@@ -1180,7 +1342,7 @@ def set_context_settings(session_id: str):
             minutes = 0
         if minutes > 10080:
             minutes = 10080
-        session.user_settings["summarize_after_minutes"] = minutes
+        session.session_settings["summarize_after_minutes"] = minutes
 
     if "summarize_context_percent" in data:
         percent = int(data["summarize_context_percent"])
@@ -1188,12 +1350,12 @@ def set_context_settings(session_id: str):
             percent = 0
         if percent > 100:
             percent = 100
-        session.user_settings["summarize_context_percent"] = percent
+        session.session_settings["summarize_context_percent"] = percent
 
     if "sliding_window_type" in data:
         wtype = data["sliding_window_type"]
         if wtype in ("messages", "tokens"):
-            session.user_settings["sliding_window_type"] = wtype
+            session.session_settings["sliding_window_type"] = wtype
 
     if "sliding_window_limit" in data:
         limit = int(data["sliding_window_limit"])
@@ -1201,7 +1363,50 @@ def set_context_settings(session_id: str):
             limit = 1
         if limit > 1000:
             limit = 1000
-        session.user_settings["sliding_window_limit"] = limit
+        session.session_settings["sliding_window_limit"] = limit
+
+    session_manager.save_session(session_id)
+
+    return jsonify({"status": "saved"})
+
+
+@api_bp.route("/sessions/<session_id>/tsm-settings", methods=["GET"])
+def get_tsm_settings(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    tsm_mode = tsm.get_tsm_mode(session)
+    state_info = tsm.get_current_state_info(session)
+
+    return jsonify({
+        "tsm_mode": tsm_mode,
+        "mode_name": state_info["mode_name"],
+        "task_name": state_info["task_name"],
+        "state": state_info["state"],
+        "allowed_transitions": state_info["allowed_transitions"],
+        "transition_log": state_info.get("transition_log", []),
+        "available_modes": tsm.TSM_MODES,
+        "mode_descriptions": tsm.TSM_MODE_DESCRIPTIONS,
+    })
+
+
+@api_bp.route("/sessions/<session_id>/tsm-settings", methods=["POST"])
+def set_tsm_settings(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    if "tsm_mode" in data:
+        mode = data["tsm_mode"]
+        try:
+            tsm.set_tsm_mode(session, mode)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
 
     session_manager.save_session(session_id)
 

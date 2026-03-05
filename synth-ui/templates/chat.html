@@ -20,6 +20,8 @@
         <div class="debug-tabs">
             <button class="debug-tab active" data-tab="request" onclick="switchDebugTab('request')">Request</button>
             <button class="debug-tab" data-tab="response" onclick="switchDebugTab('response')">Response</button>
+            <button class="debug-tab" data-tab="subagents" onclick="switchDebugTab('subagents')">Subagents</button>
+            <button class="debug-tab" data-tab="status" onclick="switchDebugTab('status')">Status</button>
         </div>
         <div class="debug-content">
             <pre id="debug-json"></pre>
@@ -154,6 +156,43 @@
     </div>
 </div>
 
+<div id="tsm-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3>Task State Machine</h3>
+        
+        <div class="settings-section">
+            <label>Режим TSM:</label>
+            <div class="radio-group" id="tsm-mode-options">
+                <label class="radio-label">
+                    <input type="radio" name="tsm-mode" value="simple">
+                    <span>Simple Prompt</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="tsm-mode" value="orchestrator">
+                    <span>Orchestrator</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="tsm-mode" value="deterministic">
+                    <span>Deterministic</span>
+                </label>
+            </div>
+            <p class="help-text" id="tsm-mode-description"></p>
+        </div>
+
+        <div class="settings-section" id="tsm-state-info" style="display: none;">
+            <h4>Текущее состояние</h4>
+            <p><strong>Задача:</strong> <span id="tsm-task-name">-</span></p>
+            <p><strong>Состояние:</strong> <span id="tsm-current-state">-</span></p>
+            <p><strong>Допустимые переходы:</strong> <span id="tsm-allowed-transitions">-</span></p>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeTsmModal()">Отмена</button>
+            <button class="btn btn-primary" onclick="saveTsmSettings()">Сохранить</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const PANEL_MODE_KEY = 't6_panel_mode';
     const PANEL_0_SESSION_KEY = 't6_panel_0_session';
@@ -261,6 +300,7 @@
                             <span>Stream</span>
                         </label>
                         <button class="btn btn-icon" onclick="openSummarizationModal(${index})" title="Настройки суммаризации">📝</button>
+                        <button class="btn btn-icon" onclick="openTsmModal(${index})" title="Task State Machine">🔄</button>
                     </div>
                     <button class="btn btn-secondary btn-small" onclick="resetPanelChat(${index})" title="Сбросить чат">🗑️</button>
                 </div>
@@ -967,6 +1007,8 @@
                         updateMessageDisabledState(panelIndex, idx, true);
                     });
                 }
+                
+                await loadPanelMessages(panelIndex);
             }
         } catch (err) {
             if (err.name === 'AbortError') {
@@ -1143,6 +1185,8 @@
                                         updateMessageDisabledState(panelIndex, idx, true);
                                     });
                                 }
+                                
+                                await loadPanelMessages(panelIndex);
                             }
                         } catch (e) {
                             console.error('Parse error:', e);
@@ -1293,6 +1337,44 @@
         const hasStatus = debugData && debugData.status;
         const hasRequest = debugData && debugData.request;
         const hasResponse = debugData && debugData.response;
+        // Check for orchestrator format
+        const hasOrchestratorRequest = debugData && debugData.orchestrator_request;
+        const hasOrchestratorResponse = debugData && debugData.orchestrator_responses;
+        const hasSubagents = debugData && (debugData.subagents || debugData.subagent_calls) && 
+                           (debugData.subagents?.length > 0 || debugData.subagent_calls?.length > 0);
+        
+        // Show/hide subagents tab based on data
+        const subagentTab = document.querySelector('.debug-tab[data-tab="subagents"]');
+        if (subagentTab) {
+            subagentTab.style.display = hasSubagents ? '' : 'none';
+        }
+        
+        // Show status tab always if there's status data
+        const statusTab = document.querySelector('.debug-tab[data-tab="status"]');
+        if (statusTab) {
+            statusTab.style.display = hasStatus ? '' : 'none';
+        }
+        
+        // For orchestrator mode - show all debug data
+        if (hasOrchestratorRequest || hasOrchestratorResponse || hasSubagents) {
+            document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
+            // Show appropriate tabs
+            document.querySelectorAll('.debug-tab').forEach(t => {
+                if (t.dataset.tab === 'request' && hasOrchestratorRequest) {
+                    t.style.display = '';
+                } else if (t.dataset.tab === 'response' && hasOrchestratorResponse) {
+                    t.style.display = '';
+                } else if (t.dataset.tab === 'subagents' && hasSubagents) {
+                    t.style.display = '';
+                } else if (t.dataset.tab === 'status' && hasStatus) {
+                    t.style.display = '';
+                } else {
+                    t.style.display = 'none';
+                }
+            });
+            document.getElementById('debug-modal').style.display = 'flex';
+            return;
+        }
         
         if (isSummary) {
             // Show all summary debug info
@@ -1304,6 +1386,9 @@
             document.querySelectorAll('.debug-tab').forEach(t => {
                 t.style.display = (hasRequest && hasResponse) ? '' : 'none';
             });
+            if (hasSubagents) {
+                subagentTab.style.display = '';
+            }
         } else if (hasStatus) {
             // Show only status
             document.getElementById('debug-json').textContent = JSON.stringify(debugData.status, null, 2);
@@ -1313,6 +1398,9 @@
             document.querySelectorAll('.debug-tab').forEach(t => {
                 t.style.display = (hasRequest && hasResponse) ? '' : 'none';
             });
+            if (hasSubagents) {
+                subagentTab.style.display = '';
+            }
             
             if (hasResponse && !hasRequest) {
                 document.getElementById('debug-json').textContent = JSON.stringify(debugData.response, null, 2);
@@ -1332,7 +1420,16 @@
         document.querySelector(`.debug-tab[data-tab="${tab}"]`).classList.add('active');
         
         if (currentDebugData) {
-            const data = tab === 'request' ? currentDebugData.request : currentDebugData.response;
+            let data;
+            if (tab === 'request') {
+                data = currentDebugData.request || currentDebugData.orchestrator_request || currentDebugData;
+            } else if (tab === 'response') {
+                data = currentDebugData.response || currentDebugData.orchestrator_responses || currentDebugData;
+            } else if (tab === 'subagents') {
+                data = currentDebugData.subagents || currentDebugData.subagent_calls || currentDebugData;
+            } else if (tab === 'status') {
+                data = currentDebugData.status || currentDebugData;
+            }
             document.getElementById('debug-json').textContent = JSON.stringify(data, null, 2);
         }
     }
@@ -1926,6 +2023,96 @@
         } catch (err) {
             console.error('Failed to delete checkpoint:', err);
             alert('Ошибка при удалении чекпоинта');
+        }
+    }
+
+    let currentTsmPanelIndex = 0;
+
+    async function openTsmModal(panelIndex) {
+        currentTsmPanelIndex = panelIndex;
+        const sessionId = panels[panelIndex] ? panels[panelIndex].sessionId : 'default';
+        const modal = document.getElementById('tsm-modal');
+        
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/tsm-settings`);
+            if (!response.ok) {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+                return;
+            }
+            
+            const data = await response.json();
+            
+            document.querySelectorAll('input[name="tsm-mode"]').forEach(radio => {
+                radio.checked = radio.value === data.tsm_mode;
+            });
+            
+            const descEl = document.getElementById('tsm-mode-description');
+            if (data.mode_descriptions && data.tsm_mode) {
+                descEl.textContent = data.mode_descriptions[data.tsm_mode];
+            }
+            
+            const stateInfo = document.getElementById('tsm-state-info');
+            if (data.task_name && data.task_name !== 'разговор на свободную тему') {
+                stateInfo.style.display = 'block';
+                document.getElementById('tsm-task-name').textContent = data.task_name;
+                document.getElementById('tsm-current-state').textContent = data.state || 'null';
+                document.getElementById('tsm-allowed-transitions').textContent = 
+                    data.allowed_transitions.length > 0 ? data.allowed_transitions.join(', ') : 'нет';
+            } else {
+                stateInfo.style.display = 'none';
+            }
+            
+            modal.style.display = 'flex';
+        } catch (err) {
+            console.error('Failed to load TSM settings:', err);
+            alert('Ошибка загрузки настроек TSM');
+        }
+    }
+
+    function closeTsmModal() {
+        document.getElementById('tsm-modal').style.display = 'none';
+    }
+
+    document.querySelectorAll('input[name="tsm-mode"]').forEach(radio => {
+        radio.addEventListener('change', async function() {
+            const sessionId = panels[currentTsmPanelIndex] ? panels[currentTsmPanelIndex].sessionId : 'default';
+            const response = await fetch(`/api/sessions/${sessionId}/tsm-settings`);
+            if (response.ok) {
+                const data = await response.json();
+                const descEl = document.getElementById('tsm-mode-description');
+                if (data.mode_descriptions && this.value) {
+                    descEl.textContent = data.mode_descriptions[this.value];
+                }
+            }
+        });
+    });
+
+    async function saveTsmSettings() {
+        const sessionId = panels[currentTsmPanelIndex] ? panels[currentTsmPanelIndex].sessionId : 'default';
+        const selectedMode = document.querySelector('input[name="tsm-mode"]:checked');
+        
+        if (!selectedMode) {
+            alert('Выберите режим TSM');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/tsm-settings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tsm_mode: selectedMode.value })
+            });
+            
+            if (response.ok) {
+                closeTsmModal();
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (err) {
+            console.error('Failed to save TSM settings:', err);
+            alert('Ошибка сохранения настроек TSM');
         }
     }
 

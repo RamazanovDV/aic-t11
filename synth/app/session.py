@@ -49,7 +49,7 @@ class Session:
     total_tokens: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    user_settings: dict[str, Any] = field(default_factory=dict)
+    session_settings: dict[str, Any] = field(default_factory=dict)
     branches: list[Branch] = field(default_factory=list)
     checkpoints: list[Checkpoint] = field(default_factory=list)
     current_branch: str = "main"
@@ -176,7 +176,7 @@ class Session:
         if not self.messages:
             return []
 
-        optimization = self.user_settings.get("context_optimization", "none")
+        optimization = self.session_settings.get("context_optimization", "none")
 
         if optimization == "sliding_window":
             return self._get_messages_sliding_window()
@@ -211,7 +211,7 @@ class Session:
 
     def _get_messages_sticky_notes(self) -> list[Message]:
         """Сообщения для LLM со sticky notes (факты + N последних сообщений)"""
-        sticky_limit = self.user_settings.get("sticky_notes_limit", 6)
+        sticky_limit = self.session_settings.get("sticky_notes_limit", 6)
 
         active_messages = [m for m in self.messages if not m.disabled and m.role in ("user", "assistant", "system")]
 
@@ -224,8 +224,8 @@ class Session:
 
     def _get_messages_sliding_window(self) -> list[Message]:
         """Сообщения для LLM со скользящим окном"""
-        window_type = self.user_settings.get("sliding_window_type", "messages")
-        window_limit = self.user_settings.get("sliding_window_limit", 10)
+        window_type = self.session_settings.get("sliding_window_type", "messages")
+        window_limit = self.session_settings.get("sliding_window_limit", 10)
 
         active_messages = [m for m in self.messages if not m.disabled and m.role in ("user", "assistant", "system")]
 
@@ -652,6 +652,7 @@ class Session:
         self.input_tokens = 0
         self.output_tokens = 0
         self.facts = {}
+        self.status = {}
         self.updated_at = datetime.now()
 
     def clear_debug(self) -> None:
@@ -725,7 +726,7 @@ class SessionManager:
                     total_tokens=data.get("total_tokens", 0),
                     input_tokens=data.get("input_tokens", 0),
                     output_tokens=data.get("output_tokens", 0),
-                    user_settings=data.get("user_settings", {}),
+                    session_settings=data.get("session_settings", data.get("user_settings", {})),
                     branches=branches,
                     checkpoints=checkpoints,
                     current_branch=data.get("current_branch", "main"),
@@ -840,7 +841,7 @@ class SessionManager:
                 total_tokens=data.get("total_tokens", 0),
                 input_tokens=data.get("input_tokens", 0),
                 output_tokens=data.get("output_tokens", 0),
-                user_settings=data.get("user_settings", {}),
+                session_settings=data.get("session_settings", data.get("user_settings", {})),
                 branches=branches,
                 checkpoints=checkpoints,
                 current_branch=data.get("current_branch", "main"),

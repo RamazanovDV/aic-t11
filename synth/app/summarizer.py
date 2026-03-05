@@ -55,22 +55,22 @@ def should_summarize(session, current_message_count: int) -> tuple[bool, str]:
     Проверяет, нужно ли запустить суммаризацию.
     Возвращает tuple(нужна ли суммаризация, причина).
     """
-    enabled = session.user_settings.get("summarization_enabled", False)
+    enabled = session.session_settings.get("summarization_enabled", False)
     if not enabled:
         return False, "disabled"
 
     count_since_summary = session.get_user_message_count_since_summary()
-    interval = session.user_settings.get("summarize_after_n", config.default_messages_interval)
+    interval = session.session_settings.get("summarize_after_n", config.default_messages_interval)
     if count_since_summary >= interval:
         return True, f"messages_count:{count_since_summary}/{interval}"
 
-    time_minutes = session.user_settings.get("summarize_after_minutes", 0)
+    time_minutes = session.session_settings.get("summarize_after_minutes", 0)
     if time_minutes > 0:
         age = session.get_oldest_message_age_minutes()
         if age >= time_minutes:
             return True, f"time:{age}/{time_minutes}min"
 
-    context_percent = session.user_settings.get("summarize_context_percent", 0)
+    context_percent = session.session_settings.get("summarize_context_percent", 0)
     if context_percent > 0:
         usage = session.get_context_usage_percent()
         if usage >= context_percent:
