@@ -108,7 +108,7 @@ class Session:
         valid_states = {"planning", "execution", "validation", "done"}
 
         self.status = {
-            "task_name": status_data.get("task_name", "разговор на свободную тему"),
+            "task_name": status_data.get("task_name", "разговор на свободной теме"),
             "state": status_data.get("state") if status_data.get("state") in valid_states else None,
             "progress": status_data.get("progress"),
             "project": status_data.get("project"),
@@ -118,6 +118,8 @@ class Session:
             "already_done": status_data.get("already_done"),
             "currently_doing": status_data.get("currently_doing"),
             "user_info": status_data.get("user_info"),
+            "active_subtasks": status_data.get("active_subtasks", []),
+            "subtasks": status_data.get("subtasks", []),
         }
         self.updated_at = datetime.now()
 

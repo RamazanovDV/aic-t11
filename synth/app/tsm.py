@@ -278,11 +278,23 @@ def process_orchestrator_response(
         
         parsed_status, cleaned_content = validate_status_block(response.content)
         
+        # Debug: log what the model returned
+        print(f"[TSM] === MODEL RESPONSE START ===")
+        print(f"[TSM] Response length: {len(response.content)}")
+        print(f"[TSM] Response content (first 500 chars):")
+        print(response.content[:500])
+        print(f"[TSM] === MODEL RESPONSE END ===")
+        
         print(f"[TSM] Iteration {iteration}: parsed_status = {parsed_status is not None}")
         
         if not parsed_status:
             print(f"[TSM] No parsed status found, breaking")
             break
+        
+        # Сохраняем raw status для debug
+        if debug_info is None:
+            debug_info = {}
+        debug_info['raw_status'] = parsed_status
         
         session.update_status(parsed_status)
         current_status = parsed_status
@@ -390,10 +402,16 @@ def process_orchestrator_response(
             break
     
     if debug_mode:
+        try:
+            debug_usage = response.usage
+        except UnboundLocalError:
+            debug_usage = {}
         debug_info["final_orchestrator_response"] = {
             "content": current_content[:500] if current_content else "",
-            "usage": response.usage if 'response' in dir() else {}
+            "usage": debug_usage
         }
+        if current_status:
+            debug_info['raw_status'] = current_status
     
     return {
         "final_content": current_content,

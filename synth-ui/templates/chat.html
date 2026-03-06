@@ -796,6 +796,7 @@
         }
         
         container.appendChild(rowDiv);
+        container.scrollTop = container.scrollHeight;
     }
 
     function updatePanelStats(panelIndex, inputTokens, outputTokens, totalTokens) {
@@ -1351,12 +1352,6 @@
         const hasSubagents = debugData && (debugData.subagents || debugData.subagent_calls) && 
                            (debugData.subagents?.length > 0 || debugData.subagent_calls?.length > 0);
         
-        // Show/hide subagents tab based on data
-        const subagentTab = document.querySelector('.debug-tab[data-tab="subagents"]');
-        if (subagentTab) {
-            subagentTab.style.display = hasSubagents ? '' : 'none';
-        }
-        
         // Show status tab always if there's status data
         const statusTab = document.querySelector('.debug-tab[data-tab="status"]');
         if (statusTab) {
@@ -1372,7 +1367,7 @@
                     t.style.display = '';
                 } else if (t.dataset.tab === 'response' && hasOrchestratorResponse) {
                     t.style.display = '';
-                } else if (t.dataset.tab === 'subagents' && hasSubagents) {
+                } else if (t.dataset.tab === 'subagents') {
                     t.style.display = '';
                 } else if (t.dataset.tab === 'status' && hasStatus) {
                     t.style.display = '';
@@ -1396,23 +1391,20 @@
             document.querySelectorAll('.debug-tab').forEach(t => {
                 t.style.display = (hasRequest && hasResponse) ? '' : 'none';
             });
-            if (hasSubagents) {
-                subagentTab.style.display = '';
-            }
+            document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
         } else if (hasStatus) {
             // Show only status
             document.getElementById('debug-json').textContent = JSON.stringify(debugData.status, null, 2);
             document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
+            document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
         } else {
             // Standard debug for LLM calls
             document.querySelectorAll('.debug-tab').forEach(t => {
                 t.style.display = (hasRequest && hasResponse) ? '' : 'none';
             });
-            if (hasSubagents) {
-                subagentTab.style.display = '';
-            }
+            document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
             
             if (hasResponse && !hasRequest) {

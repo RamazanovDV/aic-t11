@@ -550,14 +550,14 @@ def _process_orchestrator_mode(
         final_content = cleaned_content
     
     class MockResponse:
-        def __init__(self, content, usage, debug_info):
+        def __init__(self, content, usage, debug_info, model):
             self.content = content
             self.usage = usage
             self.debug_request = debug_info.get("orchestrator_request", {}) if debug_info else {}
             self.debug_response = debug_info
-            self.model = "orchestrator"
+            self.model = model
     
-    mock_response = MockResponse(final_content, usage, debug_info)
+    mock_response = MockResponse(final_content, usage, debug_info, provider.model)
     
     return mock_response, final_content, None, debug_info
 
@@ -659,6 +659,12 @@ def chat():
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
 
+    if data.get("tsm_mode"):
+        try:
+            tsm.set_tsm_mode(session, data["tsm_mode"])
+        except ValueError as e:
+            return jsonify({"error": f"Invalid tsm_mode: {str(e)}"}), 400
+    
     is_first_message = session.get_active_message_count() == 0
     session.add_user_message(user_message, source=source)
 
@@ -744,6 +750,9 @@ def chat():
             }
         if session.status:
             debug_info['status'] = session.status
+            # Сохраняем active_subtasks и subtasks из status
+            debug_info['active_subtasks'] = session.status.get('active_subtasks', [])
+            debug_info['subtasks'] = session.status.get('subtasks', [])
 
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model)
 
@@ -819,6 +828,12 @@ def chat_stream():
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
 
+    if data.get("tsm_mode"):
+        try:
+            tsm.set_tsm_mode(session, data["tsm_mode"])
+        except ValueError as e:
+            return jsonify({"error": f"Invalid tsm_mode: {str(e)}"}), 400
+    
     user_id = request.headers.get("X-User-Id")
     is_first_message = session.get_active_message_count() == 0
 
@@ -947,7 +962,7 @@ def chat_stream():
                 yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
             
             # Сохраняем в сессию (user_message уже добавлен в get_messages_for_llm)
-            session.add_assistant_message(final_content, usage, debug=debug_info, model="orchestrator")
+            session.add_assistant_message(final_content, usage, debug=debug_info, model=provider.model)
             
             # Добавляем статус в debug_info для сохранения в сессии
             if debug_info is None:
@@ -962,7 +977,7 @@ def chat_stream():
             if session.status:
                 debug_data['status'] = session.status
             
-            yield f"data: {json.dumps({'content': final_content, 'done': True, 'usage': usage, 'model': 'orchestrator', 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
+            yield f"data: {json.dumps({'content': final_content, 'done': True, 'usage': usage, 'model': provider.model, 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
@@ -1012,6 +1027,10 @@ def chat_stream():
             
             if parsed_status:
                 session.update_status(parsed_status)
+                # Сохраняем raw status для debug
+                if debug_info is None:
+                    debug_info = {}
+                debug_info['raw_status'] = parsed_status
                 _handle_project_updates(session)
                 _handle_user_info_update(parsed_status, user_id)
                 content_for_user = cleaned_content
@@ -1053,6 +1072,8 @@ def chat_stream():
             debug_data = {'request': debug_request, 'response': debug_response}
             if session.status:
                 debug_data['status'] = session.status
+                debug_data['active_subtasks'] = session.status.get('active_subtasks', [])
+                debug_data['subtasks'] = session.status.get('subtasks', [])
             if status_error:
                 debug_data['status_error'] = status_error
                 

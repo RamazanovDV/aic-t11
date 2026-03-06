@@ -108,6 +108,8 @@ def _parse_and_validate(status_json: str) -> dict[str, Any] | None:
         validated["already_done"] = status.get("already_done")
         validated["currently_doing"] = status.get("currently_doing")
         validated["user_info"] = status.get("user_info")
+        validated["active_subtasks"] = status.get("active_subtasks", [])
+        validated["subtasks"] = status.get("subtasks", [])
         
         return validated
         
