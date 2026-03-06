@@ -165,6 +165,9 @@ def chat_stream():
         payload["provider"] = provider_name
     if model:
         payload["model"] = model
+    tsm_mode = data.get("tsm_mode")
+    if tsm_mode:
+        payload["tsm_mode"] = tsm_mode
 
     try:
         response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=payload, timeout=120, stream=True)

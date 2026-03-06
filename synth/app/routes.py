@@ -116,6 +116,7 @@ def get_project_prompt(session) -> str:
     
     project_info = project_manager.project_manager.get_project_info(project_name)
     current_task = project_manager.project_manager.get_current_task(project_name)
+    invariants = project_manager.project_manager.get_invariants(project_name)
     
     result = f"\n\n[ПРОЕКТ: {project_name}]\n"
     
@@ -126,6 +127,14 @@ def get_project_prompt(session) -> str:
     
     if current_task:
         result += f"\n[ТЕКУЩАЯ ЗАДАЧА]\n{current_task}\n"
+    
+    if invariants:
+        result += f"\n[ИНВАРИАНТЫ - ОБЯЗАТЕЛЬНО К СОБЛЮДЕНИЮ]\n"
+        for key, value in invariants.items():
+            if isinstance(value, list):
+                result += f"- {key}: {', '.join(str(v) for v in value)}\n"
+            else:
+                result += f"- {key}: {value}\n"
     
     return result
 
@@ -477,7 +486,8 @@ def _process_status_block(
         "\n\nВАЖНО: Ты ОБЯЗАН добавить JSON-блок со статусом задачи в конце ответа! "
         "Формат: {\"status\": {\"task_name\": \"...\", \"state\": \"...\", \"progress\": \"...\", "
         "\"project\": \"название_проекта\", \"updated_project_info\": \"...\", \"current_task_info\": \"...\", "
-        "\"approved_plan\": \"...\", \"already_done\": \"...\", \"currently_doing\": \"...\"}}"
+        "\"approved_plan\": \"...\", \"already_done\": \"...\", \"currently_doing\": \"...\", "
+        "\"invariants\": {\"ключ\": \"значение\"} или null}}"
     )
 
     for attempt in range(max_retries):
@@ -504,9 +514,13 @@ def _process_status_block(
 
         if attempt < max_retries - 1:
             llm_messages = session.get_messages_for_llm()
-            llm_messages.append(
-                {"role": "user", "content": "Пожалуйста, добавь в конце своего ответа JSON-блок со статусом задачи в формате: {\"status\": {\"task_name\": \"название\", \"state\": \"состояние\", \"progress\": \"прогресс\", \"project\": \"проект\", \"updated_project_info\": \"обновлённое описание проекта\", \"current_task_info\": \"текущая задача\", \"approved_plan\": \"план\", \"already_done\": \"сделано\", \"currently_doing\": \"текущее\"}}"}
-            )
+            status_format = "Пожалуйста, добавь в конце своего ответа JSON-блок со статусом задачи в формате: "
+            status_format += '{"status": {"task_name": "название", "state": "состояние", "progress": "прогресс", '
+            status_format += '"project": "проект", "updated_project_info": "обновлённое описание проекта", '
+            status_format += '"current_task_info": "текущая задача", "approved_plan": "план", '
+            status_format += '"already_done": "сделано", "currently_doing": "текущее", '
+            status_format += '"invariants": {"язык": "Python", "не использовать": ["материал1"]} или null}}'
+            llm_messages.append({"role": "user", "content": status_format})
 
     return response, response.content, "Модель не формирует блок статуса в ответе", None
 
@@ -608,6 +622,10 @@ def _handle_project_updates(session) -> None:
     current_task = status.get("current_task_info")
     if current_task:
         project_manager.project_manager.save_current_task(project_name, current_task)
+
+    invariants = status.get("invariants")
+    if invariants:
+        project_manager.project_manager.save_invariants(project_name, invariants)
 
 
 @api_bp.route("/chat", methods=["POST"])
@@ -769,10 +787,6 @@ def chat():
     
     if debug_info:
         result["debug"] = debug_info
-    if session.status:
-        if "debug" not in result:
-            result["debug"] = {}
-        result["debug"]["status"] = session.status
     
     return jsonify(result)
 
@@ -921,10 +935,16 @@ def chat_stream():
             
             # Проверим есть ли system message в списке
             has_system = any(m.role == "system" for m in llm_msgs)
-            # Если system уже в сообщениях - передаем None в provider, но сохраняем для debug
+            
+            # Если system уже в сообщениях - передаем None в provider
             orchestrator_system = None if has_system else system_prompt
             
             print(f"[ROUTES] Calling orchestrator with {len(llm_msgs)} messages")
+            
+            # Callback для отправки прогресса subtasks в реальном времени
+            progress_events = []
+            def progress_callback(subtask_name: str, status: str):
+                progress_events.append({'type': 'subtask_progress', 'name': subtask_name, 'status': status})
             
             try:
                 result = tsm.process_orchestrator_response(
@@ -933,14 +953,20 @@ def chat_stream():
                     provider=provider,
                     system_prompt=orchestrator_system,
                     debug_prompt=system_prompt,  # Для debug показываем полный промт
-                    debug_mode=debug_mode
+                    debug_mode=debug_mode,
+                    progress_callback=progress_callback
                 )
+                
+                # Отправляем events прогресса перед основным контентом
+                for event in progress_events:
+                    yield f"data: {json.dumps(event)}\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'type': 'error', 'error': f'Orchestrator error: {str(e)}'})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
             
             final_content = result.get("final_content", "")
+            subtask_results = result.get("subtask_results", [])
             debug_info = result.get("debug") if debug_mode else None
             if debug_mode and final_content:
                 if debug_info is None:
@@ -966,17 +992,19 @@ def chat_stream():
                 yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
             
             # Сохраняем в сессию (user_message уже добавлен в get_messages_for_llm)
+            if session.status:
+                if debug_info is None:
+                    debug_info = {}
+                debug_info['status'] = session.status
+                debug_info['subtasks'] = session.status.get('subtasks', [])
+                
             session.add_assistant_message(final_content, usage, debug=debug_info, model=provider.model)
             
             session_manager.save_session(session_id)
             
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
-            debug_data = debug_info or {}
-            if session.status:
-                debug_data['status'] = session.status
-                debug_data['subtasks'] = session.status.get('subtasks', [])
             
-            yield f"data: {json.dumps({'content': final_content, 'done': True, 'usage': usage, 'model': provider.model, 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
+            yield f"data: {json.dumps({'content': final_content, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
@@ -1017,7 +1045,7 @@ def chat_stream():
             if not full_content:
                 raise Exception("Empty response from provider")
 
-            debug_info = {"request": debug_request, "response": debug_response} if debug_mode else None
+            debug_info = {"request": debug_request, "response": debug_response, "raw_model_response": full_content} if debug_mode else None
             
             content_for_user = full_content
             status_error = None
@@ -1026,17 +1054,18 @@ def chat_stream():
             
             if parsed_status:
                 session.update_status(parsed_status)
-                if debug_mode and full_content:
-                    if debug_info is None:
-                        debug_info = {}
-                    debug_info['raw_model_response'] = full_content
                 _handle_project_updates(session)
                 _handle_user_info_update(parsed_status, user_id)
                 content_for_user = cleaned_content
             else:
                 for retryAttempt in range(3):
                         retry_msgs = session.get_messages_for_llm()
-                        retry_msgs.append(Message(role="user", content="Пожалуйста, добавь в конце своего ответа JSON-блок со статусом задачи в формате: {\"status\": {\"task_name\": \"название\", \"state\": \"состояние\", \"progress\": \"прогресс\", \"project\": \"проект\", \"updated_project_info\": \"обновлённое описание\", \"current_task_info\": \"текущая задача\", \"approved_plan\": \"план\", \"already_done\": \"сделано\", \"currently_doing\": \"текущее\"}}", usage={}))
+                        retry_status_format = '{"status": {"task_name": "название", "state": "состояние", "progress": "прогресс", '
+                        retry_status_format += '"project": "проект", "updated_project_info": "обновлённое описание", '
+                        retry_status_format += '"current_task_info": "текущая задача", "approved_plan": "план", '
+                        retry_status_format += '"already_done": "сделано", "currently_doing": "текущее", '
+                        retry_status_format += '"invariants": {"язык": "Python", "не использовать": ["материал1"]} или null}}'
+                        retry_msgs.append(Message(role="user", content="Пожалуйста, добавь в конце своего ответа JSON-блок со статусом задачи в формате: " + retry_status_format, usage={}))
                         retry_system = system_prompt + "\n\nВАЖНО: Ты ОБЯЗАН добавить JSON-блок со статусом задачи в конце ответа!"
                         
                         try:
@@ -1048,6 +1077,10 @@ def chat_stream():
                                 _handle_project_updates(session)
                                 _handle_user_info_update(retry_status, user_id)
                                 content_for_user = retry_cleaned
+                                if debug_mode and retry_response.content:
+                                    if debug_info is None:
+                                        debug_info = {}
+                                    debug_info['raw_model_response'] = retry_response.content
                                 break
                         except Exception:
                             if retryAttempt == 2:
@@ -1057,21 +1090,24 @@ def chat_stream():
             if needs_summarization:
                 # При суммаризации user message ещё не был добавлен
                 session.add_user_message(user_msg_for_llm, source=source)
+            
+            if session.status:
+                if debug_info is None:
+                    debug_info = {}
+                debug_info['status'] = session.status
+                debug_info['subtasks'] = session.status.get('subtasks', [])
+            if status_error:
+                if debug_info is None:
+                    debug_info = {}
+                debug_info['status_error'] = status_error
+                
             session.add_assistant_message(content_for_user, total_usage, debug=debug_info, model=provider.model)
 
             session_manager.save_session(session_id)
 
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
-            debug_data = {'request': debug_request, 'response': debug_response}
-            if debug_info and 'raw_model_response' in debug_info:
-                debug_data['raw_model_response'] = debug_info['raw_model_response']
-            if session.status:
-                debug_data['status'] = session.status
-                debug_data['subtasks'] = session.status.get('subtasks', [])
-            if status_error:
-                debug_data['status_error'] = status_error
                 
-            yield f"data: {json.dumps({'content': content_for_user, 'done': True, 'usage': total_usage, 'model': provider.model, 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
+            yield f"data: {json.dumps({'content': content_for_user, 'done': True, 'usage': total_usage, 'model': provider.model, 'debug': debug_info, 'disabled_indices': disabled_indices})}\n\n"
 
         except ContextLengthExceededError as e:
             session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
@@ -1115,7 +1151,7 @@ def list_sessions():
 @api_bp.route("/sessions/<session_id>", methods=["GET"])
 @require_user
 def get_session(session_id: str):
-    session = session_manager.get_session(session_id)
+    session = session_manager.get_session(session_id, reload=True)
     if not session:
         return jsonify({"error": "Session not found"}), 404
     
@@ -1147,6 +1183,7 @@ def get_session(session_id: str):
         "input_tokens": session.input_tokens,
         "output_tokens": session.output_tokens,
         "session_settings": session.session_settings,
+        "tsm_mode": session.session_settings.get("tsm_mode"),
         "branches": [
             {
                 "id": b.id,
@@ -1404,7 +1441,8 @@ def set_context_settings(session_id: str):
 
 @api_bp.route("/sessions/<session_id>/tsm-settings", methods=["GET"])
 def get_tsm_settings(session_id: str):
-    session = session_manager.get_session(session_id)
+    session_manager.save_session(session_id)  # Save any pending changes first
+    session = session_manager.get_session(session_id, reload=True)  # Reload to get fresh data
     if not session:
         return jsonify({"error": "Session not found"}), 404
 

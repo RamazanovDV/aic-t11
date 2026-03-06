@@ -45,14 +45,14 @@ def set_tsm_mode(session, mode: str) -> None:
     session.session_settings["tsm_mode"] = mode
 
 
-def get_tsm_prompt(session) -> str:
+def get_tsm_prompt(session, debug: bool = False) -> str:
     """Получить промт TSM в зависимости от режима."""
     mode = get_tsm_mode(session)
     
     if mode == "simple":
         return _get_simple_prompt()
     elif mode == "orchestrator":
-        return _get_orchestrator_prompt()
+        return _get_orchestrator_prompt(debug=debug)
     elif mode == "deterministic":
         return _get_deterministic_prompt(session)
     
@@ -64,8 +64,10 @@ def _get_simple_prompt() -> str:
     return config.get_context_file("STATUS_SIMPLE.md") or ""
 
 
-def _get_orchestrator_prompt() -> str:
+def _get_orchestrator_prompt(debug: bool = False) -> str:
     """Получить промт оркестратора."""
+    if debug:
+        return config.get_context_file("STATUS_ORCHESTRATOR_DEBUG.md") or config.get_context_file("STATUS_ORCHESTRATOR.md") or ""
     return config.get_context_file("STATUS_ORCHESTRATOR.md") or ""
 
 
@@ -206,7 +208,8 @@ def process_orchestrator_response(
     provider,
     system_prompt: str,
     debug_mode: bool = False,
-    debug_prompt: str | None = None
+    debug_prompt: str | None = None,
+    progress_callback=None
 ) -> dict:
     """
     Обработать ответ оркестратора и при необходимости вызвать сабагентов.
@@ -223,13 +226,15 @@ def process_orchestrator_response(
         system_prompt: системный промт для LLM
         debug_mode: включить отладочный вывод
         debug_prompt: системный промт для отладки (если отличается от system_prompt)
+        progress_callback: callback для отправки прогресса (fn(subtask_name, status))
     
     Returns:
         dict: {
             "final_content": str,  # финальный ответ пользователю
             "final_status": dict,   # финальный статус
             "debug": {...},         # вся цепочка для debug
-            "usage": dict           # суммарное использование токенов
+            "usage": dict,          # суммарное использование токенов
+            "subtask_results": [...] # результаты выполнения подзадач
         }
     """
     from app.status_validator import validate_status_block
@@ -259,7 +264,9 @@ def process_orchestrator_response(
     iteration = 0
     max_iterations = 10
     
-    def build_system_prompt(base_prompt: str, active_list: list[dict]) -> str:
+    def build_system_prompt(base_prompt: str | None, active_list: list[dict]) -> str | None:
+        if not base_prompt:
+            return base_prompt
         if not active_list:
             return base_prompt
         active_info = "\n[УЖЕ ЗАПУЩЕНЫ И ВЫПОЛНЯЮТСЯ]:\n"
@@ -275,39 +282,26 @@ def process_orchestrator_response(
         try:
             response = provider.chat(llm_messages, current_system_prompt, debug=False)
         except Exception as e:
+            print(f"[TSM] ERROR in provider.chat iteration {iteration}: {e}")
+            print(f"[TSM] Stopping orchestration due to error, returning current results")
             if debug_mode:
                 debug_info["error"] = str(e)
-            raise
+            break
         
-        if debug_mode:
-            debug_info["orchestrator_responses"].append({
-                "content": response.content[:500] if response.content else "",
-                "usage": response.usage,
-                "status": session.status
-            })
-        
-        current_content = response.content
-        
-        total_usage["input_tokens"] += response.usage.get("input_tokens", 0)
-        total_usage["output_tokens"] += response.usage.get("output_tokens", 0)
-        total_usage["total_tokens"] += response.usage.get("total_tokens", 0)
+        print(f"[TSM] Iteration {iteration}: Got response, length {len(response.content)}")
         
         parsed_status, cleaned_content = validate_status_block(response.content)
-        
-        print("[TSM] === MODEL RESPONSE START ===")
-        print(f"[TSM] Response length: {len(response.content)}")
-        print("[TSM] Response content (first 500 chars):")
-        print(response.content[:500])
-        print("[TSM] === MODEL RESPONSE END ===")
-        
-        print(f"[TSM] Iteration {iteration}: parsed_status = {parsed_status is not None}")
         
         if not parsed_status:
             print("[TSM] No parsed status found, breaking")
             break
         
+        # Сохраняем очищенный контент
+        current_content = cleaned_content if cleaned_content else response.content
+        
         if debug_mode and response.content:
             debug_info['raw_model_response'] = response.content
+            debug_info['raw_status'] = parsed_status
         
         session.update_status(parsed_status)
         current_status = parsed_status
@@ -321,7 +315,7 @@ def process_orchestrator_response(
                 new_subtasks.append(st)
                 active_subtasks_internal.append(st)
         
-        print(f"[TSM] Model subtasks: {len(model_subtasks)}, New to launch: {len(new_subtasks)}, Already running: {len(active_subtasks_internal)}")
+            print(f"[TSM] Model subtasks: {len(model_subtasks)}, New: {len(new_subtasks)}")
         
         if not new_subtasks and not active_subtasks_internal:
             print("[TSM] No and no active ones subtasks to launch, breaking")
@@ -354,8 +348,10 @@ def process_orchestrator_response(
                 Message(role="user", content=subtask_prompt, usage={})
             ]
             
+            print(f"[TSM] Calling subagent '{subtask_name}' with prompt len={len(subtask_prompt)}")
+            
             try:
-                subagent_response = provider.chat(subagent_messages, subtask_prompt, debug=False)
+                subagent_response = provider.chat(subagent_messages, None, debug=False)
             except Exception as e:
                 if debug_mode:
                     subagent_call_info["error"] = str(e)
@@ -367,6 +363,8 @@ def process_orchestrator_response(
                     "success": False,
                     "error": str(e)
                 })
+                if progress_callback:
+                    progress_callback(subtask_name, "failed")
                 continue
             
             subagent_content = subagent_response.content
@@ -388,8 +386,11 @@ def process_orchestrator_response(
                 "content": subagent_content
             })
             
+            if progress_callback:
+                progress_callback(subtask_name, "completed")
+            
             subagent_result_message = Message(
-                role="subagent",
+                role="user",
                 content=subagent_content,
                 usage={}
             )
@@ -415,6 +416,8 @@ def process_orchestrator_response(
             if failed_tasks:
                 tasks_summary += "\n" + "\n".join(failed_tasks)
             
+            print(f"[TSM] subtask_results: {len(subtask_results)} tasks, completed: {len(completed_tasks)}, failed: {len(failed_tasks)}")
+            
             continuation_prompt = f"""Результаты выполнения подзадач:
 
 {tasks_summary}
@@ -424,8 +427,12 @@ def process_orchestrator_response(
             
             llm_messages.append(Message(role="user", content=continuation_prompt, usage={}))
             
-            current_content += f"\n\n---\n\n**Результаты подзадач:**\n{tasks_summary}"
+            if current_content:
+                current_content += f"\n\n---\n\n**Результаты подзадач:**\n{tasks_summary}"
+            else:
+                current_content = f"**Результаты подзадач:**\n{tasks_summary}"
             
+            print(f"[TSM] Completed {len(subtask_results)} subtasks, continuing to iteration {iteration + 1}")
             continue  # Продолжаем цикл для обработки результатов моделью
         else:
             break
@@ -446,5 +453,6 @@ def process_orchestrator_response(
         "final_content": current_content,
         "final_status": current_status,
         "debug": debug_info if debug_mode else None,
-        "usage": total_usage
+        "usage": total_usage,
+        "subtask_results": subtask_results
     }

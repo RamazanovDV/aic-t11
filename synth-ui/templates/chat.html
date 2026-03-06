@@ -560,6 +560,7 @@
                 panel.currentBranch = data.current_branch || 'main';
                 panel.branches = data.branches || [];
                 panel.checkpoints = data.checkpoints || [];
+                panel.tsmMode = data.tsm_mode || null;
             }
         } catch (e) {
             if (e.message !== 'Unauthorized') {
@@ -988,7 +989,7 @@
                     'X-User-Id': user ? user.id : '',
                 },
                 signal: panel.abortController ? panel.abortController.signal : null,
-                body: JSON.stringify({ message, provider, model, debug: debugMode, source: 'web' })
+                body: JSON.stringify({ message, provider, model, debug: debugMode, source: 'web', tsm_mode: panel.tsmMode || null })
             });
 
             if (response.status === 401) {
@@ -1042,7 +1043,7 @@
                     'X-User-Id': user ? user.id : '',
                 },
                 signal: panel.abortController ? panel.abortController.signal : null,
-                body: JSON.stringify({ message, provider, model, debug: debugMode, source: 'web' })
+                body: JSON.stringify({ message, provider, model, debug: debugMode, source: 'web', tsm_mode: panel.tsmMode || null })
             });
 
             if (response.status === 401) {
@@ -1103,6 +1104,11 @@
                                 return;
                             }
 
+                            if (data.type === 'subtask_progress') {
+                                updateSubtaskProgress(panelIndex, data.name, data.status);
+                                continue;
+                            }
+
                             if (data.error) {
                                 const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
                                 addMessageToPanel(panelIndex, 'Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
@@ -1123,6 +1129,16 @@
                             }
 
                             if (data.done) {
+                                // Показываем subtask_results даже если контент пустой
+                                if (data.subtask_results && data.subtask_results.length > 0) {
+                                    renderSubtaskProgress(messageContent, data.subtask_results);
+                                }
+                                // Пропускаем пустой контент, но оставляем subtask results
+                                if (!fullContent || !fullContent.trim()) {
+                                    rowDiv.remove();
+                                    hideSummarizationIndicator(panelIndex);
+                                    return;
+                                }
                                 // Применяем markdown только в конце
                                 messageContent.innerHTML = marked.parse(fullContent.trim());
                                 let modelName = null;
@@ -2149,6 +2165,108 @@
             console.error('Failed to save TSM settings:', err);
             alert('Ошибка сохранения настроек TSM');
         }
+    }
+
+    function renderSubtaskProgress(container, subtaskResults) {
+        const progressDiv = document.createElement('div');
+        progressDiv.className = 'subtask-progress';
+        progressDiv.style.cssText = 'margin-top: 12px; padding: 12px; background: #f5f5f5; border-radius: 8px;';
+        
+        const title = document.createElement('div');
+        title.style.cssText = 'font-weight: 600; margin-bottom: 8px; color: #333;';
+        title.textContent = 'Выполненные подзадачи:';
+        progressDiv.appendChild(title);
+        
+        const list = document.createElement('ul');
+        list.style.cssText = 'list-style: none; padding: 0; margin: 0;';
+        
+        subtaskResults.forEach(task => {
+            const li = document.createElement('li');
+            li.style.cssText = 'display: flex; align-items: center; gap: 8px; padding: 4px 0;';
+            li.dataset.taskName = task.name;
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = true;
+            checkbox.disabled = true;
+            checkbox.style.cssText = 'width: 16px; height: 16px; accent-color: #22c55e;';
+            
+            const label = document.createElement('span');
+            label.textContent = task.name;
+            label.style.cssText = 'color: #22c55e; font-size: 14px;';
+            
+            li.appendChild(checkbox);
+            li.appendChild(label);
+            list.appendChild(li);
+        });
+        
+        progressDiv.appendChild(list);
+        container.appendChild(progressDiv);
+    }
+
+    function updateSubtaskProgress(panelIndex, taskName, status) {
+        const panel = panels[panelIndex];
+        if (!panel) return;
+        
+        const messages = panel.messagesContainer.querySelectorAll('.message-assistant');
+        if (messages.length === 0) return;
+        
+        const lastMessage = messages[messages.length - 1];
+        let progressDiv = lastMessage.querySelector('.subtask-progress');
+        
+        if (!progressDiv) {
+            progressDiv = document.createElement('div');
+            progressDiv.className = 'subtask-progress';
+            progressDiv.style.cssText = 'margin-top: 12px; padding: 12px; background: #f5f5f5; border-radius: 8px;';
+            
+            const title = document.createElement('div');
+            title.style.cssText = 'font-weight: 600; margin-bottom: 8px; color: #333;';
+            title.textContent = 'Выполненные подзадачи:';
+            progressDiv.appendChild(title);
+            
+            const list = document.createElement('ul');
+            list.style.cssText = 'list-style: none; padding: 0; margin: 0;';
+            progressDiv.appendChild(list);
+            
+            const messageContent = lastMessage.querySelector('.message-content');
+            if (messageContent) {
+                messageContent.appendChild(progressDiv);
+            }
+        }
+        
+        const list = progressDiv.querySelector('ul');
+        const existingLi = list.querySelector(`[data-task-name="${taskName}"]`);
+        
+        if (!existingLi) {
+            const li = document.createElement('li');
+            li.style.cssText = 'display: flex; align-items: center; gap: 8px; padding: 4px 0;';
+            li.dataset.taskName = taskName;
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = status === 'completed';
+            checkbox.disabled = true;
+            checkbox.style.cssText = 'width: 16px; height: 16px;';
+            
+            const label = document.createElement('span');
+            label.textContent = taskName;
+            if (status === 'completed') {
+                checkbox.style.accentColor = '#22c55e';
+                label.style.color = '#22c55e';
+            } else if (status === 'failed') {
+                checkbox.style.accentColor = '#ef4444';
+                label.style.color = '#ef4444';
+            } else {
+                label.style.color = '#666';
+            }
+            label.style.cssText = 'font-size: 14px;';
+            
+            li.appendChild(checkbox);
+            li.appendChild(label);
+            list.appendChild(li);
+        }
+        
+        panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
     }
 
     initPanels();

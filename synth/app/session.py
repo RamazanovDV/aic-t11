@@ -64,6 +64,7 @@ class Session:
         "already_done": None,
         "currently_doing": None,
         "user_info": None,
+        "invariants": None,
     })
     owner_id: str | None = None
     access: str = "owner"
@@ -119,6 +120,7 @@ class Session:
             "currently_doing": status_data.get("currently_doing"),
             "user_info": status_data.get("user_info"),
             "subtasks": status_data.get("subtasks", []),
+            "invariants": status_data.get("invariants"),
         }
         self.updated_at = datetime.now()
 
@@ -739,7 +741,8 @@ class SessionManager:
                         "current_task_info": None,
                         "approved_plan": None,
                         "already_done": None,
-                        "currently_doing": None
+                        "currently_doing": None,
+                        "invariants": None,
                     }),
                     owner_id=data.get("owner_id"),
                     access=data.get("access", "owner"),
@@ -747,7 +750,61 @@ class SessionManager:
                 session._ensure_main_branch()
                 self._sessions[session_id] = session
 
-    def get_session(self, session_id: str) -> Session:
+    def get_session(self, session_id: str, reload: bool = False) -> Session:
+        if reload:
+            # Force reload from storage
+            if session_id in self._sessions:
+                self._sessions[session_id].save()
+            data = storage.load_session(session_id)
+            if data:
+                # Reconstruct session from storage
+                messages = []
+                for m in data.get("messages", []):
+                    content = m.get("content", "")
+                    if m.get("role") == "assistant":
+                        content = _clean_message_content(content)
+                    messages.append(Message(
+                        role=m["role"],
+                        content=content,
+                        usage=m.get("usage", {}),
+                        debug=m.get("debug"),
+                        model=m.get("model"),
+                        summary_of=m.get("summary_of"),
+                        created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
+                        disabled=m.get("disabled", False),
+                        branch_id=m.get("branch_id", "main"),
+                        source=m.get("source"),
+                    ))
+                
+                branches = []
+                for b in data.get("branches", []):
+                    branches.append(Branch(
+                        id=b["id"],
+                        name=b["name"],
+                    ))
+                
+                session = Session(
+                    session_id=session_id,
+                    messages=messages,
+                    status=data.get("status", {}),
+                    branches=branches,
+                    current_branch=data.get("current_branch", "main"),
+                    provider=data.get("provider"),
+                    model=data.get("model"),
+                    total_tokens=data.get("total_tokens", 0),
+                    input_tokens=data.get("input_tokens", 0),
+                    output_tokens=data.get("output_tokens", 0),
+                    session_settings=data.get("session_settings", {}),
+                    owner_id=data.get("owner_id"),
+                    access=data.get("access", "owner"),
+                )
+                session._ensure_main_branch()
+                self._sessions[session_id] = session
+                return session
+            else:
+                self._sessions[session_id] = Session(session_id=session_id)
+                return self._sessions[session_id]
+        
         if session_id not in self._sessions:
             self._sessions[session_id] = Session(session_id=session_id)
         return self._sessions[session_id]
@@ -854,7 +911,8 @@ class SessionManager:
                     "current_task_info": None,
                     "approved_plan": None,
                     "already_done": None,
-                    "currently_doing": None
+                    "currently_doing": None,
+                    "invariants": None,
                 }),
             )
             session._ensure_main_branch()
