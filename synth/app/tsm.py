@@ -425,6 +425,8 @@ def process_orchestrator_response(
             llm_messages.append(Message(role="user", content=continuation_prompt, usage={}))
             
             current_content += f"\n\n---\n\n**Результаты подзадач:**\n{tasks_summary}"
+            
+            continue  # Продолжаем цикл для обработки результатов моделью
         else:
             break
     

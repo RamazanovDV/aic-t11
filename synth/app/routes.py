@@ -924,6 +924,8 @@ def chat_stream():
             # Если system уже в сообщениях - передаем None в provider, но сохраняем для debug
             orchestrator_system = None if has_system else system_prompt
             
+            print(f"[ROUTES] Calling orchestrator with {len(llm_msgs)} messages")
+            
             try:
                 result = tsm.process_orchestrator_response(
                     session=session,
