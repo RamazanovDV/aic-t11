@@ -22,6 +22,7 @@
             <button class="debug-tab" data-tab="response" onclick="switchDebugTab('response')">Response</button>
             <button class="debug-tab" data-tab="subagents" onclick="switchDebugTab('subagents')">Subagents</button>
             <button class="debug-tab" data-tab="status" onclick="switchDebugTab('status')">Status</button>
+            <button class="debug-tab" data-tab="raw" onclick="switchDebugTab('raw')">Raw</button>
             <button class="debug-tab" data-tab="session" onclick="switchDebugTab('session')">Session</button>
         </div>
         <div class="debug-content">
@@ -1358,6 +1359,12 @@
             statusTab.style.display = hasStatus ? '' : 'none';
         }
         
+        const hasRaw = debugData && (debugData.raw_model_response || debugData.raw_status);
+        const rawTab = document.querySelector('.debug-tab[data-tab="raw"]');
+        if (rawTab) {
+            rawTab.style.display = hasRaw ? '' : 'none';
+        }
+        
         // For orchestrator mode - show all debug data
         if (hasOrchestratorRequest || hasOrchestratorResponse || hasSubagents) {
             document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
@@ -1370,6 +1377,8 @@
                 } else if (t.dataset.tab === 'subagents') {
                     t.style.display = '';
                 } else if (t.dataset.tab === 'status' && hasStatus) {
+                    t.style.display = '';
+                } else if (t.dataset.tab === 'raw' && hasRaw) {
                     t.style.display = '';
                 } else if (t.dataset.tab === 'session') {
                     t.style.display = '';
@@ -1424,7 +1433,7 @@
         document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
         document.querySelector(`.debug-tab[data-tab="${tab}"]`).classList.add('active');
         
-        if (currentDebugData) {
+            if (currentDebugData) {
             let data;
             if (tab === 'request') {
                 data = currentDebugData.request || currentDebugData.orchestrator_request || currentDebugData;
@@ -1434,6 +1443,8 @@
                 data = currentDebugData.subagent_calls || currentDebugData.subagents || [];
             } else if (tab === 'status') {
                 data = currentDebugData.status || null;
+            } else if (tab === 'raw') {
+                data = currentDebugData.raw_model_response || currentDebugData.raw_status || null;
             } else if (tab === 'session') {
                 const sessionId = panels[0]?.sessionId || 'default';
                 fetch(`/api/sessions/${sessionId}`)

@@ -211,7 +211,10 @@ def process_orchestrator_response(
     """
     Обработать ответ оркестратора и при необходимости вызвать сабагентов.
     
-    Поддерживает несколько сабагентов через массив active_subtasks.
+    Логика:
+    - Модель возвращает subtasks (план подзадач)
+    - Оркестратор ведёт internal active_subtasks (уже запущенные задачи)
+    - При каждом ответе сравниваем subtasks с active_subtasks и запускаем новые
     
     Args:
         session: объект сессии
@@ -232,17 +235,18 @@ def process_orchestrator_response(
     from app.status_validator import validate_status_block
     from app.llm.base import Message
     
-    # Используем debug_prompt если передан, иначе system_prompt
     prompt_for_debug = debug_prompt if debug_prompt is not None else system_prompt
     
-    debug_info = {
-        "orchestrator_request": {
-            "system_prompt": prompt_for_debug,
-            "messages_count": len(llm_messages)
-        },
-        "subagent_calls": [],
-        "orchestrator_responses": []
-    }
+    debug_info = {}
+    if debug_mode:
+        debug_info = {
+            "orchestrator_request": {
+                "system_prompt": prompt_for_debug,
+                "messages_count": len(llm_messages)
+            },
+            "subagent_calls": [],
+            "orchestrator_responses": []
+        }
     
     total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     
@@ -250,14 +254,26 @@ def process_orchestrator_response(
     current_status = None
     subtask_results = []
     
+    active_subtasks_internal: list[dict] = []
+    
     iteration = 0
     max_iterations = 10
+    
+    def build_system_prompt(base_prompt: str, active_list: list[dict]) -> str:
+        if not active_list:
+            return base_prompt
+        active_info = "\n[УЖЕ ЗАПУЩЕНЫ И ВЫПОЛНЯЮТСЯ]:\n"
+        for st in active_list:
+            active_info += f"- {st.get('name', 'unnamed')}: {st.get('id', '?')}\n"
+        return base_prompt + active_info
     
     while iteration < max_iterations:
         iteration += 1
         
+        current_system_prompt = build_system_prompt(system_prompt, active_subtasks_internal)
+        
         try:
-            response = provider.chat(llm_messages, system_prompt, debug=False)
+            response = provider.chat(llm_messages, current_system_prompt, debug=False)
         except Exception as e:
             if debug_mode:
                 debug_info["error"] = str(e)
@@ -278,47 +294,51 @@ def process_orchestrator_response(
         
         parsed_status, cleaned_content = validate_status_block(response.content)
         
-        # Debug: log what the model returned
-        print(f"[TSM] === MODEL RESPONSE START ===")
+        print("[TSM] === MODEL RESPONSE START ===")
         print(f"[TSM] Response length: {len(response.content)}")
-        print(f"[TSM] Response content (first 500 chars):")
+        print("[TSM] Response content (first 500 chars):")
         print(response.content[:500])
-        print(f"[TSM] === MODEL RESPONSE END ===")
+        print("[TSM] === MODEL RESPONSE END ===")
         
         print(f"[TSM] Iteration {iteration}: parsed_status = {parsed_status is not None}")
         
         if not parsed_status:
-            print(f"[TSM] No parsed status found, breaking")
+            print("[TSM] No parsed status found, breaking")
             break
         
-        # Сохраняем raw status для debug
-        if debug_info is None:
-            debug_info = {}
-        debug_info['raw_status'] = parsed_status
+        if debug_mode and response.content:
+            debug_info['raw_model_response'] = response.content
         
         session.update_status(parsed_status)
         current_status = parsed_status
         
-        active_subtasks = parsed_status.get("active_subtasks", [])
-        active_subtask = parsed_status.get("active_subtask")
+        model_subtasks = parsed_status.get("subtasks", [])
         
-        if active_subtask and not active_subtasks:
-            active_subtasks = [active_subtask]
+        new_subtasks = []
+        for st in model_subtasks:
+            st_id = st.get("id")
+            if not any(s.get("id") == st_id for s in active_subtasks_internal):
+                new_subtasks.append(st)
+                active_subtasks_internal.append(st)
         
-        print(f"[TSM] Active subtasks: {len(active_subtasks) if active_subtasks else 0}")
+        print(f"[TSM] Model subtasks: {len(model_subtasks)}, New to launch: {len(new_subtasks)}, Already running: {len(active_subtasks_internal)}")
         
-        if not active_subtasks:
-            print(f"[TSM] No active subtasks, breaking")
+        if not new_subtasks and not active_subtasks_internal:
+            print("[TSM] No and no active ones subtasks to launch, breaking")
+            break
+        
+        if not new_subtasks:
+            print("[TSM] All subtasks already running, waiting for completion")
             break
         
         subtask_results = []
         
-        for idx, subtask in enumerate(active_subtasks):
+        for idx, subtask in enumerate(new_subtasks):
             subtask_id = subtask.get("id", f"task_{idx}")
             subtask_name = subtask.get("name", "unnamed")
             subtask_prompt = subtask.get("prompt", "")
             
-            print(f"[TSM] Processing subtask {idx+1}/{len(active_subtasks)}: {subtask_name}")
+            print(f"[TSM] Processing subtask {idx+1}/{len(new_subtasks)}: {subtask_name}")
             
             if not subtask_prompt:
                 print(f"[TSM] No prompt for subtask {subtask_name}, skipping")
@@ -374,6 +394,13 @@ def process_orchestrator_response(
                 usage={}
             )
             llm_messages.append(subagent_result_message)
+            
+            for st in active_subtasks_internal:
+                if st.get("id") == subtask_id:
+                    st["completed"] = True
+                    break
+        
+        active_subtasks_internal = [st for st in active_subtasks_internal if not st.get("completed", False)]
         
         if subtask_results:
             completed_tasks = []

@@ -118,7 +118,6 @@ class Session:
             "already_done": status_data.get("already_done"),
             "currently_doing": status_data.get("currently_doing"),
             "user_info": status_data.get("user_info"),
-            "active_subtasks": status_data.get("active_subtasks", []),
             "subtasks": status_data.get("subtasks", []),
         }
         self.updated_at = datetime.now()
@@ -357,7 +356,6 @@ class Session:
 
     def get_context_tokens_estimate(self, model: str | None = None) -> int:
         """Оценка количества токенов в контексте (после последнего summary)"""
-        from app.config import config
 
         last_summary_idx = None
         for i in range(len(self.messages) - 1, -1, -1):

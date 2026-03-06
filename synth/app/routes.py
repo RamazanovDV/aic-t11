@@ -750,8 +750,6 @@ def chat():
             }
         if session.status:
             debug_info['status'] = session.status
-            # Сохраняем active_subtasks и subtasks из status
-            debug_info['active_subtasks'] = session.status.get('active_subtasks', [])
             debug_info['subtasks'] = session.status.get('subtasks', [])
 
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model)
@@ -942,6 +940,10 @@ def chat_stream():
             
             final_content = result.get("final_content", "")
             debug_info = result.get("debug") if debug_mode else None
+            if debug_mode and final_content:
+                if debug_info is None:
+                    debug_info = {}
+                debug_info['raw_model_response'] = final_content
             usage = result.get("usage", {})
             
             print(f"[ORCHESTRATOR] Usage: {usage}")
@@ -964,18 +966,13 @@ def chat_stream():
             # Сохраняем в сессию (user_message уже добавлен в get_messages_for_llm)
             session.add_assistant_message(final_content, usage, debug=debug_info, model=provider.model)
             
-            # Добавляем статус в debug_info для сохранения в сессии
-            if debug_info is None:
-                debug_info = {}
-            if session.status:
-                debug_info['status'] = session.status
-                
             session_manager.save_session(session_id)
             
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
             debug_data = debug_info or {}
             if session.status:
                 debug_data['status'] = session.status
+                debug_data['subtasks'] = session.status.get('subtasks', [])
             
             yield f"data: {json.dumps({'content': final_content, 'done': True, 'usage': usage, 'model': provider.model, 'debug': debug_data, 'disabled_indices': disabled_indices})}\n\n"
             yield "data: [DONE]\n\n"
@@ -1027,10 +1024,10 @@ def chat_stream():
             
             if parsed_status:
                 session.update_status(parsed_status)
-                # Сохраняем raw status для debug
-                if debug_info is None:
-                    debug_info = {}
-                debug_info['raw_status'] = parsed_status
+                if debug_mode and full_content:
+                    if debug_info is None:
+                        debug_info = {}
+                    debug_info['raw_model_response'] = full_content
                 _handle_project_updates(session)
                 _handle_user_info_update(parsed_status, user_id)
                 content_for_user = cleaned_content
@@ -1054,12 +1051,6 @@ def chat_stream():
                             if retryAttempt == 2:
                                 status_error = "Модель не формирует блок статуса в ответе"
             
-            # Добавляем статус в debug_info для сохранения в сессии
-            if debug_info is None:
-                debug_info = {}
-            if session.status:
-                debug_info['status'] = session.status
-            
             # Сохраняем сообщения в сессию
             if needs_summarization:
                 # При суммаризации user message ещё не был добавлен
@@ -1070,9 +1061,10 @@ def chat_stream():
 
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
             debug_data = {'request': debug_request, 'response': debug_response}
+            if debug_info and 'raw_model_response' in debug_info:
+                debug_data['raw_model_response'] = debug_info['raw_model_response']
             if session.status:
                 debug_data['status'] = session.status
-                debug_data['active_subtasks'] = session.status.get('active_subtasks', [])
                 debug_data['subtasks'] = session.status.get('subtasks', [])
             if status_error:
                 debug_data['status_error'] = status_error
