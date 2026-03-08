@@ -25,6 +25,7 @@ class FileStorage:
         session_file = self._session_file(session.session_id)
         
         data = {
+            "schema_version": "1.0.0",
             "session_id": session.session_id,
             "messages": [
                 {

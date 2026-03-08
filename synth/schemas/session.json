@@ -1,0 +1,327 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://synth.ai/schemas/session.json",
+  "title": "Synth Session",
+  "description": "Schema for Synth AI session storage format",
+  "version": "1.0.0",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "session_id",
+    "messages",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of the schema format"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Unique session identifier"
+    },
+    "messages": {
+      "type": "array",
+      "description": "List of messages in the session",
+      "items": {
+        "$ref": "#/$defs/Message"
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of session creation"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of last update"
+    },
+    "provider": {
+      "type": "string",
+      "description": "LLM provider name (e.g., 'openai', 'anthropic')"
+    },
+    "model": {
+      "type": "string",
+      "description": "Model identifier"
+    },
+    "total_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total tokens used in session"
+    },
+    "input_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Input tokens used"
+    },
+    "output_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Output tokens generated"
+    },
+    "settings": {
+      "$ref": "#/$defs/SessionSettings",
+      "description": "Session-specific settings (renamed from session_settings in v1.0)"
+    },
+    "session_settings": {
+      "$ref": "#/$defs/SessionSettings",
+      "description": "Legacy field - use 'settings' instead"
+    },
+    "branches": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Branch"
+      },
+      "description": "List of conversation branches"
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Checkpoint"
+      },
+      "description": "Saved conversation checkpoints"
+    },
+    "current_branch": {
+      "type": "string",
+      "default": "main",
+      "description": "ID of the currently active branch"
+    },
+    "status": {
+      "$ref": "#/$defs/SessionStatus",
+      "description": "Current task status (TSM state)"
+    },
+    "owner_id": {
+      "type": ["string", "null"],
+      "description": "User ID of session owner"
+    },
+    "access": {
+      "type": "string",
+      "enum": ["owner", "team", "public"],
+      "default": "owner",
+      "description": "Access control level"
+    }
+  },
+  "$defs": {
+    "Message": {
+      "type": "object",
+      "required": ["role", "content", "created_at"],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["system", "user", "assistant", "error", "note", "info", "summary"]
+        },
+        "content": {
+          "type": "string",
+          "description": "Message text content"
+        },
+        "usage": {
+          "$ref": "#/$defs/TokenUsage",
+          "description": "Token usage for this message"
+        },
+        "debug": {
+          "type": ["object", "null"],
+          "description": "Debug information"
+        },
+        "model": {
+          "type": ["string", "null"],
+          "description": "Model that generated this message"
+        },
+        "summary_of": {
+          "type": ["array", "null"],
+          "items": {"type": "integer"},
+          "description": "Indices of messages this summary references"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether message is disabled for LLM context"
+        },
+        "branch_id": {
+          "type": "string",
+          "default": "main",
+          "description": "Branch this message belongs to"
+        },
+        "source": {
+          "type": ["string", "null"],
+          "enum": ["web", "cli", null],
+          "description": "Source of the message"
+        }
+      }
+    },
+    "TokenUsage": {
+      "type": "object",
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "SessionSettings": {
+      "type": "object",
+      "properties": {
+        "tsm_mode": {
+          "type": "string",
+          "enum": ["simple", "orchestrator", "deterministic"],
+          "default": "simple",
+          "description": "Task State Management mode"
+        },
+        "context_optimization": {
+          "type": "string",
+          "enum": ["none", "sliding_window", "summarization", "sticky_notes"],
+          "default": "none"
+        },
+        "summarization_enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "summarize_after_n": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Summarize after N user messages"
+        },
+        "summarize_after_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Summarize after N minutes of inactivity"
+        },
+        "summarize_context_percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Summarize when context reaches N% of max"
+        },
+        "sliding_window_type": {
+          "type": "string",
+          "enum": ["messages", "tokens"],
+          "default": "messages"
+        },
+        "sliding_window_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10
+        },
+        "sticky_notes_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 6
+        }
+      }
+    },
+    "Branch": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique branch identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Branch display name"
+        },
+        "parent_branch": {
+          "type": ["string", "null"]
+        },
+        "parent_checkpoint": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "Checkpoint": {
+      "type": "object",
+      "required": ["id", "name", "branch_id", "message_count"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "branch_id": {
+          "type": "string"
+        },
+        "message_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "summary": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "SessionStatus": {
+      "type": "object",
+      "properties": {
+        "task_name": {
+          "type": "string",
+          "default": "разговор на свободную тему"
+        },
+        "state": {
+          "type": ["string", "null"],
+          "enum": ["planning", "execution", "validation", "done", null]
+        },
+        "progress": {
+          "type": ["string", "null"]
+        },
+        "project": {
+          "type": ["string", "null"]
+        },
+        "updated_project_info": {
+          "type": ["object", "null"]
+        },
+        "current_task_info": {
+          "type": ["object", "null"]
+        },
+        "approved_plan": {
+          "type": ["string", "null"]
+        },
+        "already_done": {
+          "type": ["string", "null"]
+        },
+        "currently_doing": {
+          "type": ["string", "null"]
+        },
+        "user_info": {
+          "type": ["string", "null"]
+        },
+        "subtasks": {
+          "type": "array",
+          "items": {"type": "object"},
+          "default": []
+        },
+        "invariants": {
+          "type": ["object", "null"]
+        },
+        "transition_log": {
+          "type": "array",
+          "items": {"type": "object"},
+          "default": []
+        }
+      }
+    }
+  }
+}

@@ -667,9 +667,22 @@ class Session:
 
 
 class SessionManager:
+    CURRENT_SCHEMA_VERSION = "1.0.0"
+
     def __init__(self):
         self._sessions: dict[str, Session] = {}
         self._load_sessions()
+
+    def _migrate_session_data(self, data: dict) -> dict:
+        """Migrate session data from older schema versions."""
+        schema_version = data.get("schema_version", "0.0.0")
+        
+        if schema_version == "0.0.0":
+            if "user_settings" in data and "session_settings" not in data:
+                data["session_settings"] = data.pop("user_settings")
+        
+        data["schema_version"] = self.CURRENT_SCHEMA_VERSION
+        return data
 
     def _load_sessions(self) -> None:
         sessions = storage.list_sessions()
@@ -677,6 +690,7 @@ class SessionManager:
             session_id = session_info["session_id"]
             data = storage.load_session(session_id)
             if data:
+                data = self._migrate_session_data(data)
                 messages = []
                 for m in data.get("messages", []):
                     content = m.get("content", "")
@@ -728,7 +742,7 @@ class SessionManager:
                     total_tokens=data.get("total_tokens", 0),
                     input_tokens=data.get("input_tokens", 0),
                     output_tokens=data.get("output_tokens", 0),
-                    session_settings=data.get("session_settings", data.get("user_settings", {})),
+                session_settings=data.get("session_settings", {}),
                     branches=branches,
                     checkpoints=checkpoints,
                     current_branch=data.get("current_branch", "main"),
@@ -752,12 +766,11 @@ class SessionManager:
 
     def get_session(self, session_id: str, reload: bool = False) -> Session:
         if reload:
-            # Force reload from storage
             if session_id in self._sessions:
                 self._sessions[session_id].save()
             data = storage.load_session(session_id)
             if data:
-                # Reconstruct session from storage
+                data = self._migrate_session_data(data)
                 messages = []
                 for m in data.get("messages", []):
                     content = m.get("content", "")
@@ -850,6 +863,7 @@ class SessionManager:
         session_id = storage.import_session(session_data)
         data = storage.load_session(session_id)
         if data:
+            data = self._migrate_session_data(data)
             messages = [
                 Message(
                     role=m["role"],
@@ -898,7 +912,7 @@ class SessionManager:
                 total_tokens=data.get("total_tokens", 0),
                 input_tokens=data.get("input_tokens", 0),
                 output_tokens=data.get("output_tokens", 0),
-                session_settings=data.get("session_settings", data.get("user_settings", {})),
+                session_settings=data.get("session_settings", {}),
                 branches=branches,
                 checkpoints=checkpoints,
                 current_branch=data.get("current_branch", "main"),

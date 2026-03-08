@@ -283,7 +283,7 @@ def process_orchestrator_response(
             response = provider.chat(llm_messages, current_system_prompt, debug=False)
         except Exception as e:
             print(f"[TSM] ERROR in provider.chat iteration {iteration}: {e}")
-            print(f"[TSM] Stopping orchestration due to error, returning current results")
+            print("[TSM] Stopping orchestration due to error, returning current results")
             if debug_mode:
                 debug_info["error"] = str(e)
             break
@@ -436,6 +436,14 @@ def process_orchestrator_response(
             continue  # Продолжаем цикл для обработки результатов моделью
         else:
             break
+    
+    # Add final orchestrator response usage
+    try:
+        total_usage["input_tokens"] += response.usage.get("input_tokens", 0)
+        total_usage["output_tokens"] += response.usage.get("output_tokens", 0)
+        total_usage["total_tokens"] += response.usage.get("total_tokens", 0)
+    except (NameError, UnboundLocalError):
+        pass
     
     if debug_mode:
         try:

@@ -117,3 +117,98 @@ python run.py
 ## Конфигурация
 
 См. `config.example.yaml` для доступных опций.
+
+## Формат сессии
+
+Сессии хранятся в JSON-файлах в директории `data/sessions/`.
+
+### Структура (schema v1.0)
+
+```json
+{
+  "schema_version": "1.0.0",
+  "session_id": "string",
+  "messages": [...],
+  "created_at": "ISO8601",
+  "updated_at": "ISO8601",
+  "provider": "openai|anthropic|ollama|...",
+  "model": "gpt-4|claude-3|...",
+  "total_tokens": 0,
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "settings": {...},
+  "branches": [...],
+  "checkpoints": [...],
+  "current_branch": "main",
+  "status": {...},
+  "owner_id": "user_id|null",
+  "access": "owner|team|public"
+}
+```
+
+### Message
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `role` | string | `system`, `user`, `assistant`, `error`, `note`, `info`, `summary` |
+| `content` | string | Текст сообщения |
+| `usage` | object | `{input_tokens, output_tokens, total_tokens}` |
+| `model` | string? | Модель, сгенерировавшая сообщение |
+| `created_at` | ISO8601 | Время создания |
+| `disabled` | boolean | Исключено из LLM-контекста |
+| `branch_id` | string | ID ветки (по умолчанию `main`) |
+| `source` | string? | Источник: `web`, `cli` |
+
+### Settings (сессионные настройки)
+
+```json
+{
+  "tsm_mode": "simple|orchestrator|deterministic",
+  "context_optimization": "none|sliding_window|summarization|sticky_notes",
+  "summarization_enabled": false,
+  "summarize_after_n": 10,
+  "summarize_after_minutes": 0,
+  "summarize_context_percent": 0,
+  "sliding_window_type": "messages|tokens",
+  "sliding_window_limit": 10,
+  "sticky_notes_limit": 6
+}
+```
+
+### TSM Modes
+
+| Mode | Описание |
+|------|----------|
+| `simple` | Базовый промт с инструкцией по статусу задачи |
+| `orchestrator` | Оркестратор запускает subagent-задачи |
+| `deterministic` | Детерминированный переход по states |
+
+### Status (TSM state)
+
+```json
+{
+  "task_name": "разговор на свободную тему",
+  "state": "planning|execution|validation|done|null",
+  "progress": "строка прогресса",
+  "project": "название проекта",
+  "subtasks": [...],
+  "invariants": {...},
+  "transition_log": [...]
+}
+```
+
+### GraphSON Schema
+
+Полная схема доступна в `schemas/session.json`. Валидация:
+
+```bash
+# Установить jsonschema
+pip install jsonschema
+
+# Валидировать файл
+jsonschema -i data/sessions/mysession.json schemas/session.json
+```
+
+### Legacy Fields
+
+Поле `session_settings` считается устаревшим — используйте `settings`. При загрузке старых сессий выполняется автоматическая миграция.
