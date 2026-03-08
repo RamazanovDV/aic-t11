@@ -1391,7 +1391,7 @@
         const hasResponse = debugData && debugData.response;
         // Check for orchestrator format
         const hasOrchestratorRequest = debugData && debugData.orchestrator_request;
-        const hasOrchestratorResponse = debugData && debugData.orchestrator_responses;
+        const hasOrchestratorResponse = debugData && debugData.orchestrator_responses && debugData.orchestrator_responses.length > 0;
         const hasSubagents = debugData && (debugData.subagents || debugData.subagent_calls) && 
                            (debugData.subagents?.length > 0 || debugData.subagent_calls?.length > 0);
         

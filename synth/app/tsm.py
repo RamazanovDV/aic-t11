@@ -315,7 +315,7 @@ def process_orchestrator_response(
         current_system_prompt = build_system_prompt(system_prompt, active_subtasks_internal)
         
         try:
-            response = provider.chat(llm_messages, current_system_prompt, debug=False)
+            response = provider.chat(llm_messages, current_system_prompt, debug=debug_mode)
         except Exception as e:
             print(f"[TSM] ERROR in provider.chat iteration {iteration}: {e}")
             print("[TSM] Stopping orchestration due to error, returning current results")
@@ -323,9 +323,23 @@ def process_orchestrator_response(
                 debug_info["error"] = str(e)
             break
         
-        print(f"[TSM] Iteration {iteration}: Got response, length {len(response.content)}")
+        print(f"[TSM] Iteration {iteration}: Got response, length {len(response.content)}, usage: {response.usage}")
+        
+        # Add usage from orchestrator response immediately
+        total_usage["input_tokens"] += response.usage.get("input_tokens", 0)
+        total_usage["output_tokens"] += response.usage.get("output_tokens", 0)
+        total_usage["total_tokens"] += response.usage.get("total_tokens", 0)
         
         parsed_status, cleaned_content = validate_status_block(response.content)
+        
+        if debug_mode and response.content:
+            debug_info['orchestrator_responses'].append({
+                "content": response.content,
+                "parsed_status": parsed_status,
+                "usage": response.usage
+            })
+            debug_info['raw_model_response'] = response.content
+            debug_info['raw_status'] = parsed_status
         
         # Сохраняем контент даже если нет parsed_status
         current_content = cleaned_content if cleaned_content else response.content
@@ -334,10 +348,6 @@ def process_orchestrator_response(
             print("[TSM] No parsed status found, breaking")
             # Всё равно возвращаем контент пользователю
             break
-        
-        if debug_mode and response.content:
-            debug_info['raw_model_response'] = response.content
-            debug_info['raw_status'] = parsed_status
         
         session.update_status(parsed_status)
         current_status = parsed_status
@@ -400,6 +410,7 @@ def process_orchestrator_response(
             
             try:
                 subagent_response = provider.chat(subagent_messages, None, debug=False)
+                print(f"[TSM] Subagent '{subtask_name}' response, usage: {subagent_response.usage}")
             except Exception as e:
                 if debug_mode:
                     subagent_call_info["error"] = str(e)
@@ -523,6 +534,8 @@ def process_orchestrator_response(
         }
         if current_status:
             debug_info['raw_status'] = current_status
+    
+    print(f"[TSM] Returning total_usage: {total_usage}")
     
     return {
         "final_content": current_content,

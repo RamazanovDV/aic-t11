@@ -1027,10 +1027,7 @@ def chat_stream():
             debug_info = result.get("debug") if debug_mode else None
             was_aborted = result.get("aborted", False)
             
-            if debug_mode and final_content:
-                if debug_info is None:
-                    debug_info = {}
-                debug_info['raw_model_response'] = final_content
+            raw_original_content = final_content
             usage = result.get("usage", {})
             
             print(f"[ORCHESTRATOR] Usage: {usage}")
@@ -1047,6 +1044,12 @@ def chat_stream():
                     final_content = cleaned_content
             else:
                 final_content = str(final_content) if final_content else ""
+            
+            # Сохраняем оригинальный контент для debug если debug_mode включен
+            if debug_mode and raw_original_content:
+                if debug_info is None:
+                    debug_info = {}
+                debug_info['raw_model_response'] = raw_original_content
             
             # Отправляем контент частями для имитации streaming
             for i in range(0, len(final_content), 50):

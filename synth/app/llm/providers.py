@@ -20,6 +20,29 @@ def estimate_tokens(text: str) -> dict:
     }
 
 
+def extract_usage(data: dict) -> dict:
+    """Extract usage from API response - supports both Anthropic and OpenAI formats."""
+    if "usage" not in data:
+        return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    
+    u = data["usage"]
+    
+    if "prompt_tokens" in u or "completion_tokens" in u:
+        return {
+            "input_tokens": u.get("prompt_tokens", 0),
+            "output_tokens": u.get("completion_tokens", 0),
+            "total_tokens": u.get("total_tokens", 0),
+        }
+    elif "input_tokens" in u or "output_tokens" in u:
+        return {
+            "input_tokens": u.get("input_tokens", 0),
+            "output_tokens": u.get("output_tokens", 0),
+            "total_tokens": u.get("total_tokens", u.get("input_tokens", 0) + u.get("output_tokens", 0)),
+        }
+    
+    return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+
+
 class ContextLengthExceededError(Exception):
     def __init__(self, message: str = "Context window exceeded", debug_response: dict | None = None):
         self.message = message
@@ -77,13 +100,7 @@ class GenericOpenAIProvider(BaseProvider):
         data = response.json()
         content = data["choices"][0]["message"]["content"]
         
-        usage = {}
-        if "usage" in data:
-            usage = {
-                "input_tokens": data["usage"].get("prompt_tokens", 0),
-                "output_tokens": data["usage"].get("completion_tokens", 0),
-                "total_tokens": data["usage"].get("total_tokens", 0),
-            }
+        usage = extract_usage(data)
 
         if debug:
             debug_response = data
@@ -180,11 +197,7 @@ class GenericOpenAIProvider(BaseProvider):
                             yield LLMChunk(content=full_content, is_final=False)
 
                         if "usage" in data:
-                            total_usage = {
-                                "input_tokens": data["usage"].get("prompt_tokens", 0),
-                                "output_tokens": data["usage"].get("completion_tokens", 0),
-                                "total_tokens": data["usage"].get("total_tokens", 0),
-                            }
+                            total_usage = extract_usage(data)
                     except json.JSONDecodeError:
                         continue
 
@@ -321,13 +334,7 @@ class AnthropicProvider(BaseProvider):
         if not content:
             content = data.get("content", [{}])[0].get("text", "") or data.get("content", [{}])[0].get("thinking", "")
         
-        usage = {}
-        if "usage" in data:
-            usage = {
-                "input_tokens": data["usage"].get("prompt_tokens", 0),
-                "output_tokens": data["usage"].get("completion_tokens", 0),
-                "total_tokens": data["usage"].get("total_tokens", 0),
-            }
+        usage = extract_usage(data)
 
         if debug:
             debug_response = data
@@ -440,11 +447,7 @@ class AnthropicProvider(BaseProvider):
                                 yield LLMChunk(content=full_content, is_final=False)
                         elif data.get("type") == "message_delta":
                             if "usage" in data:
-                                total_usage = {
-                                    "input_tokens": data["usage"].get("input_tokens", 0),
-                                    "output_tokens": data["usage"].get("output_tokens", 0),
-                                    "total_tokens": data["usage"].get("input_tokens", 0) + data["usage"].get("output_tokens", 0),
-                                }
+                                total_usage = extract_usage(data)
                     except json.JSONDecodeError:
                         continue
 
