@@ -72,6 +72,18 @@ class Config:
         return self._config.get("timeout", 120)
 
     @property
+    def orchestrator_timeout(self) -> int:
+        return self._config.get("orchestrator_timeout", 300)
+
+    @property
+    def token_warning_percent(self) -> int:
+        return self._config.get("token_warning_percent", 80)
+
+    @property
+    def token_abort_percent(self) -> int:
+        return self._config.get("token_abort_percent", 95)
+
+    @property
     def providers(self) -> dict[str, dict[str, Any]]:
         return self._config.get("providers", {})
 

@@ -937,37 +937,96 @@ def chat_stream():
             has_system = any(m.role == "system" for m in llm_msgs)
             
             # Если system уже в сообщениях - передаем None в provider
+            import queue
+            import threading
+            import time
+            
             orchestrator_system = None if has_system else system_prompt
             
             print(f"[ROUTES] Calling orchestrator with {len(llm_msgs)} messages")
             
-            # Callback для отправки прогресса subtasks в реальном времени
-            progress_events = []
-            def progress_callback(subtask_name: str, status: str):
-                progress_events.append({'type': 'subtask_progress', 'name': subtask_name, 'status': status})
+            ORCHESTRATOR_TIMEOUT = config.orchestrator_timeout
+            TOKEN_WARNING_PERCENT = config.token_warning_percent
+            TOKEN_ABORT_PERCENT = config.token_abort_percent
+            
+            model_config = config.get_provider_config(provider_name)
+            model_name = model or provider.model
+            context_window = config.get_context_window(model_name)
+            token_limit = int(context_window * 0.9)
+            
+            progress_queue = queue.Queue()
+            result_queue = queue.Queue()
+            stop_event = threading.Event()
+            
+            def run_orchestrator():
+                try:
+                    result = tsm.process_orchestrator_response(
+                        session=session,
+                        llm_messages=llm_msgs,
+                        provider=provider,
+                        system_prompt=orchestrator_system,
+                        debug_prompt=system_prompt,
+                        debug_mode=debug_mode,
+                        progress_queue=progress_queue,
+                        token_limit=token_limit,
+                        stop_event=stop_event
+                    )
+                    result_queue.put(("success", result))
+                except Exception as e:
+                    result_queue.put(("error", str(e)))
+            
+            orchestrator_thread = threading.Thread(target=run_orchestrator)
+            orchestrator_thread.start()
+            
+            timeout_warning_sent = False
+            start_time = time.time()
+            
+            while orchestrator_thread.is_alive():
+                elapsed = time.time() - start_time
+                
+                if elapsed > ORCHESTRATOR_TIMEOUT and not timeout_warning_sent:
+                    yield f"data: {json.dumps({'type': 'timeout_warning', 'elapsed': round(elapsed)})}\n\n"
+                    timeout_warning_sent = True
+                
+                try:
+                    event = progress_queue.get(timeout=0.3)
+                    
+                    if event.get('type') == 'token_usage':
+                        percent = event.get('percent', 0)
+                        if percent >= TOKEN_ABORT_PERCENT:
+                            yield f"data: {json.dumps({'type': 'token_limit_abort', 'percent': percent})}\n\n"
+                            stop_event.set()
+                        elif percent >= TOKEN_WARNING_PERCENT:
+                            yield f"data: {json.dumps({'type': 'token_warning', 'percent': percent})}\n\n"
+                    
+                    yield f"data: {json.dumps(event)}\n\n"
+                except queue.Empty:
+                    continue
+                except Exception as e:
+                    print(f"[ROUTES] Error processing progress event: {e}")
+                    continue
+            
+            orchestrator_thread.join(timeout=10)
             
             try:
-                result = tsm.process_orchestrator_response(
-                    session=session,
-                    llm_messages=llm_msgs,
-                    provider=provider,
-                    system_prompt=orchestrator_system,
-                    debug_prompt=system_prompt,  # Для debug показываем полный промт
-                    debug_mode=debug_mode,
-                    progress_callback=progress_callback
-                )
-                
-                # Отправляем events прогресса перед основным контентом
-                for event in progress_events:
-                    yield f"data: {json.dumps(event)}\n\n"
-            except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'error': f'Orchestrator error: {str(e)}'})}\n\n"
+                status, result = result_queue.get_nowait()
+            except queue.Empty:
+                result = {"error": "Orchestrator timeout", "aborted": True}
+                status = "error"
+            
+            if status == "error":
+                if isinstance(result, str):
+                    yield f"data: {json.dumps({'type': 'error', 'error': f'Orchestrator error: {result}'})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'error', 'error': result.get('error', 'Unknown error')})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
             
             final_content = result.get("final_content", "")
             subtask_results = result.get("subtask_results", [])
             debug_info = result.get("debug") if debug_mode else None
+            was_aborted = result.get("aborted", False)
+            
             if debug_mode and final_content:
                 if debug_info is None:
                     debug_info = {}
@@ -976,6 +1035,9 @@ def chat_stream():
             
             print(f"[ORCHESTRATOR] Usage: {usage}")
             print(f"[ORCHESTRATOR] Model: orchestrator")
+            
+            if was_aborted:
+                yield f"data: {json.dumps({'type': 'aborted', 'reason': 'user_stop'})}\n\n"
             
             # Очищаем JSON-блок из ответа
             if final_content and isinstance(final_content, str):
@@ -1004,7 +1066,7 @@ def chat_stream():
             
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
             
-            yield f"data: {json.dumps({'content': final_content, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices})}\n\n"
+            yield f"data: {json.dumps({'content': final_content, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices, 'aborted': was_aborted})}\n\n"
             yield "data: [DONE]\n\n"
             return
 

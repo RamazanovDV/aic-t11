@@ -1109,6 +1109,28 @@
                                 continue;
                             }
 
+                            if (data.type === 'timeout_warning') {
+                                showWarning(`⏱️ Превышено время выполнения (${data.elapsed}с). Нажмите Стоп для прерывания или подождите.`, panelIndex);
+                                continue;
+                            }
+
+                            if (data.type === 'token_warning') {
+                                showWarning(`⚠️ Использовано ${Math.round(data.percent)}% токенов от лимита!`, panelIndex);
+                                continue;
+                            }
+
+                            if (data.type === 'token_limit_abort') {
+                                showError(`🛑 Превышен лимит токенов (${Math.round(data.percent)}%). Процесс прерван.`, panelIndex);
+                                showRetryButton(panelIndex, message);
+                                continue;
+                            }
+
+                            if (data.type === 'aborted') {
+                                showInfo('❌ Процесс прерван пользователем', panelIndex);
+                                showRetryButton(panelIndex, message);
+                                continue;
+                            }
+
                             if (data.error) {
                                 const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
                                 addMessageToPanel(panelIndex, 'Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
@@ -1132,6 +1154,10 @@
                                 // Показываем subtask_results даже если контент пустой
                                 if (data.subtask_results && data.subtask_results.length > 0) {
                                     renderSubtaskProgress(messageContent, data.subtask_results);
+                                }
+                                // Показываем retry кнопку если процесс был прерван
+                                if (data.aborted) {
+                                    showRetryButton(panelIndex, message);
                                 }
                                 // Пропускаем пустой контент, но оставляем subtask results
                                 if (!fullContent || !fullContent.trim()) {
@@ -1521,6 +1547,75 @@
         if (indicator) {
             indicator.remove();
         }
+    }
+
+    let pendingRetry = null;
+
+    function showWarning(message, panelIndex) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.messagesContainer) return;
+        
+        const warningDiv = document.createElement('div');
+        warningDiv.className = 'message message-info';
+        warningDiv.style.cssText = 'background: #fff3cd; border: 1px solid #ffc107; padding: 10px; border-radius: 8px; margin: 8px 0;';
+        warningDiv.innerHTML = `<div class="message-content">${escapeHtml(message)}</div>`;
+        panel.messagesContainer.appendChild(warningDiv);
+        panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
+    }
+
+    function showError(message, panelIndex) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.messagesContainer) return;
+        
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'message message-error';
+        errorDiv.style.cssText = 'background: #f8d7da; border: 1px solid #f5c6cb; padding: 10px; border-radius: 8px; margin: 8px 0;';
+        errorDiv.innerHTML = `<div class="message-content">${escapeHtml(message)}</div>`;
+        panel.messagesContainer.appendChild(errorDiv);
+        panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
+    }
+
+    function showInfo(message, panelIndex) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.messagesContainer) return;
+        
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'message message-info';
+        infoDiv.style.cssText = 'background: #d1ecf1; border: 1px solid #bee5eb; padding: 10px; border-radius: 8px; margin: 8px 0;';
+        infoDiv.innerHTML = `<div class="message-content">${escapeHtml(message)}</div>`;
+        panel.messagesContainer.appendChild(infoDiv);
+        panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
+    }
+
+    function showRetryButton(panelIndex, originalMessage) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.messagesContainer) return;
+        
+        const retryDiv = document.createElement('div');
+        retryDiv.className = 'retry-container';
+        retryDiv.style.cssText = 'display: flex; gap: 8px; margin: 8px 0;';
+        
+        const retryBtn = document.createElement('button');
+        retryBtn.className = 'btn btn-primary btn-small';
+        retryBtn.textContent = '🔄 Повторить запрос';
+        retryBtn.onclick = function() {
+            retryDiv.remove();
+            pendingRetry = { panelIndex, message: originalMessage };
+            sendToPanel(panel, originalMessage, true, panelIndex);
+        };
+        
+        const newChatBtn = document.createElement('button');
+        newChatBtn.className = 'btn btn-secondary btn-small';
+        newChatBtn.textContent = '🆕 Начать заново';
+        newChatBtn.onclick = function() {
+            retryDiv.remove();
+            resetPanelChat(panelIndex);
+        };
+        
+        retryDiv.appendChild(retryBtn);
+        retryDiv.appendChild(newChatBtn);
+        panel.messagesContainer.appendChild(retryDiv);
+        panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
     }
 
     function openSummarizationModal(panelIndex = 0) {

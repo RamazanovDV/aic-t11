@@ -209,7 +209,9 @@ def process_orchestrator_response(
     system_prompt: str,
     debug_mode: bool = False,
     debug_prompt: str | None = None,
-    progress_callback=None
+    progress_queue=None,
+    token_limit: int | None = None,
+    stop_event=None
 ) -> dict:
     """
     Обработать ответ оркестратора и при необходимости вызвать сабагентов.
@@ -226,7 +228,9 @@ def process_orchestrator_response(
         system_prompt: системный промт для LLM
         debug_mode: включить отладочный вывод
         debug_prompt: системный промт для отладки (если отличается от system_prompt)
-        progress_callback: callback для отправки прогресса (fn(subtask_name, status))
+        progress_queue: queue для отправки прогресса в реальном времени
+        token_limit: лимит токенов для предупреждений
+        stop_event: threading.Event для прерывания выполнения
     
     Returns:
         dict: {
@@ -234,7 +238,8 @@ def process_orchestrator_response(
             "final_status": dict,   # финальный статус
             "debug": {...},         # вся цепочка для debug
             "usage": dict,          # суммарное использование токенов
-            "subtask_results": [...] # результаты выполнения подзадач
+            "subtask_results": [...], # результаты выполнения подзадач
+            "aborted": bool,        # было ли прервано
         }
     """
     from app.status_validator import validate_status_block
@@ -274,8 +279,38 @@ def process_orchestrator_response(
             active_info += f"- {st.get('name', 'unnamed')}: {st.get('id', '?')}\n"
         return base_prompt + active_info
     
+    def send_token_update():
+        """Отправить обновление об использовании токенов в очередь"""
+        if progress_queue is not None and token_limit:
+            try:
+                progress_queue.put({
+                    'type': 'token_usage',
+                    'input': total_usage.get("input_tokens", 0),
+                    'output': total_usage.get("output_tokens", 0),
+                    'total': total_usage.get("total_tokens", 0),
+                    'limit': token_limit,
+                    'percent': round((total_usage.get("total_tokens", 0) / token_limit) * 100, 1)
+                })
+            except Exception:
+                pass  # Queue might be closed
+    
+    def check_stop():
+        """Проверить флаг остановки и отправить событие abort"""
+        if stop_event and stop_event.is_set():
+            if progress_queue:
+                progress_queue.put({
+                    'type': 'aborted',
+                    'reason': 'user_stop'
+                })
+            return True
+        return False
+    
     while iteration < max_iterations:
         iteration += 1
+        
+        if check_stop():
+            print("[TSM] Stop event set, aborting orchestration")
+            break
         
         current_system_prompt = build_system_prompt(system_prompt, active_subtasks_internal)
         
@@ -292,12 +327,13 @@ def process_orchestrator_response(
         
         parsed_status, cleaned_content = validate_status_block(response.content)
         
+        # Сохраняем контент даже если нет parsed_status
+        current_content = cleaned_content if cleaned_content else response.content
+        
         if not parsed_status:
             print("[TSM] No parsed status found, breaking")
+            # Всё равно возвращаем контент пользователю
             break
-        
-        # Сохраняем очищенный контент
-        current_content = cleaned_content if cleaned_content else response.content
         
         if debug_mode and response.content:
             debug_info['raw_model_response'] = response.content
@@ -338,6 +374,10 @@ def process_orchestrator_response(
                 print(f"[TSM] No prompt for subtask {subtask_name}, skipping")
                 continue
             
+            if check_stop():
+                print("[TSM] Stop event set, aborting subtask loop")
+                break
+            
             subagent_call_info = {
                 "subtask_id": subtask_id,
                 "subtask_name": subtask_name,
@@ -347,6 +387,14 @@ def process_orchestrator_response(
             subagent_messages = [
                 Message(role="user", content=subtask_prompt, usage={})
             ]
+            
+            # Отправляем статус "started" перед вызовом сабагента
+            if progress_queue:
+                progress_queue.put({
+                    'type': 'subtask_progress',
+                    'name': subtask_name,
+                    'status': 'started'
+                })
             
             print(f"[TSM] Calling subagent '{subtask_name}' with prompt len={len(subtask_prompt)}")
             
@@ -363,8 +411,14 @@ def process_orchestrator_response(
                     "success": False,
                     "error": str(e)
                 })
-                if progress_callback:
-                    progress_callback(subtask_name, "failed")
+                if progress_queue:
+                    progress_queue.put({
+                        'type': 'subtask_progress',
+                        'name': subtask_name,
+                        'status': 'failed',
+                        'error': str(e)
+                    })
+                send_token_update()
                 continue
             
             subagent_content = subagent_response.content
@@ -379,6 +433,9 @@ def process_orchestrator_response(
             total_usage["output_tokens"] += subagent_response.usage.get("output_tokens", 0)
             total_usage["total_tokens"] += subagent_response.usage.get("total_tokens", 0)
             
+            # Отправляем обновление токенов
+            send_token_update()
+            
             subtask_results.append({
                 "id": subtask_id,
                 "name": subtask_name,
@@ -386,8 +443,12 @@ def process_orchestrator_response(
                 "content": subagent_content
             })
             
-            if progress_callback:
-                progress_callback(subtask_name, "completed")
+            if progress_queue:
+                progress_queue.put({
+                    'type': 'subtask_progress',
+                    'name': subtask_name,
+                    'status': 'completed'
+                })
             
             subagent_result_message = Message(
                 role="user",
@@ -437,6 +498,9 @@ def process_orchestrator_response(
         else:
             break
     
+    # Check if aborted
+    was_aborted = stop_event is not None and stop_event.is_set()
+    
     # Add final orchestrator response usage
     try:
         total_usage["input_tokens"] += response.usage.get("input_tokens", 0)
@@ -444,6 +508,9 @@ def process_orchestrator_response(
         total_usage["total_tokens"] += response.usage.get("total_tokens", 0)
     except (NameError, UnboundLocalError):
         pass
+    
+    # Send final token update
+    send_token_update()
     
     if debug_mode:
         try:
@@ -462,5 +529,6 @@ def process_orchestrator_response(
         "final_status": current_status,
         "debug": debug_info if debug_mode else None,
         "usage": total_usage,
-        "subtask_results": subtask_results
+        "subtask_results": subtask_results,
+        "aborted": was_aborted
     }
