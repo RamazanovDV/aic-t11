@@ -1027,7 +1027,7 @@ def chat_stream():
             debug_info = result.get("debug") if debug_mode else None
             was_aborted = result.get("aborted", False)
             
-            raw_original_content = final_content
+            raw_original_content = result.get("raw_response", final_content)
             usage = result.get("usage", {})
             
             print(f"[ORCHESTRATOR] Usage: {usage}")

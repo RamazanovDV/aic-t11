@@ -263,6 +263,7 @@ def process_orchestrator_response(
     current_content = None
     current_status = None
     subtask_results = []
+    raw_response = None
     
     active_subtasks_internal: list[dict] = []
     
@@ -324,6 +325,9 @@ def process_orchestrator_response(
             break
         
         print(f"[TSM] Iteration {iteration}: Got response, length {len(response.content)}, usage: {response.usage}")
+        
+        # Save raw response immediately before any processing
+        raw_response = response.content
         
         # Add usage from orchestrator response immediately
         total_usage["input_tokens"] += response.usage.get("input_tokens", 0)
@@ -540,6 +544,7 @@ def process_orchestrator_response(
     return {
         "final_content": current_content,
         "final_status": current_status,
+        "raw_response": raw_response,
         "debug": debug_info if debug_mode else None,
         "usage": total_usage,
         "subtask_results": subtask_results,
