@@ -1,4 +1,5 @@
 import os
+import yaml
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,9 @@ class ProjectManager:
 
     def _get_current_task_path(self, project_name: str) -> Path:
         return self._get_project_dir(project_name) / "current_task.md"
+
+    def _get_invariants_path(self, project_name: str) -> Path:
+        return self._get_project_dir(project_name) / "invariants.yaml"
 
     def project_exists(self, project_name: str) -> bool:
         return self._get_project_dir(project_name).exists()
@@ -97,6 +101,31 @@ class ProjectManager:
 
         try:
             self._get_current_task_path(project_name).write_text(content, encoding="utf-8")
+            return True
+        except Exception:
+            return False
+
+    def get_invariants(self, project_name: str) -> dict[str, Any] | None:
+        if not self.project_exists(project_name):
+            return None
+
+        invariants_path = self._get_invariants_path(project_name)
+        if not invariants_path.exists():
+            return None
+
+        try:
+            with open(invariants_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            return None
+
+    def save_invariants(self, project_name: str, invariants: dict[str, Any]) -> bool:
+        if not self.project_exists(project_name):
+            return False
+
+        try:
+            with open(self._get_invariants_path(project_name), "w", encoding="utf-8") as f:
+                yaml.safe_dump(invariants, f, allow_unicode=True, sort_keys=False)
             return True
         except Exception:
             return False

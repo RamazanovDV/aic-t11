@@ -110,6 +110,7 @@ def _parse_and_validate(status_json: str) -> dict[str, Any] | None:
         validated["user_info"] = status.get("user_info")
         validated["active_subtasks"] = status.get("active_subtasks", [])
         validated["subtasks"] = status.get("subtasks", [])
+        validated["invariants"] = status.get("invariants")
         
         return validated
         
@@ -127,7 +128,7 @@ def is_valid_status(status: dict[str, Any] | None) -> bool:
     
     has_any_field = any(
         k in status and status[k] is not None
-        for k in ["task_name", "state", "progress", "project", "updated_project_info", "current_task_info", "approved_plan", "already_done", "currently_doing"]
+        for k in ["task_name", "state", "progress", "project", "updated_project_info", "current_task_info", "approved_plan", "already_doing", "currently_doing", "invariants"]
     )
     
     return has_any_field

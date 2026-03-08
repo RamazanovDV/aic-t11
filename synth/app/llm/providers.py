@@ -282,7 +282,7 @@ class AnthropicProvider(BaseProvider):
         payload = {
             "model": self.model,
             "messages": formatted_messages,
-            "max_tokens": 4096,
+            "temperature": self.temperature,
         }
 
         debug_request = None
@@ -299,7 +299,7 @@ class AnthropicProvider(BaseProvider):
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
         try:
             response.raise_for_status()
-        except requests.HTTPError:
+        except requests.HTTPError as e:
             if response.status_code in (400, 422):
                 error_data = response.json() if response.content else {}
                 error_message = ""

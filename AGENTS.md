@@ -1,31 +1,22 @@
 # AGENTS.md - Instructions for AI Coding Agents
 
 ## Project Overview
-
 Synth is a multi-user AI agent with web interface and CLI. Backend is Flask (port 5000), UI is Flask + htmx (port 5001), CLI is Click-based.
 
 ## Project Structure
-
 ```
-synth/
-├── synth/              # Flask API (port 5000)
-├── synth-ui/          # Flask + htmx web UI (port 5001)
-├── synth-cli/         # Click-based CLI
-├── context/           # Markdown files for system prompt
-└── data/              # Session data (gitignored)
+synth/      # Flask API (port 5000): routes.py, session.py, storage.py, auth.py, config.py, models.py, tsm.py
+synth-ui/   # Flask + htmx web UI (port 5001)
+synth-cli/  # Click-based CLI
+context/    # Markdown files for system prompt
+data/       # Session data (gitignored)
 ```
 
 ## Build/Lint/Test Commands
-
 ### Setup
 ```bash
-for dir in synth synth-ui synth-cli; do
-  cd $dir && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt && cd ..
-done
-
-cp synth/config.example.yaml synth/config.yaml
-cp synth-ui/config.example.yaml synth-ui/config.yaml
-cp synth-cli/config.example.yaml synth-cli/config.yaml
+for dir in synth synth-ui synth-cli; do cd $dir && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt && cd ..; done
+cp synth/config.example.yaml synth/config.yaml && cp synth-ui/config.example.yaml synth-ui/config.yaml && cp synth-cli/config.example.yaml synth-cli/config.yaml
 ```
 
 ### Running
@@ -33,7 +24,12 @@ cp synth-cli/config.example.yaml synth-cli/config.yaml
 cd synth && source venv/bin/activate && python run.py      # port 5000
 cd synth-ui && source venv/bin/activate && python run.py   # port 5001
 cd synth-cli && source venv/bin/activate
-python main.py chat "Hello"
+python main.py chat "Hello"           # Send message
+python main.py repl                   # Interactive mode
+python main.py session list           # List sessions
+python main.py session new <name>     # Create session
+python main.py session reset -s <id>  # Reset session
+python main.py health                 # Check backend
 ```
 
 ### Testing
@@ -43,24 +39,23 @@ cd synth && pytest                        # specific component
 pytest synth/tests/test_session.py       # single file
 pytest synth/tests/test_session.py::test_func  # single test
 pytest -k "pattern"                       # by pattern
-pytest -v --tb=short                     # verbose
+pytest -v --tb=short                      # verbose
 ```
 
 ### Linting
 ```bash
 ruff check .           # lint
 ruff check --fix .     # auto-fix
-ruff check synth/app/routes.py  # specific file
 ```
 
 ## Code Style
-
 ### Imports (order: stdlib, third-party, local)
 ```python
-import os
-from pathlib import Path
+import json
 import requests
 from flask import Blueprint, jsonify, request
+from app.config import config
+from app.session import session_manager
 ```
 
 ### Formatting
@@ -75,10 +70,8 @@ def get_session_id() -> str:
 ```
 
 ### Naming Conventions
-- Variables/functions: `snake_case`
-- Classes: `PascalCase`
-- Constants: `UPPER_SNAKE_CASE`
-- Private methods: prefix with `_`
+- Variables/functions: `snake_case`, Classes: `PascalCase`, Constants: `UPPER_SNAKE_CASE`
+- Private methods: prefix with `_`, Blueprint names: `Blueprint("api", __name__)`
 
 ### Error Handling
 ```python
@@ -89,7 +82,7 @@ except requests.RequestException as e:
     return jsonify({"error": f"Backend error: {str(e)}"}), 500
 ```
 
-### Flask Routes Pattern
+## Flask Routes Pattern
 ```python
 api_bp = Blueprint("api", __name__)
 
@@ -109,65 +102,87 @@ def chat():
     if not data or "message" not in data:
         return jsonify({"error": "Missing 'message' field"}), 400
     return jsonify({"message": response})
+
+def get_session_id() -> str:
+    session_id = request.headers.get("X-Session-Id")
+    return session_id or request.cookies.get("session_id", "default")
 ```
 
-### CLI (Click) Pattern
+## CLI (Click) Pattern
 ```python
 import click
 
 @click.group()
-def cli(): """Synth CLI""" pass
+def cli(): """T6 AI Assistant CLI""" pass
 
 @cli.command()
 @click.argument("message")
-def chat(message: str): """Send a message""" ...
+@click.option("-p", "--provider", default=None)
+@click.option("-s", "--session", default=None)
+def chat(message: str, provider: str | None, session: str | None):
+    """Send a message to the AI""" ...
+
+@cli.group()
+def session():
+    """Manage sessions""" pass
 ```
 
-### HTML/Jinja2
+## Session Management
+```python
+from app.session import session_manager
+session_id = get_session_id()
+session = session_manager.get_session(session_id)
+session.add_user_message(content, source="web")
+session.add_assistant_message(content, usage, model=model)
+session_manager.save_session(session_id)
+```
+
+## Storage/Models
+```python
+from app.storage import storage
+from app.models import User
+user = storage.load_user(user_id)
+storage.save_user(user)
+users = storage.list_users()
+```
+
+## HTML/Jinja2
 ```html
 {% extends "base.html" %}
 {% block content %}{{ content|safe }}{% endblock %}
 ```
 
-### JavaScript
-- ES6+ syntax (async/await, arrow functions)
-- Use `const` by default, `let` when needed
-- Strict equality (`===` and `!==`)
-- Event listeners via `addEventListener`, not inline onclick
-
-```javascript
-async function loadMessages() {
-    const response = await fetch('/api/sessions/');
-    const data = await response.json();
-    return data;
-}
-```
+## JavaScript (ES6+)
+Use `const` by default, `let` when needed. Strict equality (`===` and `!==`). Event listeners via `addEventListener`, not inline onclick.
 
 ## Configuration
-
-- Store sensitive data in YAML config files (gitignored)
-- Use `.gitignore` to exclude `config.yaml`, `venv/`, `data/`
+Store sensitive data in YAML config files (gitignored). Use `.gitignore` to exclude `config.yaml`, `venv/`, `data/`.
 
 ### Environment Variables
 - `T6_SESSION_ID` - Session ID for CLI (default: "cli-default")
 - `T6_BACKEND_URL` - Backend URL override
 
-## Common Tasks
-
-**Add LLM Provider** - Edit `synth/config.yaml`:
+### config.yaml Structure
 ```yaml
+backend:
+  url: "http://localhost:5000"
+  api_key: "your-key"
+auth:
+  api_key: "your-auth-key"
 llm:
+  default_provider: "openai"
   providers:
-    new_provider:
-      url: "https://api.example.com/v1/chat/completions"
-      api_key: "your-key"
-      model: "model-name"
+    openai:
+      url: "https://api.openai.com/v1/chat/completions"
+      api_key: "sk-"
+      model: "gpt-4"
 ```
 
-**Add API Endpoint** - Add route in `synth/app/routes.py`, use `@require_auth` if needed.
+## Common Tasks
+**Add LLM Provider** - Edit `synth/config.yaml` with provider config.
+**Add API Endpoint** - Add route in `synth/app/routes.py`, use `@require_auth`.
 
 ## Git Practices
-
 - Commit with clear messages describing the "why"
 - Never commit secrets/credentials
 - Run lint before committing
