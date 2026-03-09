@@ -8,6 +8,7 @@ from app.config import config
 from app.context import get_system_prompt
 from app.llm import ProviderFactory
 from app.llm.providers import ContextLengthExceededError
+from app.llm.client import PromptBuilder, LLMClient, create_llm_client, create_prompt_builder
 from app.session import session_manager
 from app import summarizer
 from app import status_validator
@@ -525,21 +526,14 @@ def _process_status_block(
                 if attempt < max_retries:
                     print(f"[ROUTES] Invalid state (attempt {attempt}/{max_retries}): {error_msg}")
                     
-                    error_reminder = (
-                        f"\n\n⚠️ ОШИБКА ПЕРЕХОДА СОСТОЯНИЯ! ⚠️\n"
-                        f"Ты попытался перейти в недопустимое состояние.\n\n"
-                        f"Ошибка: {error_msg}\n\n"
-                        f"Текущее состояние: {current_state}\n"
-                        f"Допустимые переходы из '{current_state}': {allowed}\n\n"
-                        f"ОБЪЯСНИ пользователю почему этот переход невозможен "
-                        f"и предложи допустимый следующий шаг."
-                    )
+                    prompt_builder = create_prompt_builder(session, user_id)
+                    error_reminder = prompt_builder.build_error_reminder(error_msg, current_state, allowed)
                     
-                    llm_messages = session.get_messages_for_llm()
-                    llm_messages.append({"role": "user", "content": error_reminder})
+                    retry_messages = prompt_builder.build_messages(error_reminder)
                     
                     try:
-                        response = provider.chat(llm_messages, system_prompt + error_reminder, debug=debug_mode)
+                        llm_client = create_llm_client(session)
+                        response = llm_client.send(retry_messages, system_prompt, debug=debug_mode)
                     except Exception as e:
                         if attempt == max_retries - 1:
                             raise
@@ -1272,24 +1266,16 @@ def chat_stream():
                     
                     print(f"[CHAT_STREAM] Invalid state (retry): {error_msg}")
                     
-                    error_reminder = (
-                        f"\n\n⚠️ ОШИБКА ПЕРЕХОДА СОСТОЯНИЯ! ⚠️\n"
-                        f"Ты попытался перейти в недопустимое состояние.\n\n"
-                        f"Ошибка: {error_msg}\n\n"
-                        f"Текущее состояние: {current_state}\n"
-                        f"Допустимые переходы из '{current_state}': {allowed}\n\n"
-                        f"ОБЪЯСНИ пользователю почему этот переход невозможен "
-                        f"и предложи допустимый следующий шаг."
-                    )
+                    prompt_builder = create_prompt_builder(session, user_id)
+                    error_reminder = prompt_builder.build_error_reminder(error_msg, current_state, allowed)
                     
-                    retry_msgs = session.get_messages_for_llm()
+                    retry_messages = prompt_builder.build_messages(error_reminder)
                     retry_system = system_prompt
                     
                     try:
-                        from app.llm.base import Message
-                        retry_msgs_converted = list(retry_msgs)
-                        retry_msgs_converted.append(Message(role="user", content=error_reminder, usage={}))
-                        retry_response = provider.chat(retry_msgs_converted, retry_system, debug=debug_mode)
+                        print(f"[CHAT_STREAM] Retry: {len(retry_messages)} messages")
+                        llm_client = create_llm_client(session)
+                        retry_response = llm_client.send(retry_messages, retry_system, debug=debug_mode)
                         retry_status, retry_cleaned = status_validator.validate_status_block(retry_response.content)
                         
                         if retry_status:
@@ -1315,6 +1301,8 @@ def chat_stream():
                             content_for_user = cleaned_content
                     except Exception as e:
                         print(f"[CHAT_STREAM] Error during retry: {e}")
+                        import traceback
+                        traceback.print_exc()
                         # При ошибке retry - восстанавливаем предыдущее состояние
                         if previous_state and session.status:
                             session.status["state"] = previous_state
