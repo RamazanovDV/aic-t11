@@ -1265,6 +1265,7 @@ def chat_stream():
                     allowed = tsm.get_allowed_transitions(current_state)
                     
                     print(f"[CHAT_STREAM] Invalid state (retry): {error_msg}")
+                    print(f"[CHAT_STREAM] ===> ABOUT TO ENTER TRY BLOCK <===", flush=True)
                     
                     try:
                         prompt_builder = create_prompt_builder(session, user_id)
