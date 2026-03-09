@@ -59,10 +59,10 @@ class GenericOpenAIProvider(BaseProvider):
 
         formatted_messages = []
         if system_prompt:
-            formatted_messages.append({"role": "system", "content": system_prompt})
+            formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
 
         for msg in messages:
-            formatted_messages.append({"role": msg.role, "content": msg.content})
+            formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
 
         payload = {
             "model": self.model,
@@ -213,10 +213,10 @@ class OpenAIProvider(GenericOpenAIProvider):
 
         formatted_messages = []
         if system_prompt:
-            formatted_messages.append({"role": "system", "content": system_prompt})
+            formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
 
         for msg in messages:
-            formatted_messages.append({"role": msg.role, "content": msg.content})
+            formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
 
         payload = {
             "model": self.model,
@@ -465,10 +465,10 @@ class OllamaProvider(BaseProvider):
 
         formatted_messages = []
         if system_prompt:
-            formatted_messages.append({"role": "system", "content": system_prompt})
+            formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
 
         for msg in messages:
-            formatted_messages.append({"role": msg.role, "content": msg.content})
+            formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
 
         payload = {
             "model": self.model,

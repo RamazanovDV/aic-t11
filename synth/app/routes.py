@@ -1264,32 +1264,17 @@ def chat_stream():
                     current_state = previous_state or transition_info.get("from") or session.status.get("state")
                     allowed = tsm.get_allowed_transitions(current_state)
                     
-                    import sys
-                    sys.stderr.write(f">>> ENTERING RETRY BLOCK, current_state={current_state}, error={error_msg}\n")
-                    sys.stderr.flush()
-                    
-                    print(f"[CHAT_STREAM] Invalid state (retry): {error_msg}", flush=True)
-                    import traceback as tb
-                    print(f"[CHAT_STREAM] About to enter retry block...", flush=True)
-                    sys.stderr.flush()
-                    sys.stderr.flush()
+                    print(f"[CHAT_STREAM] Invalid state (retry): {error_msg}")
                     
                     try:
-                        print(f"[CHAT_STREAM] Step 1: Creating prompt_builder...", flush=True)
                         prompt_builder = create_prompt_builder(session, user_id)
-                        print(f"[CHAT_STREAM] Step 2: Building error_reminder...", flush=True)
                         error_reminder = prompt_builder.build_error_reminder(error_msg, current_state, allowed)
-                        print(f"[CHAT_STREAM] Step 3: Building messages...", flush=True)
                         retry_messages = prompt_builder.build_messages(error_reminder)
                         retry_system = system_prompt
                         
-                        print(f"[CHAT_STREAM] Step 4: Retry has {len(retry_messages)} messages", flush=True)
-                        print(f"[CHAT_STREAM] Step 5: Session provider={session.provider}, model={session.model}", flush=True)
-                        print(f"[CHAT_STREAM] Step 6: Creating LLMClient...", flush=True)
+                        print(f"[CHAT_STREAM] Retry: {len(retry_messages)} messages, provider={session.provider}")
                         llm_client = create_llm_client(session)
-                        print(f"[CHAT_STREAM] Step 7: Calling provider.chat()...", flush=True)
                         retry_response = llm_client.send(retry_messages, retry_system, debug=debug_mode)
-                        print(f"[CHAT_STREAM] Step 8: Got response", flush=True)
                         retry_status, retry_cleaned = status_validator.validate_status_block(retry_response.content)
                         
                         if retry_status:
