@@ -113,7 +113,10 @@ def validate_state_transition(current_state: Optional[str], new_state: Optional[
         return False, f"Недопустимое состояние: {new_state}. Допустимые: {VALID_STATES}"
     
     if current_state is None:
-        return True, None
+        # Переход из None разрешен только в planning (начало новой задачи)
+        if new_state == "planning":
+            return True, None
+        return False, f"Недопустимый переход. Начальное состояние должно быть 'planning', а не '{new_state}'"
     
     allowed = STATE_TRANSITIONS.get(current_state, [])
     if new_state not in allowed:
@@ -125,6 +128,7 @@ def validate_state_transition(current_state: Optional[str], new_state: Optional[
 def process_state_transition(session, parsed_status: dict[str, Any]) -> dict[str, Any]:
     """Обработать переход состояния из статуса."""
     mode = get_tsm_mode(session)
+    print(f"[TSM] process_state_transition: mode={mode}, current_state={session.status.get('state')}, task_name={session.status.get('task_name')}")
     
     if mode != "deterministic":
         return parsed_status
@@ -139,9 +143,11 @@ def process_state_transition(session, parsed_status: dict[str, Any]) -> dict[str
     proposed_next = parsed_status.get("next_state")
     
     target_state = proposed_next or proposed_state
+    print(f"[TSM] proposed_state={proposed_state}, proposed_next={proposed_next}, target_state={target_state}")
     
     if target_state and target_state != current_state:
         is_valid, error = validate_state_transition(current_state, target_state, task_name)
+        print(f"[TSM] Transition check: {current_state} -> {target_state}, is_valid={is_valid}, error={error}")
         
         if is_valid:
             _log_transition(session, current_state, target_state)
@@ -152,6 +158,7 @@ def process_state_transition(session, parsed_status: dict[str, Any]) -> dict[str
                 "validated": True,
             }
         else:
+            log_transition_error(session, error or "Unknown error", current_state, target_state)
             parsed_status["_transition_error"] = error
             parsed_status["_transition_info"] = {
                 "from": current_state,
@@ -178,6 +185,24 @@ def _log_transition(session, from_state: str, to_state: str) -> None:
     }
     
     session.status["transition_log"].append(log_entry)
+
+
+def log_transition_error(session, error: str | None, from_state: str, to_state: str, attempt: int = 1) -> None:
+    """Логировать ошибку перехода состояния."""
+    if "transition_errors" not in session.status:
+        session.status["transition_errors"] = []
+    
+    from datetime import datetime
+    log_entry = {
+        "from": from_state,
+        "to": to_state,
+        "error": error,
+        "attempt": attempt,
+        "timestamp": datetime.now().isoformat(),
+    }
+    
+    session.status["transition_errors"].append(log_entry)
+    print(f"[TSM] Transition error logged: {from_state} -> {to_state}, attempt: {attempt}, error: {error}")
 
 
 def get_allowed_transitions(current_state: Optional[str]) -> list[str]:

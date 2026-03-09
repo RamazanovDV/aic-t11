@@ -504,6 +504,70 @@ def _process_status_block(
         if parsed_status:
             parsed_status = tsm.process_state_transition(session, parsed_status)
             
+            transition_error = parsed_status.get("_transition_error")
+            proposed_state = parsed_status.get("state")
+            proposed_state_raw = parsed_status.get("_proposed_state")
+            
+            print(f"[ROUTES] state={proposed_state}, _proposed_state={proposed_state_raw}, _transition_error={transition_error}")
+            
+            if transition_error or (proposed_state is None and proposed_state_raw is not None):
+                if transition_error:
+                    error_msg = transition_error
+                else:
+                    invalid_state = parsed_status.get("_proposed_state")
+                    error_msg = f"Недопустимое состояние: '{invalid_state}'. Допустимые: {tsm.VALID_STATES}"
+                
+                transition_info = parsed_status.get("_transition_info", {})
+                current_state = transition_info.get("from", session.status.get("state"))
+                allowed = tsm.get_allowed_transitions(current_state)
+                attempt += 1
+                
+                if attempt < max_retries:
+                    print(f"[ROUTES] Invalid state (attempt {attempt}/{max_retries}): {error_msg}")
+                    
+                    error_reminder = (
+                        f"\n\n⚠️ ОШИБКА ПЕРЕХОДА СОСТОЯНИЯ! ⚠️\n"
+                        f"Ты попытался перейти в недопустимое состояние.\n\n"
+                        f"Ошибка: {error_msg}\n\n"
+                        f"Текущее состояние: {current_state}\n"
+                        f"Допустимые переходы из '{current_state}': {allowed}\n\n"
+                        f"Пожалуйста, исправь статус в JSON-блоке и укажи допустимое состояние."
+                    )
+                    
+                    llm_messages = session.get_messages_for_llm()
+                    llm_messages.append({"role": "user", "content": error_reminder})
+                    
+                    try:
+                        response = provider.chat(llm_messages, system_prompt + error_reminder, debug=debug_mode)
+                    except Exception as e:
+                        if attempt == max_retries - 1:
+                            raise
+                        continue
+                    
+                    parsed_status, cleaned_content = status_validator.validate_status_block(response.content)
+                    
+                    if parsed_status:
+                        parsed_status = tsm.process_state_transition(session, parsed_status)
+                        
+                        if parsed_status.get("_transition_error"):
+                            print(f"[ROUTES] Retry failed - model still reports invalid state")
+                            # Всё равно возвращаем ответ пользователю
+                            session.update_status(parsed_status)
+                            _handle_project_updates(session)
+                            _handle_user_info_update(parsed_status, user_id)
+                            return response, cleaned_content, None, None
+                        else:
+                            session.update_status(parsed_status)
+                            _handle_project_updates(session)
+                            _handle_user_info_update(parsed_status, user_id)
+                            return response, cleaned_content, None, None
+                    else:
+                        # Модель не вернула статус - возвращаем контент пользователю
+                        print(f"[ROUTES] Retry: model did not return status block")
+                        return response, response.content, None, None
+                else:
+                    print(f"[ROUTES] Max retries reached for state transition, using current state")
+            
             session.update_status(parsed_status)
             
             _handle_project_updates(session)
@@ -1180,17 +1244,88 @@ def chat_stream():
             content_for_user = full_content
             status_error = None
 
+            # Сохраняем предыдущее состояние для восстановления при ошибке
+            previous_state = session.status.get("state") if session.status else None
+
             parsed_status, cleaned_content = status_validator.validate_status_block(full_content)
             
             if parsed_status:
-                session.update_status(parsed_status)
-                _handle_project_updates(session)
-                _handle_user_info_update(parsed_status, user_id)
-                content_for_user = cleaned_content
+                parsed_status = tsm.process_state_transition(session, parsed_status)
                 
-                status_event = _emit_project_status(session, previous_status)
-                if status_event:
-                    yield f"data: {json.dumps(status_event, ensure_ascii=False)}\n\n"
+                transition_error = parsed_status.get("_transition_error")
+                proposed_state = parsed_status.get("state")
+                proposed_state_raw = parsed_status.get("_proposed_state")
+                
+                print(f"[CHAT_STREAM] state={proposed_state}, _proposed_state={proposed_state_raw}, _transition_error={transition_error}")
+                
+                if transition_error or (proposed_state is None and proposed_state_raw is not None):
+                    if transition_error:
+                        error_msg = transition_error
+                    else:
+                        invalid_state = parsed_status.get("_proposed_state")
+                        error_msg = f"Недопустимое состояние: '{invalid_state}'. Допустимые: {tsm.VALID_STATES}"
+                    
+                    transition_info = parsed_status.get("_transition_info", {})
+                    current_state = previous_state or transition_info.get("from") or session.status.get("state")
+                    allowed = tsm.get_allowed_transitions(current_state)
+                    
+                    print(f"[CHAT_STREAM] Invalid state (retry): {error_msg}")
+                    
+                    error_reminder = (
+                        f"\n\n⚠️ ОШИБКА ПЕРЕХОДА СОСТОЯНИЯ! ⚠️\n"
+                        f"Ты попытался перейти в недопустимое состояние.\n\n"
+                        f"Ошибка: {error_msg}\n\n"
+                        f"Текущее состояние: {current_state}\n"
+                        f"Допустимые переходы из '{current_state}': {allowed}\n\n"
+                        f"Пожалуйста, исправь статус в JSON-блоке и укажи допустимое состояние."
+                    )
+                    
+                    retry_msgs = session.get_messages_for_llm()
+                    retry_system = system_prompt
+                    
+                    try:
+                        from app.llm.base import Message
+                        retry_msgs_converted = list(retry_msgs)
+                        retry_msgs_converted.append(Message(role="user", content=error_reminder, usage={}))
+                        retry_response = provider.chat(retry_msgs_converted, retry_system, debug=debug_mode)
+                        retry_status, retry_cleaned = status_validator.validate_status_block(retry_response.content)
+                        
+                        if retry_status:
+                            retry_status = tsm.process_state_transition(session, retry_status)
+                            if retry_status.get("_transition_error"):
+                                print(f"[CHAT_STREAM] Retry failed - model still reports invalid state")
+                                # Восстанавливаем предыдущее состояние
+                                if previous_state and session.status:
+                                    session.status["state"] = previous_state
+                            else:
+                                session.update_status(retry_status)
+                                _handle_project_updates(session)
+                                _handle_user_info_update(retry_status, user_id)
+                            content_for_user = retry_cleaned
+                            
+                            status_event = _emit_project_status(session, previous_status)
+                            if status_event:
+                                yield f"data: {json.dumps(status_event, ensure_ascii=False)}\n\n"
+                        else:
+                            # Retry не вернул статус - восстанавливаем предыдущее состояние
+                            if previous_state and session.status:
+                                session.status["state"] = previous_state
+                            content_for_user = cleaned_content
+                    except Exception as e:
+                        print(f"[CHAT_STREAM] Error during retry: {e}")
+                        # При ошибке retry - восстанавливаем предыдущее состояние
+                        if previous_state and session.status:
+                            session.status["state"] = previous_state
+                        content_for_user = cleaned_content
+                else:
+                    session.update_status(parsed_status)
+                    _handle_project_updates(session)
+                    _handle_user_info_update(parsed_status, user_id)
+                    content_for_user = cleaned_content
+                    
+                    status_event = _emit_project_status(session, previous_status)
+                    if status_event:
+                        yield f"data: {json.dumps(status_event, ensure_ascii=False)}\n\n"
             else:
                 for retryAttempt in range(3):
                         retry_msgs = session.get_messages_for_llm()

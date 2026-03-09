@@ -91,6 +91,7 @@ def _parse_and_validate(status_json: str) -> dict[str, Any] | None:
         
         if "state" in status:
             state = status["state"]
+            validated["_proposed_state"] = state
             if state in VALID_STATES:
                 validated["state"] = state
             elif state is None:
@@ -99,6 +100,7 @@ def _parse_and_validate(status_json: str) -> dict[str, Any] | None:
                 validated["state"] = None
         else:
             validated["state"] = None
+            validated["_proposed_state"] = None
         
         validated["progress"] = status.get("progress")
         validated["project"] = status.get("project")
@@ -111,6 +113,7 @@ def _parse_and_validate(status_json: str) -> dict[str, Any] | None:
         validated["active_subtasks"] = status.get("active_subtasks", [])
         validated["subtasks"] = status.get("subtasks", [])
         validated["invariants"] = status.get("invariants")
+        validated["next_state"] = status.get("next_state")
         
         return validated
         

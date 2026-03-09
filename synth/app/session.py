@@ -116,9 +116,16 @@ class Session:
         
         prev_status = self.status.copy() if self.status else {}
         
+        # Не меняем state если есть ошибка перехода
+        if "_transition_error" not in status_data:
+            new_state = status_data.get("state")
+            if new_state in valid_states:
+                self.status["state"] = new_state
+            # Если new_state невалиден - оставляем предыдущее state без изменений
+        
         self.status = {
             "task_name": status_data.get("task_name", "conversation"),
-            "state": status_data.get("state") if status_data.get("state") in valid_states else None,
+            "state": self.status.get("state"),  # уже обработали выше
             "progress": status_data.get("progress"),
             "project": status_data.get("project"),
             "updated_project_info": status_data.get("updated_project_info"),
