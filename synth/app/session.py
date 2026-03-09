@@ -420,6 +420,13 @@ class Session:
         """Удалить сообщение по индексу"""
         if 0 <= index < len(self.messages):
             del self.messages[index]
+            
+            # Обновляем статус на основе последнего сообщения со статусом
+            for msg in reversed(self.messages):
+                if msg.role == "assistant" and msg.status and not getattr(msg, 'disabled', False):
+                    self.status = msg.status.copy()
+                    break
+            
             self.updated_at = datetime.now()
             return True
         return False
