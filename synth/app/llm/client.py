@@ -123,6 +123,7 @@ class LLMClient:
         Returns:
             LLMResponse объект
         """
+        print(f"[LLMClient] send() called, provider={self.provider_name}, model={self.model}, messages={len(messages)}")
         return self.provider.chat(messages, system_prompt, debug=debug)
     
     def stream(self, 

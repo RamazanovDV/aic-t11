@@ -279,6 +279,7 @@ class OpenAIProvider(GenericOpenAIProvider):
 
 class AnthropicProvider(BaseProvider):
     def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> LLMResponse:
+        print(f"[AnthropicProvider] chat() called, model={self.model}, url={self.url}")
         headers = {
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
@@ -297,6 +298,8 @@ class AnthropicProvider(BaseProvider):
             "messages": formatted_messages,
             "temperature": self.temperature,
         }
+
+        print(f"[AnthropicProvider] payload messages: {formatted_messages[:2]}...")
 
         debug_request = None
         debug_response = None
