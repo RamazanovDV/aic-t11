@@ -531,7 +531,8 @@ def _process_status_block(
                         f"Ошибка: {error_msg}\n\n"
                         f"Текущее состояние: {current_state}\n"
                         f"Допустимые переходы из '{current_state}': {allowed}\n\n"
-                        f"Пожалуйста, исправь статус в JSON-блоке и укажи допустимое состояние."
+                        f"ОБЪЯСНИ пользователю почему этот переход невозможен "
+                        f"и предложи допустимый следующий шаг."
                     )
                     
                     llm_messages = session.get_messages_for_llm()
@@ -1277,7 +1278,8 @@ def chat_stream():
                         f"Ошибка: {error_msg}\n\n"
                         f"Текущее состояние: {current_state}\n"
                         f"Допустимые переходы из '{current_state}': {allowed}\n\n"
-                        f"Пожалуйста, исправь статус в JSON-блоке и укажи допустимое состояние."
+                        f"ОБЪЯСНИ пользователю почему этот переход невозможен "
+                        f"и предложи допустимый следующий шаг."
                     )
                     
                     retry_msgs = session.get_messages_for_llm()
