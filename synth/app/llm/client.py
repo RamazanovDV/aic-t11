@@ -17,8 +17,8 @@ class PromptBuilder:
             session: объект сессии
             user_id: ID пользователя (опционально)
         """
+        print(f"[PromptBuilder] __init__ called, session type: {type(session)}, user_id: {user_id}")
         self.session = session
-        self.user_id = user_id
         self.user_id = user_id
     
     def build_system_prompt(self) -> str:
@@ -155,6 +155,7 @@ def create_llm_client(session, provider_name: str | None = None, model: str | No
     Returns:
         LLMClient instance
     """
+    print(f"[CLIENT] create_llm_client called, provider={provider_name}, model={model}")
     if not provider_name:
         provider_name = session.provider or config.default_provider
     if not model:
@@ -173,4 +174,5 @@ def create_prompt_builder(session, user_id: str | None = None) -> PromptBuilder:
     Returns:
         PromptBuilder instance
     """
+    print(f"[CLIENT] create_prompt_builder called, session={session}, user_id={user_id}")
     return PromptBuilder(session, user_id)
