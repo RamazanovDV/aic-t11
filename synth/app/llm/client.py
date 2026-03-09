@@ -3,7 +3,7 @@
 from typing import Generator, Any
 from app.llm.base import Message
 from app.llm import ProviderFactory
-from app import config
+from app.config import config
 from app import tsm
 
 
