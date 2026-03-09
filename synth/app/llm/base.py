@@ -16,6 +16,7 @@ class Message:
     disabled: bool = False
     branch_id: str = "main"
     source: str | None = None
+    status: dict | None = None
 
 
 @dataclass

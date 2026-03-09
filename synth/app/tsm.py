@@ -74,9 +74,9 @@ def _get_orchestrator_prompt(debug: bool = False) -> str:
 def _get_deterministic_prompt(session) -> str:
     """Получить детерминированный промт для текущего состояния."""
     current_state = session.status.get("state")
-    task_name = session.status.get("task_name", "разговор на свободную тему")
+    task_name = session.status.get("task_name", "conversation")
     
-    if task_name == "разговор на свободную тему":
+    if task_name == "conversation":
         return config.get_context_file("TSM_PLANNING.md") or ""
     
     if not current_state:
@@ -101,9 +101,9 @@ def _get_deterministic_prompt(session) -> str:
     return prompt + context_info
 
 
-def validate_state_transition(current_state: Optional[str], new_state: Optional[str], task_name: str = "разговор на свободную тему") -> tuple[bool, Optional[str]]:
+def validate_state_transition(current_state: Optional[str], new_state: Optional[str], task_name: str = "conversation") -> tuple[bool, Optional[str]]:
     """Валидировать переход состояния."""
-    if task_name == "разговор на свободную тему":
+    if task_name == "conversation":
         return True, None
     
     if new_state is None:
@@ -130,9 +130,9 @@ def process_state_transition(session, parsed_status: dict[str, Any]) -> dict[str
         return parsed_status
     
     current_state = session.status.get("state")
-    task_name = session.status.get("task_name", "разговор на свободную тему")
+    task_name = session.status.get("task_name", "conversation")
     
-    if task_name == "разговор на свободную тему":
+    if task_name == "conversation":
         return parsed_status
     
     proposed_state = parsed_status.get("state")
@@ -189,7 +189,7 @@ def get_allowed_transitions(current_state: Optional[str]) -> list[str]:
 
 def get_current_state_info(session) -> dict:
     """Получить информацию о текущем состоянии TSM."""
-    task_name = session.status.get("task_name", "разговор на свободную тему")
+    task_name = session.status.get("task_name", "conversation")
     current_state = session.status.get("state")
     
     return {

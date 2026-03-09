@@ -423,7 +423,7 @@ def get_tsm_settings(session_id: str):
             return jsonify({
                 "tsm_mode": "simple",
                 "mode_name": "Simple Prompt",
-                "task_name": "разговор на свободную тему",
+                "task_name": "conversation",
                 "state": None,
                 "allowed_transitions": [],
                 "transition_log": [],

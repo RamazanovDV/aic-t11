@@ -165,6 +165,58 @@ body {
     white-space: nowrap;
 }
 
+.panel-project-name {
+    padding: 0.2rem 0.5rem;
+    background: #3d2a1a;
+    color: #f0a040;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.panel-task-name {
+    padding: 0.2rem 0.5rem;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.panel-task-state {
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.panel-task-state.state-planning {
+    background: #4a2d6b;
+    color: #d0b0ff;
+}
+
+.panel-task-state.state-execution {
+    background: #1a3a5c;
+    color: #70b0ff;
+}
+
+.panel-task-state.state-validation {
+    background: #f5f5f5;
+    color: #333333;
+}
+
+.panel-task-state.state-done {
+    background: #1a4d2e;
+    color: #70ff90;
+}
+
+.panel-divider {
+    color: var(--text-secondary);
+    margin: 0 0.25rem;
+}
+
 .session-select {
     padding: 0.4rem 0.75rem;
     background: var(--bg-secondary);
@@ -716,10 +768,68 @@ body {
     border-radius: 12px;
 }
 
+.message.message-user.state-planning {
+    background: #4a2d6b;
+    color: #d0b0ff;
+}
+
+.message.message-user.state-execution {
+    background: #1a3a5c;
+    color: #70b0ff;
+}
+
+.message.message-user.state-validation {
+    background: #f5f5f5;
+    color: #333333;
+}
+
+.message.message-user.state-done {
+    background: #1a4d2e;
+    color: #70ff90;
+}
+
+.message.message-user.state-active {
+    background: #3d2a1a;
+    color: #f0a040;
+}
+
+.message.message-user.state-free {
+    background: var(--message-user);
+}
+
 .message.message-assistant {
     align-self: flex-start;
     background: var(--message-assistant);
     border-radius: 12px;
+}
+
+.message.message-assistant.state-planning {
+    background: #4a2d6b;
+    color: #d0b0ff;
+}
+
+.message.message-assistant.state-execution {
+    background: #1a3a5c;
+    color: #70b0ff;
+}
+
+.message.message-assistant.state-validation {
+    background: #f5f5f5;
+    color: #333333;
+}
+
+.message.message-assistant.state-done {
+    background: #1a4d2e;
+    color: #70ff90;
+}
+
+.message.message-assistant.state-active {
+    background: #3d2a1a;
+    color: #f0a040;
+}
+
+.message.message-assistant.state-free {
+    background: var(--message-assistant);
 }
 
 .message-system {
@@ -749,6 +859,36 @@ body {
     background: var(--message-info);
     color: #e07020;
     border-radius: 12px;
+}
+
+.message.message-info.project-open {
+    background: #3d2a1a;
+    color: #f0a040;
+}
+
+.message.message-info.state-planning {
+    background: #4a2d6b;
+    color: #d0b0ff;
+}
+
+.message.message-info.state-execution {
+    background: #1a3a5c;
+    color: #70b0ff;
+}
+
+.message.message-info.state-validation {
+    background: #f5f5f5;
+    color: #333333;
+}
+
+.message.message-info.state-done {
+    background: #1a4d2e;
+    color: #70ff90;
+}
+
+.message.message-info.free-conversation {
+    background: #3d2a1a;
+    color: #e07020;
 }
 
 .message.message-summary {

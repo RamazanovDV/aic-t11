@@ -38,6 +38,7 @@ class FileStorage:
                     "disabled": m.disabled,
                     "branch_id": m.branch_id,
                     "source": m.source,
+                    "status": m.status,
                 }
                 for m in session.messages
             ],

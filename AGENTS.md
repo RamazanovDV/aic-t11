@@ -186,3 +186,7 @@ llm:
 - Commit with clear messages describing the "why"
 - Never commit secrets/credentials
 - Run lint before committing
+
+## Important Notes
+### Debug Usage
+The `debug` field in messages is intended ONLY for user-facing information in Debug mode. It must NEVER be used in any internal mechanisms, UI logic, or backend processing. Use dedicated fields (like `status`) for such purposes.

@@ -604,6 +604,44 @@ def _handle_user_info_update(parsed_status: dict, user_id: str | None) -> None:
         pass
 
 
+def _emit_project_status(session, previous_status: dict) -> dict:
+    """Определить тип изменения статуса и сформировать данные для отправки"""
+    current = session.status or {}
+    prev = previous_status
+    
+    project = current.get("project")
+    task_name = current.get("task_name", "conversation")
+    state = current.get("state")
+    
+    prev_project = prev.get("project")
+    prev_task_name = prev.get("task_name")
+    prev_state = prev.get("state")
+    
+    # Определяем тип события
+    if project and project != prev_project:
+        event_type = "project_open"
+    elif task_name == "conversation" and prev_task_name and prev_task_name != "conversation":
+        event_type = "free_conversation"
+    elif state and state != prev_state:
+        event_type = "state_change"
+    elif project and (not prev_project or prev_project != project):
+        event_type = "project_update"
+    else:
+        event_type = None
+    
+    if not event_type:
+        return None
+    
+    return {
+        "type": "project_status",
+        "event_type": event_type,
+        "project": project,
+        "task_name": task_name,
+        "state": state,
+        "previous_state": prev_state,
+    }
+
+
 def _handle_project_updates(session) -> None:
     """Обработать обновления проекта из статуса"""
     status = session.status
@@ -854,6 +892,12 @@ def chat_stream():
     def generate():
         nonlocal needs_summarization
 
+        previous_status = {
+            "project": session.status.get("project") if session.status else None,
+            "task_name": session.status.get("task_name") if session.status else None,
+            "state": session.status.get("state") if session.status else None,
+        }
+
         user_msg_for_llm = user_message
         summary_content = None
 
@@ -1070,6 +1114,11 @@ def chat_stream():
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
             
             yield f"data: {json.dumps({'content': final_content, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices, 'aborted': was_aborted})}\n\n"
+            
+            status_event = _emit_project_status(session, previous_status)
+            if status_event:
+                yield f"data: {json.dumps(status_event, ensure_ascii=False)}\n\n"
+            
             yield "data: [DONE]\n\n"
             return
 
@@ -1122,6 +1171,10 @@ def chat_stream():
                 _handle_project_updates(session)
                 _handle_user_info_update(parsed_status, user_id)
                 content_for_user = cleaned_content
+                
+                status_event = _emit_project_status(session, previous_status)
+                if status_event:
+                    yield f"data: {json.dumps(status_event, ensure_ascii=False)}\n\n"
             else:
                 for retryAttempt in range(3):
                         retry_msgs = session.get_messages_for_llm()
@@ -1142,6 +1195,10 @@ def chat_stream():
                                 _handle_project_updates(session)
                                 _handle_user_info_update(retry_status, user_id)
                                 content_for_user = retry_cleaned
+                                
+                                status_event = _emit_project_status(session, previous_status)
+                                if status_event:
+                                    yield f"data: {json.dumps(status_event, ensure_ascii=False)}\n\n"
                                 if debug_mode and retry_response.content:
                                     if debug_info is None:
                                         debug_info = {}
@@ -1233,6 +1290,7 @@ def get_session(session_id: str):
             "created_at": m.created_at.isoformat(),
             "disabled": m.disabled,
             "source": m.source,
+            "status": m.status,
         }
         for m in current_branch_messages
     ]
@@ -1266,6 +1324,9 @@ def get_session(session_id: str):
             for cp in session.checkpoints
         ],
         "current_branch": session.current_branch,
+        "project": session.status.get("project") if session.status else None,
+        "task_name": session.status.get("task_name") if session.status else None,
+        "state": session.status.get("state") if session.status else None,
     })
 
 

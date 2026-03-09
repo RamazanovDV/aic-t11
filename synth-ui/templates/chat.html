@@ -246,6 +246,7 @@
                 currentBranch: 'main',
                 branches: [],
                 checkpoints: [],
+                currentStatusClass: 'state-free',
             });
         }
     }
@@ -280,6 +281,13 @@
                     <span class="branch-name panel-branch-name" data-panel="${index}" onclick="showTreeModal(${index})">main</span>
                     <button class="btn btn-small" onclick="createCheckpointPanel(${index})" title="Создать чекпоинт">📸</button>
                     <button class="btn btn-small" onclick="showTreeModal(${index})" title="Дерево веток">🌳</button>
+                    <span class="panel-divider">|</span>
+                    <span class="panel-label">Проект:</span>
+                    <span class="panel-project-name" data-panel="${index}">-</span>
+                    <span class="panel-label">Задача:</span>
+                    <span class="panel-task-name" data-panel="${index}">conversation</span>
+                    <span class="panel-label">Этап:</span>
+                    <span class="panel-task-state" data-panel="${index}">-</span>
                 </div>
 
                 <div class="chat-header">
@@ -427,7 +435,8 @@
             
             panels.forEach((panel, idx) => {
                 const userMsgIndex = panel.messages.length;
-                addMessageToPanel(idx, message, 'user', null, null, null, false, userMsgIndex, username + ' | web');
+                const statusClass = panel.currentStatusClass || 'state-free';
+                addMessageToPanel(idx, message, 'user', null, null, null, false, userMsgIndex, username + ' | web', statusClass);
             });
 
             const messageText = message;
@@ -561,6 +570,14 @@
                 panel.branches = data.branches || [];
                 panel.checkpoints = data.checkpoints || [];
                 panel.tsmMode = data.tsm_mode || null;
+                
+                if (data.project || data.task_name || data.state) {
+                    updatePanelProjectStatus(panelIndex, {
+                        project: data.project,
+                        task_name: data.task_name || 'conversation',
+                        state: data.state
+                    });
+                }
             }
         } catch (e) {
             if (e.message !== 'Unauthorized') {
@@ -603,6 +620,39 @@
             }
         }
         branchName.textContent = currentBranchName;
+    }
+
+    function updatePanelProjectStatus(panelIndex, data) {
+        const panel = panels[panelIndex];
+        const projectEl = document.querySelector(`.panel-project-name[data-panel="${panelIndex}"]`);
+        const taskNameEl = document.querySelector(`.panel-task-name[data-panel="${panelIndex}"]`);
+        const taskStateEl = document.querySelector(`.panel-task-state[data-panel="${panelIndex}"]`);
+        
+        if (projectEl && data.project) {
+            projectEl.textContent = data.project;
+        }
+        if (taskNameEl) {
+            taskNameEl.textContent = data.task_name || 'conversation';
+        }
+        if (taskStateEl) {
+            const state = data.state;
+            taskStateEl.textContent = state || '-';
+            taskStateEl.className = 'panel-task-state';
+            if (state) {
+                taskStateEl.classList.add(`state-${state}`);
+            }
+        }
+        
+        let stateClass = 'state-free';
+        if (data.state) {
+            stateClass = `state-${data.state}`;
+        } else if (data.task_name && data.task_name !== 'conversation') {
+            stateClass = 'state-active';
+        }
+        
+        if (panel) {
+            panel.currentStatusClass = stateClass;
+        }
     }
 
     async function loadPanelModels(panelIndex) {
@@ -685,7 +735,24 @@
             panel.totalTokens = 0;
             
             panel.messages.forEach((msg, idx) => {
-                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null);
+                let statusClass = 'state-free';
+                
+                if (msg.role === 'user' && !msg.status) {
+                    for (let j = idx - 1; j >= 0; j--) {
+                        if (panel.messages[j].role === 'assistant' && panel.messages[j].status) {
+                            const s = panel.messages[j].status;
+                            if (s.state) statusClass = `state-${s.state}`;
+                            else if (s.task_name && s.task_name !== 'conversation') statusClass = 'state-active';
+                            break;
+                        }
+                    }
+                } else if (msg.status) {
+                    const s = msg.status;
+                    if (s.state) statusClass = `state-${s.state}`;
+                    else if (s.task_name && s.task_name !== 'conversation') statusClass = 'state-active';
+                }
+                
+                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass);
                 panel.messages[idx]._renderIndex = idx;
                 if (msg.usage && msg.role !== 'note' && msg.role !== 'info') {
                     panel.totalInput += msg.usage.input_tokens || 0;
@@ -693,6 +760,15 @@
                     panel.totalTokens += msg.usage.total_tokens || 0;
                 }
             });
+            
+            const lastMsg = panel.messages[panel.messages.length - 1];
+            let lastStatusClass = 'state-free';
+            if (lastMsg && lastMsg.status) {
+                const s = lastMsg.status;
+                if (s.state) lastStatusClass = `state-${s.state}`;
+                else if (s.task_name && s.task_name !== 'conversation') lastStatusClass = 'state-active';
+            }
+            panel.currentStatusClass = lastStatusClass;
             
             updatePanelStats(panelIndex, panel.totalInput, panel.totalOutput, panel.totalTokens);
             
@@ -702,7 +778,7 @@
         }
     }
 
-    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null) {
+    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null) {
         const panel = panels[panelIndex];
         const container = panel.messagesContainer;
         if (!container) return;
@@ -712,6 +788,10 @@
         
         const div = document.createElement('div');
         div.className = `message message-${role}${disabled ? ' message-disabled' : ''}`;
+        
+        if (statusClass && (role === 'user' || role === 'assistant')) {
+            div.classList.add(statusClass);
+        }
         
         let contentHtml = '';
         if (role === 'assistant') {
@@ -1006,7 +1086,8 @@
             } else {
                 const usage = data.usage || null;
                 const msgIndex = panel.messages.length;
-                addMessageToPanel(panelIndex, data.message, 'assistant', data.debug || null, usage, data.model || null, false, msgIndex);
+                const statusClass = panel.currentStatusClass || 'state-free';
+                addMessageToPanel(panelIndex, data.message, 'assistant', data.debug || null, usage, data.model || null, false, msgIndex, null, statusClass);
                 if (data.usage) {
                     panel.totalInput += data.usage.input_tokens || 0;
                     panel.totalOutput += data.usage.output_tokens || 0;
@@ -1061,7 +1142,8 @@
             rowDiv.className = 'message-row message-assistant';
             
             const div = document.createElement('div');
-            div.className = 'message message-assistant';
+            const statusClass = panel.currentStatusClass || 'state-free';
+            div.className = `message message-assistant ${statusClass}`;
             const messageContent = document.createElement('div');
             messageContent.className = 'message-content';
             messageContent.innerHTML = '';
@@ -1128,6 +1210,11 @@
                             if (data.type === 'aborted') {
                                 showInfo('❌ Процесс прерван пользователем', panelIndex);
                                 showRetryButton(panelIndex, message);
+                                continue;
+                            }
+
+                            if (data.type === 'project_status') {
+                                updatePanelProjectStatus(panelIndex, data);
                                 continue;
                             }
 
@@ -1582,6 +1669,53 @@
         const infoDiv = document.createElement('div');
         infoDiv.className = 'message message-info';
         infoDiv.style.cssText = 'background: #d1ecf1; border: 1px solid #bee5eb; padding: 10px; border-radius: 8px; margin: 8px 0;';
+        infoDiv.innerHTML = `<div class="message-content">${escapeHtml(message)}</div>`;
+        panel.messagesContainer.appendChild(infoDiv);
+        panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
+    }
+
+    function addProjectStatusMessage(panelIndex, data) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.messagesContainer) return;
+        
+        let message = '';
+        let stateClass = '';
+        
+        switch (data.event_type) {
+            case 'project_open':
+                message = `📁 Открыт проект: ${data.project}`;
+                stateClass = 'project-open';
+                break;
+            case 'state_change':
+                const stateEmoji = {
+                    'planning': '📋',
+                    'execution': '⚙️',
+                    'validation': '🔍',
+                    'done': '✅'
+                };
+                const stateName = {
+                    'planning': 'Планирование',
+                    'execution': 'Выполнение',
+                    'validation': 'Проверка',
+                    'done': 'Готово'
+                };
+                message = `${stateEmoji[data.state] || '📋'} Этап изменён: ${stateName[data.state] || data.state}`;
+                stateClass = `state-${data.state}`;
+                break;
+            case 'free_conversation':
+                message = '💬 Возврат к разговору на свободную тему';
+                stateClass = 'free-conversation';
+                break;
+            case 'project_update':
+                message = `📁 Проект обновлён: ${data.project}`;
+                stateClass = 'project-open';
+                break;
+            default:
+                return;
+        }
+        
+        const infoDiv = document.createElement('div');
+        infoDiv.className = `message message-info ${stateClass}`;
         infoDiv.innerHTML = `<div class="message-content">${escapeHtml(message)}</div>`;
         panel.messagesContainer.appendChild(infoDiv);
         panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
@@ -2199,7 +2333,7 @@
             }
             
             const stateInfo = document.getElementById('tsm-state-info');
-            if (data.task_name && data.task_name !== 'разговор на свободную тему') {
+            if (data.task_name && data.task_name !== 'conversation') {
                 stateInfo.style.display = 'block';
                 document.getElementById('tsm-task-name').textContent = data.task_name;
                 document.getElementById('tsm-current-state').textContent = data.state || 'null';

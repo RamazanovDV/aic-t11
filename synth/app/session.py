@@ -54,7 +54,7 @@ class Session:
     checkpoints: list[Checkpoint] = field(default_factory=list)
     current_branch: str = "main"
     status: dict[str, Any] = field(default_factory=lambda: {
-        "task_name": "разговор на свободную тему",
+        "task_name": "conversation",
         "state": None,
         "progress": None,
         "project": None,
@@ -88,12 +88,18 @@ class Session:
             self.current_branch = "main"
 
     def add_user_message(self, content: str, usage: dict[str, int] | None = None, source: str | None = None) -> None:
-        msg = Message(role="user", content=content, usage=usage or {}, branch_id=self.current_branch, source=source)
+        status = None
+        for msg in reversed(self.messages):
+            if msg.role == "assistant" and msg.status:
+                status = msg.status.copy()
+                break
+        
+        msg = Message(role="user", content=content, usage=usage or {}, branch_id=self.current_branch, source=source, status=status)
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
     def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None) -> None:
-        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch)
+        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch, status=self.status.copy() if self.status else None)
         self.messages.append(msg)
         if usage:
             self.total_tokens += usage.get("total_tokens", 0)
@@ -107,9 +113,11 @@ class Session:
             return
 
         valid_states = {"planning", "execution", "validation", "done"}
-
+        
+        prev_status = self.status.copy() if self.status else {}
+        
         self.status = {
-            "task_name": status_data.get("task_name", "разговор на свободной теме"),
+            "task_name": status_data.get("task_name", "conversation"),
             "state": status_data.get("state") if status_data.get("state") in valid_states else None,
             "progress": status_data.get("progress"),
             "project": status_data.get("project"),
@@ -122,6 +130,23 @@ class Session:
             "subtasks": status_data.get("subtasks", []),
             "invariants": status_data.get("invariants"),
         }
+        
+        new_project = self.status.get("project")
+        prev_project = prev_status.get("project")
+        new_state = self.status.get("state")
+        prev_state = prev_status.get("state")
+        new_task = self.status.get("task_name")
+        prev_task = prev_status.get("task_name")
+        
+        if new_project and new_project != prev_project:
+            self.add_info_message(f"📁 Открыт проект: {new_project}")
+        elif new_state and new_state != prev_state:
+            state_emoji = {"planning": "📋", "execution": "⚙️", "validation": "🔍", "done": "✅"}
+            state_name = {"planning": "Планирование", "execution": "Выполнение", "validation": "Проверка", "done": "Готово"}
+            self.add_info_message(f"{state_emoji.get(new_state, '📋')} Этап изменён: {state_name.get(new_state, new_state)}")
+        elif new_task and new_task != "conversation" and prev_task == "conversation":
+            self.add_info_message(f"💬 Возврат к разговору на свободную тему")
+        
         self.updated_at = datetime.now()
 
     def add_error_message(self, content: str, debug: dict | None = None, model: str | None = None) -> None:
@@ -707,6 +732,7 @@ class SessionManager:
                         disabled=m.get("disabled", False),
                         branch_id=m.get("branch_id", "main"),
                         source=m.get("source"),
+                        status=m.get("status"),
                     ))
 
                 branches = [
@@ -747,7 +773,7 @@ class SessionManager:
                     checkpoints=checkpoints,
                     current_branch=data.get("current_branch", "main"),
                     status=data.get("status", {
-                        "task_name": "разговор на свободную тему",
+                        "task_name": "conversation",
                         "state": None,
                         "progress": None,
                         "project": None,
@@ -787,6 +813,7 @@ class SessionManager:
                         disabled=m.get("disabled", False),
                         branch_id=m.get("branch_id", "main"),
                         source=m.get("source"),
+                        status=m.get("status"),
                     ))
                 
                 branches = []
@@ -917,7 +944,7 @@ class SessionManager:
                 checkpoints=checkpoints,
                 current_branch=data.get("current_branch", "main"),
                 status=data.get("status", {
-                    "task_name": "разговор на свободную тему",
+                    "task_name": "conversation",
                     "state": None,
                     "progress": None,
                     "project": None,

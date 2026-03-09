@@ -85,9 +85,9 @@ def _parse_and_validate(status_json: str) -> dict[str, Any] | None:
         validated = {}
         
         if "task_name" in status:
-            validated["task_name"] = str(status["task_name"]) if status["task_name"] else "разговор на свободной теме"
+            validated["task_name"] = str(status["task_name"]) if status["task_name"] else "conversation"
         else:
-            validated["task_name"] = "разговор на свободной теме"
+            validated["task_name"] = "conversation"
         
         if "state" in status:
             state = status["state"]
