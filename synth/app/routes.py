@@ -1265,15 +1265,19 @@ def chat_stream():
                     allowed = tsm.get_allowed_transitions(current_state)
                     
                     print(f"[CHAT_STREAM] Invalid state (retry): {error_msg}")
-                    print(f"[CHAT_STREAM] ===> ABOUT TO ENTER TRY BLOCK <===", flush=True)
+                    import sys
+                    sys.stderr.write(f"[DEBUG] Entering retry block now...\n")
+                    sys.stderr.flush()
                     
                     try:
+                        sys.stderr.write("[DEBUG] Inside try, creating prompt_builder...\n")
+                        sys.stderr.flush()
                         prompt_builder = create_prompt_builder(session, user_id)
                         error_reminder = prompt_builder.build_error_reminder(error_msg, current_state, allowed)
                         retry_messages = prompt_builder.build_messages(error_reminder)
                         retry_system = system_prompt
                         
-                        print(f"[CHAT_STREAM] Retry: {len(retry_messages)} messages, provider={session.provider}")
+                        print(f"[CHAT_STREAM] Retry: {len(retry_messages)} messages, provider={session.provider}", flush=True)
                         llm_client = create_llm_client(session)
                         retry_response = llm_client.send(retry_messages, retry_system, debug=debug_mode)
                         retry_status, retry_cleaned = status_validator.validate_status_block(retry_response.content)
