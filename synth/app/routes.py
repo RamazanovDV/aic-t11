@@ -1270,7 +1270,9 @@ def chat_stream():
                         prompt_builder = create_prompt_builder(session, user_id)
                         error_reminder = prompt_builder.build_error_reminder(error_msg, current_state, allowed)
                         retry_messages = prompt_builder.build_messages(error_reminder)
-                        retry_system = system_prompt
+                        
+                        # Добавляем строгое предупреждение в system prompt
+                        retry_system = system_prompt + "\n\n⚠️ ВНИМАНИЕ! Ты должен ОБЪЯСНИТЬ пользователю если он просит невозможное. Не делай вид что всё в порядке. Если переход невозможен - скажи об этом явно и предложи допустимый следующий шаг."
                         
                         print(f"[CHAT_STREAM] Retry: {len(retry_messages)} messages, provider={session.provider}")
                         llm_client = create_llm_client(session)
