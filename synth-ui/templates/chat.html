@@ -1187,7 +1187,58 @@
                             }
 
                             if (data.type === 'subtask_progress') {
-                                updateSubtaskProgress(panelIndex, data.name, data.status);
+                                console.log('[DEBUG] subtask_progress received:', data);
+                                updateSubtaskProgress(panelIndex, data.name, data.status, rowDiv);
+                                continue;
+                            }
+
+                            if (data.type === 'orchestrator_content') {
+                                console.log('[DEBUG] orchestrator_content received:', data);
+                                // Обновляем статус если есть
+                                if (data.status && data.status.state) {
+                                    const state = data.status.state;
+                                    const taskName = data.status.task_name || 'conversation';
+                                    const stateClass = 'state-' + state;
+                                    panel.currentStatusClass = stateClass;
+                                    // Обновляем отображение статуса в UI
+                                    const taskStateEl = document.querySelector(`.panel-task-state[data-panel="${panelIndex}"]`);
+                                    if (taskStateEl) {
+                                        taskStateEl.textContent = state;
+                                        taskStateEl.className = 'panel-task-state ' + stateClass;
+                                    }
+                                }
+                                // Добавляем row в DOM при получении первого контента
+                                if (!panel.messagesContainer.contains(rowDiv)) {
+                                    panel.messagesContainer.appendChild(rowDiv);
+                                }
+                                // Показываем контент оркестратора
+                                const content = data.content || '';
+                                fullContent = content;
+                                messageContent.textContent = content;
+                                // Добавляем информацию о подзадачах если есть
+                                if (data.subtasks && data.subtasks.length > 0) {
+                                    const tasksDiv = document.createElement('div');
+                                    tasksDiv.className = 'subtask-list';
+                                    tasksDiv.style.cssText = 'margin-top: 12px; padding: 12px; background: #f0f9ff; border-radius: 8px;';
+                                    const title = document.createElement('div');
+                                    title.style.cssText = 'font-weight: 600; margin-bottom: 8px; color: #0369a1;';
+                                    title.textContent = 'Запланированные подзадачи:';
+                                    tasksDiv.appendChild(title);
+                                    const list = document.createElement('ul');
+                                    list.style.cssText = 'list-style: none; padding: 0; margin: 0;';
+                                    data.subtasks.forEach(st => {
+                                        const li = document.createElement('li');
+                                        li.style.cssText = 'display: flex; align-items: center; gap: 8px; padding: 4px 0; color: #075985; font-size: 14px;';
+                                        const icon = document.createElement('span');
+                                        icon.textContent = '⏳';
+                                        li.appendChild(icon);
+                                        li.appendChild(document.createTextNode(st.name || st.id || 'unnamed'));
+                                        list.appendChild(li);
+                                    });
+                                    tasksDiv.appendChild(list);
+                                    messageContent.appendChild(tasksDiv);
+                                }
+                                panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
                                 continue;
                             }
 
@@ -1247,13 +1298,26 @@
                                     showRetryButton(panelIndex, message);
                                 }
                                 // Пропускаем пустой контент, но оставляем subtask results
-                                if (!fullContent || !fullContent.trim()) {
+                                // Не удаляем если уже был промежуточный контент от оркестратора
+                                if ((!fullContent || !fullContent.trim()) && !panel.messagesContainer.contains(rowDiv)) {
                                     rowDiv.remove();
                                     hideSummarizationIndicator(panelIndex);
                                     return;
                                 }
-                                // Применяем markdown только в конце
-                                messageContent.innerHTML = marked.parse(fullContent.trim());
+                                // Если уже есть контент от промежуточных событий, не перезаписываем
+                                if (fullContent && fullContent.trim() && !messageContent.textContent) {
+                                    // Сохраняем существующие элементы подзадач
+                                    const existingSubtaskProgress = messageContent.querySelector('.subtask-progress');
+                                    const existingSubtaskList = messageContent.querySelector('.subtask-list');
+                                    messageContent.innerHTML = marked.parse(fullContent.trim());
+                                    // Восстанавливаем элементы подзадач
+                                    if (existingSubtaskProgress) {
+                                        messageContent.appendChild(existingSubtaskProgress);
+                                    }
+                                    if (existingSubtaskList) {
+                                        messageContent.appendChild(existingSubtaskList);
+                                    }
+                                }
                                 let modelName = null;
                                 if (data.debug && data.debug.response && data.debug.response.model) {
                                     modelName = data.debug.response.model;
@@ -2433,15 +2497,25 @@
         container.appendChild(progressDiv);
     }
 
-    function updateSubtaskProgress(panelIndex, taskName, status) {
+    function updateSubtaskProgress(panelIndex, taskName, status, currentRowDiv) {
         const panel = panels[panelIndex];
         if (!panel) return;
         
-        const messages = panel.messagesContainer.querySelectorAll('.message-assistant');
-        if (messages.length === 0) return;
+        let targetMessage = null;
         
-        const lastMessage = messages[messages.length - 1];
-        let progressDiv = lastMessage.querySelector('.subtask-progress');
+        // Используем переданный rowDiv если есть
+        if (currentRowDiv && currentRowDiv.querySelector) {
+            targetMessage = currentRowDiv;
+        }
+        
+        // Иначе ищем последнее сообщение
+        if (!targetMessage) {
+            const messages = panel.messagesContainer.querySelectorAll('.message-assistant');
+            if (messages.length === 0) return;
+            targetMessage = messages[messages.length - 1];
+        }
+        
+        let progressDiv = targetMessage.querySelector('.subtask-progress');
         
         if (!progressDiv) {
             progressDiv = document.createElement('div');
@@ -2457,7 +2531,7 @@
             list.style.cssText = 'list-style: none; padding: 0; margin: 0;';
             progressDiv.appendChild(list);
             
-            const messageContent = lastMessage.querySelector('.message-content');
+            const messageContent = targetMessage.querySelector('.message-content');
             if (messageContent) {
                 messageContent.appendChild(progressDiv);
             }

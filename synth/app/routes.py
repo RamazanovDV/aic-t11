@@ -1035,6 +1035,21 @@ def chat_stream():
                 try:
                     event = progress_queue.get(timeout=0.3)
                     
+                    if event.get('type') == 'orchestrator_content':
+                        content = event.get('content', '')
+                        print(f"[ROUTES] orchestrator_content event: content_len={len(content)}, subtasks={len(event.get('subtasks', []))}")
+                        event_data = {
+                            'type': 'orchestrator_content',
+                            'content': content,
+                            'done': False,
+                            'subtasks': event.get('subtasks', [])
+                        }
+                        # Отправляем статус если он изменился
+                        status_info = event.get('status')
+                        if status_info and status_info.get('state'):
+                            event_data['status'] = status_info
+                        yield f"data: {json.dumps(event_data)}\n\n"
+                    
                     if event.get('type') == 'token_usage':
                         percent = event.get('percent', 0)
                         if percent >= TOKEN_ABORT_PERCENT:
@@ -1043,7 +1058,8 @@ def chat_stream():
                         elif percent >= TOKEN_WARNING_PERCENT:
                             yield f"data: {json.dumps({'type': 'token_warning', 'percent': percent})}\n\n"
                     
-                    yield f"data: {json.dumps(event)}\n\n"
+                    if event.get('type') != 'orchestrator_content':
+                        yield f"data: {json.dumps(event)}\n\n"
                 except queue.Empty:
                     continue
                 except Exception as e:

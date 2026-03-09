@@ -348,6 +348,27 @@ def process_orchestrator_response(
         # Сохраняем контент даже если нет parsed_status
         current_content = cleaned_content if cleaned_content else response.content
         
+        # Отправляем промежуточный контент оркестратора клиенту сразу
+        if progress_queue and current_content:
+            subtasks_for_event = parsed_status.get("subtasks", []) if parsed_status else []
+            status_for_event = None
+            if parsed_status and parsed_status.get("state"):
+                status_for_event = {
+                    "state": parsed_status.get("state"),
+                    "task_name": parsed_status.get("task_name"),
+                }
+            try:
+                print(f"[TSM] Sending orchestrator_content: content_len={len(current_content)}, subtasks={len(subtasks_for_event)}, status={status_for_event}")
+                progress_queue.put({
+                    'type': 'orchestrator_content',
+                    'content': current_content,
+                    'iteration': iteration,
+                    'subtasks': subtasks_for_event,
+                    'status': status_for_event
+                })
+            except Exception as e:
+                print(f"[TSM] Error sending orchestrator_content: {e}")
+        
         if not parsed_status:
             print("[TSM] No parsed status found, breaking")
             # Всё равно возвращаем контент пользователю
