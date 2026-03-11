@@ -1219,3 +1219,80 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.register_blueprint(ui_bp)
     return app
+
+
+@ui_bp.route("/api/projects/<project_name>/schedules", methods=["GET"])
+def list_project_schedules(project_name):
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/schedules"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/schedules", methods=["POST"])
+def create_project_schedule(project_name):
+    data = request.get_json()
+    if not data or "name" not in data or "prompt" not in data or "cron" not in data:
+        return jsonify({"error": "Missing required fields: name, prompt, cron"}), 400
+
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/schedules"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json()), 201
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/schedules/<schedule_id>", methods=["PUT"])
+def update_project_schedule(project_name, schedule_id):
+    data = request.get_json()
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/schedules/{schedule_id}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.put(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/schedules/<schedule_id>", methods=["DELETE"])
+def delete_project_schedule(project_name, schedule_id):
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/schedules/{schedule_id}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.delete(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/schedules/<schedule_id>/run", methods=["POST"])
+def run_project_schedule(project_name, schedule_id):
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/schedules/{schedule_id}/run"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), timeout=120)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500

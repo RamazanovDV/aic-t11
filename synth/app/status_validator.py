@@ -114,6 +114,7 @@ def _parse_and_validate(status_json: str) -> dict[str, Any] | None:
         validated["subtasks"] = status.get("subtasks", [])
         validated["invariants"] = status.get("invariants")
         validated["next_state"] = status.get("next_state")
+        validated["schedule"] = status.get("schedule")
         
         return validated
         

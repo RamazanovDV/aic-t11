@@ -4,3 +4,4 @@ anthropic==0.40.0
 pyyaml==6.0.2
 requests==2.32.3
 mcp>=1.0.0
+croniter>=2.0.0

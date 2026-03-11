@@ -17,6 +17,7 @@ from app import status_validator
 from app import project_manager
 from app import storage
 from app import tsm
+from app import scheduler
 from app.auth import get_auth_provider, require_user, require_admin, get_current_user
 from app.mcp import mcp_available, mcp_config
 
@@ -153,6 +154,16 @@ def get_project_prompt(session) -> str:
                 result += f"- {key}: {', '.join(str(v) for v in value)}\n"
             else:
                 result += f"- {key}: {value}\n"
+    
+    schedules = scheduler.scheduler.get_schedules(project_name)
+    enabled_schedules = [s for s in schedules if s.enabled]
+    if enabled_schedules:
+        result += f"\n[ЗАДАНИЯ ПО РАСПИСАНИЮ]\n"
+        result += "В этом проекте настроены автоматические задания:\n"
+        for s in enabled_schedules:
+            next_run_str = s.next_run.strftime("%Y-%m-%d %H:%M") if s.next_run else "неизвестно"
+            result += f"- {s.name}: cron={s.cron}, следующий запуск: {next_run_str}\n"
+        result += "Можно создать новое задание, указав его параметры в поле schedule.status.\n"
     
     return result
 
@@ -945,6 +956,133 @@ def _handle_project_updates(session) -> None:
     invariants = status.get("invariants")
     if invariants:
         project_manager.project_manager.save_invariants(project_name, invariants)
+
+    schedule_data = status.get("schedule")
+    if schedule_data and project_name:
+        try:
+            scheduler.scheduler.create_schedule(
+                project_name=project_name,
+                name=schedule_data.get("name", "Scheduled task"),
+                prompt=schedule_data.get("prompt", ""),
+                cron=schedule_data.get("cron", "0 0 * * *"),
+                model=schedule_data.get("model"),
+                session_id=schedule_data.get("session_id"),
+                enabled=True,
+            )
+        except Exception as e:
+            print(f"[ROUTES] Failed to create schedule from status block: {e}")
+
+
+@api_bp.route("/projects/<project_name>/schedules", methods=["GET"])
+@require_user
+def list_schedules(project_name):
+    """Получить список расписаний проекта"""
+    schedules = scheduler.scheduler.get_schedules(project_name)
+    return jsonify([
+        {
+            "id": s.id,
+            "name": s.name,
+            "prompt": s.prompt,
+            "model": s.model,
+            "session_id": s.session_id,
+            "cron": s.cron,
+            "enabled": s.enabled,
+            "last_run": s.last_run.isoformat() if s.last_run else None,
+            "next_run": s.next_run.isoformat() if s.next_run else None,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in schedules
+    ])
+
+
+@api_bp.route("/projects/<project_name>/schedules", methods=["POST"])
+@require_user
+def create_schedule(project_name):
+    """Создать новое расписание"""
+    data = request.get_json()
+    if not data or "name" not in data or "prompt" not in data or "cron" not in data:
+        return jsonify({"error": "Missing required fields: name, prompt, cron"}), 400
+
+    try:
+        schedule = scheduler.scheduler.create_schedule(
+            project_name=project_name,
+            name=data["name"],
+            prompt=data["prompt"],
+            cron=data["cron"],
+            model=data.get("model"),
+            session_id=data.get("session_id"),
+            enabled=data.get("enabled", True),
+        )
+        return jsonify({
+            "id": schedule.id,
+            "name": schedule.name,
+            "prompt": schedule.prompt,
+            "model": schedule.model,
+            "session_id": schedule.session_id,
+            "cron": schedule.cron,
+            "enabled": schedule.enabled,
+            "last_run": schedule.last_run.isoformat() if schedule.last_run else None,
+            "next_run": schedule.next_run.isoformat() if schedule.next_run else None,
+            "created_at": schedule.created_at.isoformat() if schedule.created_at else None,
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/projects/<project_name>/schedules/<schedule_id>", methods=["PUT"])
+@require_user
+def update_schedule(project_name, schedule_id):
+    """Обновить расписание"""
+    data = request.get_json()
+
+    try:
+        schedule = scheduler.scheduler.update_schedule(
+            project_name=project_name,
+            schedule_id=schedule_id,
+            name=data.get("name"),
+            prompt=data.get("prompt"),
+            cron=data.get("cron"),
+            model=data.get("model"),
+            session_id=data.get("session_id"),
+            enabled=data.get("enabled"),
+        )
+        if not schedule:
+            return jsonify({"error": "Schedule not found"}), 404
+
+        return jsonify({
+            "id": schedule.id,
+            "name": schedule.name,
+            "prompt": schedule.prompt,
+            "model": schedule.model,
+            "session_id": schedule.session_id,
+            "cron": schedule.cron,
+            "enabled": schedule.enabled,
+            "last_run": schedule.last_run.isoformat() if schedule.last_run else None,
+            "next_run": schedule.next_run.isoformat() if schedule.next_run else None,
+            "created_at": schedule.created_at.isoformat() if schedule.created_at else None,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/projects/<project_name>/schedules/<schedule_id>", methods=["DELETE"])
+@require_user
+def delete_schedule(project_name, schedule_id):
+    """Удалить расписание"""
+    success = scheduler.scheduler.delete_schedule(project_name, schedule_id)
+    if not success:
+        return jsonify({"error": "Schedule not found"}), 404
+    return jsonify({"message": "Schedule deleted"})
+
+
+@api_bp.route("/projects/<project_name>/schedules/<schedule_id>/run", methods=["POST"])
+@require_user
+def run_schedule(project_name, schedule_id):
+    """Запустить расписание вручную"""
+    success = scheduler.scheduler.run_job(project_name, schedule_id)
+    if not success:
+        return jsonify({"error": "Schedule not found or execution failed"}), 404
+    return jsonify({"message": "Job executed"})
 
 
 @api_bp.route("/chat", methods=["POST"])
@@ -2615,3 +2753,27 @@ def delete_model(model_name: str):
     if config.delete_model(model_name):
         return jsonify({"status": "deleted", "model": model_name})
     return jsonify({"error": "Cannot delete default model or model not found"}), 400
+
+
+@api_bp.route("/sessions/<session_id>/events", methods=["GET"])
+def session_events(session_id: str):
+    """SSE endpoint for session updates."""
+    import time
+    
+    def generate():
+        from flask import stream_with_context, request
+        from app import events
+        
+        @stream_with_context
+        def yield_messages():
+            response = request._get_current_object()
+            events.subscribe(session_id, response)
+            try:
+                while True:
+                    time.sleep(1)
+            except GeneratorExit:
+                events.unsubscribe(session_id, response)
+        
+        return yield_messages()
+    
+    return Response(generate(), mimetype="text/event-stream")

@@ -214,6 +214,64 @@
     </div>
 </div>
 
+<div id="schedules-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 600px;">
+        <h3>Задания по расписанию</h3>
+        
+        <div class="settings-section">
+            <p class="help-text">Управление автоматическими заданиями для проекта.</p>
+            <div id="schedules-list" class="checkbox-group">
+                <div class="loading">Загрузка...</div>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeSchedulesModal()">Закрыть</button>
+            <button class="btn btn-primary" onclick="openScheduleForm()">Добавить</button>
+        </div>
+    </div>
+</div>
+
+<div id="schedule-form-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+        <h3 id="schedule-form-title">Новое задание</h3>
+        
+        <div class="settings-section">
+            <label>Название:</label>
+            <input type="text" id="schedule-name" class="form-input" placeholder="Название задания">
+        </div>
+
+        <div class="settings-section">
+            <label>Промпт:</label>
+            <textarea id="schedule-prompt" class="form-input" rows="4" placeholder="Промпт для отправки модели"></textarea>
+        </div>
+
+        <div class="settings-section">
+            <label>Cron (стандартный формат):</label>
+            <input type="text" id="schedule-cron" class="form-input" placeholder="0 9 * * *" value="0 9 * * *">
+            <p class="help-text">Например: 0 9 * * * - каждый день в 9:00</p>
+        </div>
+
+        <div class="settings-section">
+            <label>Модель (оставьте пустым для默认值):</label>
+            <input type="text" id="schedule-model" class="form-input" placeholder="claude-3-5-sonnet-20241022">
+        </div>
+
+        <div class="settings-section">
+            <label>Сессия:</label>
+            <select id="schedule-session" class="form-input">
+                <option value="">Создать новую</option>
+            </select>
+            <p class="help-text">Выберите существующую сессию или оставьте пустым для создания новой.</p>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeScheduleFormModal()">Отмена</button>
+            <button class="btn btn-primary" onclick="saveSchedule()">Сохранить</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const PANEL_MODE_KEY = 't6_panel_mode';
     const PANEL_0_SESSION_KEY = 't6_panel_0_session';
@@ -226,6 +284,48 @@
     let currentDebugData = null;
     let availableProviders = [];
     let allSessions = [];
+    let sessionEventSources = {};
+
+    function subscribeToSession(sessionId, panelIndex) {
+        if (sessionEventSources[sessionId]) {
+            sessionEventSources[sessionId].close();
+        }
+        
+        const es = new EventSource('/api/sessions/' + encodeURIComponent(sessionId) + '/events');
+        es.onmessage = function(e) {
+            try {
+                const data = JSON.parse(e.data);
+                const eventType = data.type;
+                
+                if (eventType === 'session_updated') {
+                    console.log('Session updated, reloading panel', panelIndex);
+                    loadPanelMessages(panelIndex);
+                    loadPanelSettings(panelIndex);
+                }
+            } catch (err) {
+                console.error('Error processing session event:', err);
+            }
+        };
+        es.onerror = function() {
+            console.log('SSE connection error, retrying...');
+        };
+        sessionEventSources[sessionId] = es;
+    }
+
+    function closeSessionEventSource(sessionId) {
+        if (sessionEventSources[sessionId]) {
+            sessionEventSources[sessionId].close();
+            delete sessionEventSources[sessionId];
+        }
+    }
+
+    function initSessionEventSources() {
+        panels.forEach((panel, index) => {
+            if (panel.sessionId) {
+                subscribeToSession(panel.sessionId, index);
+            }
+        });
+    }
 
     function getPanelSessionId(panelIndex) {
         if (panelIndex === 0) {
@@ -331,6 +431,7 @@
                         <button class="btn btn-icon" onclick="openSummarizationModal(${index})" title="Настройки суммаризации">📝</button>
                         <button class="btn btn-icon" onclick="openTsmModal(${index})" title="Task State Machine">🔄</button>
                         <button class="btn btn-icon" onclick="openMcpModal(${index})" title="MCP Серверы">🔌</button>
+                        <button class="btn btn-icon" onclick="openSchedulesModal(${index})" title="Расписание">⏰</button>
                     </div>
                     <button class="btn btn-secondary btn-small" onclick="resetPanelChat(${index})" title="Сбросить чат">🗑️</button>
                 </div>
@@ -933,10 +1034,14 @@
             }
         }
         
+        const oldSessionId = panels[panelIndex].sessionId;
+        closeSessionEventSource(oldSessionId);
+        
         setPanelSessionId(panelIndex, sessionId);
         panels[panelIndex].sessionId = sessionId;
         await loadPanelSettings(panelIndex);
         await loadPanelMessages(panelIndex);
+        subscribeToSession(sessionId, panelIndex);
     }
 
     async function createNewSessionPanel(panelIndex) {
@@ -2690,7 +2795,204 @@
         panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
     }
 
+    let currentScheduleProject = null;
+    let editingScheduleId = null;
+
+    function getProjectFromPanel(panelIndex) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.messages) return null;
+        
+        for (let i = panel.messages.length - 1; i >= 0; i--) {
+            const msg = panel.messages[i];
+            if (msg.status && msg.status.project) {
+                return msg.status.project;
+            }
+        }
+        return null;
+    }
+
+    async function openSchedulesModal(panelIndex) {
+        const projectName = getProjectFromPanel(panelIndex);
+        if (!projectName) {
+            alert('Сначала выберите проект в чате');
+            return;
+        }
+        
+        currentScheduleProject = projectName;
+        document.getElementById('schedules-modal').style.display = 'flex';
+        await loadSchedulesList(projectName);
+    }
+
+    function closeSchedulesModal() {
+        document.getElementById('schedules-modal').style.display = 'none';
+        currentScheduleProject = null;
+    }
+
+    async function loadSchedulesList(projectName) {
+        const listEl = document.getElementById('schedules-list');
+        
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(projectName)}/schedules`);
+            const schedules = await response.json();
+            
+            if (!schedules || schedules.length === 0) {
+                listEl.innerHTML = '<p class="help-text">Нет настроенных заданий</p>';
+                return;
+            }
+            
+            listEl.innerHTML = schedules.map(s => `
+                <div class="schedule-item" style="display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 8px;">
+                    <input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSchedule('${projectName}', '${s.id}', this.checked)">
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600;">${escapeHtml(s.name)}</div>
+                        <div style="font-size: 12px; color: #666;">cron: ${escapeHtml(s.cron)} | next: ${s.next_run ? new Date(s.next_run).toLocaleString() : 'N/A'}</div>
+                    </div>
+                    <button class="btn btn-small" onclick="runScheduleNow('${projectName}', '${s.id}')" title="Запустить сейчас">▶</button>
+                    <button class="btn btn-small" onclick="editSchedule('${projectName}', '${s.id}', '${escapeHtml(s.name)}', '${escapeHtml(s.prompt)}', '${escapeHtml(s.cron)}', '${s.model || ''}', '${s.session_id || ''}')" title="Редактировать">✎</button>
+                    <button class="btn btn-small" onclick="deleteSchedule('${projectName}', '${s.id}')" title="Удалить">🗑️</button>
+                </div>
+            `).join('');
+        } catch (e) {
+            listEl.innerHTML = '<p class="error">Ошибка загрузки: ' + e.message + '</p>';
+        }
+    }
+
+    async function toggleSchedule(projectName, scheduleId, enabled) {
+        try {
+            await authFetch(`/api/projects/${encodeURIComponent(projectName)}/schedules/${scheduleId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled })
+            });
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+            loadSchedulesList(projectName);
+        }
+    }
+
+    async function runScheduleNow(projectName, scheduleId) {
+        if (!confirm('Запустить задание сейчас?')) return;
+        
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(projectName)}/schedules/${scheduleId}/run`, {
+                method: 'POST'
+            });
+            if (response.ok) {
+                alert('Задание запущено');
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    function editSchedule(projectName, scheduleId, name, prompt, cron, model, sessionId) {
+        editingScheduleId = scheduleId;
+        document.getElementById('schedule-form-title').textContent = 'Редактировать задание';
+        document.getElementById('schedule-name').value = name;
+        document.getElementById('schedule-prompt').value = prompt;
+        document.getElementById('schedule-cron').value = cron;
+        document.getElementById('schedule-model').value = model;
+        
+        const sessionSelect = document.getElementById('schedule-session');
+        sessionSelect.innerHTML = '<option value="">Создать новую</option>';
+        allSessions.forEach(s => {
+            const option = document.createElement('option');
+            option.value = s.session_id;
+            option.textContent = s.session_id;
+            if (s.session_id === sessionId) {
+                option.selected = true;
+            }
+            sessionSelect.appendChild(option);
+        });
+        
+        document.getElementById('schedule-form-modal').style.display = 'flex';
+    }
+
+    async function deleteSchedule(projectName, scheduleId) {
+        if (!confirm('Удалить задание?')) return;
+        
+        try {
+            await authFetch(`/api/projects/${encodeURIComponent(projectName)}/schedules/${scheduleId}`, {
+                method: 'DELETE'
+            });
+            await loadSchedulesList(projectName);
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    function openScheduleForm() {
+        editingScheduleId = null;
+        document.getElementById('schedule-form-title').textContent = 'Новое задание';
+        document.getElementById('schedule-name').value = '';
+        document.getElementById('schedule-prompt').value = '';
+        document.getElementById('schedule-cron').value = '0 9 * * *';
+        document.getElementById('schedule-model').value = '';
+        
+        const sessionSelect = document.getElementById('schedule-session');
+        sessionSelect.innerHTML = '<option value="">Создать новую</option>';
+        allSessions.forEach(s => {
+            const option = document.createElement('option');
+            option.value = s.session_id;
+            option.textContent = s.session_id;
+            sessionSelect.appendChild(option);
+        });
+        
+        document.getElementById('schedule-form-modal').style.display = 'flex';
+    }
+
+    function closeScheduleFormModal() {
+        document.getElementById('schedule-form-modal').style.display = 'none';
+        editingScheduleId = null;
+    }
+
+    async function saveSchedule() {
+        const name = document.getElementById('schedule-name').value.trim();
+        const prompt = document.getElementById('schedule-prompt').value.trim();
+        const cron = document.getElementById('schedule-cron').value.trim();
+        const model = document.getElementById('schedule-model').value.trim();
+        const sessionId = document.getElementById('schedule-session').value;
+        
+        if (!name || !prompt || !cron) {
+            alert('Заполните название, промпт и cron');
+            return;
+        }
+        
+        const data = {
+            name,
+            prompt,
+            cron,
+            model: model || null,
+            session_id: sessionId || null
+        };
+        
+        try {
+            if (editingScheduleId) {
+                await authFetch(`/api/projects/${encodeURIComponent(currentScheduleProject)}/schedules/${editingScheduleId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+            } else {
+                await authFetch(`/api/projects/${encodeURIComponent(currentScheduleProject)}/schedules`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+            }
+            
+            closeScheduleFormModal();
+            await loadSchedulesList(currentScheduleProject);
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
     initPanels();
     renderPanels();
+    initSessionEventSources();
 </script>
 {% endblock %}

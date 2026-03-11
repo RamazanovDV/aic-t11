@@ -96,13 +96,11 @@ class Session:
         self.updated_at = datetime.now()
 
     def get_mcp_servers(self) -> list[str]:
-        # Handle both old format (list of strings) and new format (list of dicts)
         if self.mcp_servers and isinstance(self.mcp_servers[0], str):
             return [s for s in self.mcp_servers]
         return [s.get("name") for s in self.mcp_servers if isinstance(s, dict) and s.get("active") == "true"]
 
     def get_all_mcp_servers(self) -> list[dict[str, str]]:
-        # Handle both old format (list of strings) and new format (list of dicts)
         if self.mcp_servers and isinstance(self.mcp_servers[0], str):
             return [{"name": s, "active": "true"} for s in self.mcp_servers]
         return [s.copy() if isinstance(s, dict) else {"name": str(s), "active": "true"} for s in self.mcp_servers]
@@ -111,19 +109,27 @@ class Session:
         self.mcp_servers.clear()
         self.updated_at = datetime.now()
 
-    def set_mcp_server_inactive(self, server_name: str) -> None:
+    def get_mcp_server_status(self, server_name: str) -> str | None:
         for s in self.mcp_servers:
-            # Handle both old format (string) and new format (dict)
-            if isinstance(s, dict):
-                if s.get("name") == server_name:
-                    s["active"] = "false"
-                    break
-            elif s == server_name:
-                # Migrate from old format to new format
-                idx = self.mcp_servers.index(s)
-                self.mcp_servers[idx] = {"name": server_name, "active": "false"}
-                break
+            if isinstance(s, dict) and s.get("name") == server_name:
+                return s.get("active")
+        return None
+
+    def set_mcp_server_status(self, server_name: str, active: str) -> None:
+        for s in self.mcp_servers:
+            if isinstance(s, dict) and s.get("name") == server_name:
+                s["active"] = active
+                self.updated_at = datetime.now()
+                return
+        self.mcp_servers.append({"name": server_name, "active": active})
         self.updated_at = datetime.now()
+
+    def get_current_usage(self) -> dict[str, int]:
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+        }
 
     def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None, tool_use: list[dict] | None = None) -> None:
         msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch, status=self.status.copy() if self.status else None, tool_use=tool_use)
@@ -193,20 +199,41 @@ class Session:
         self.model = model
 
     def add_mcp_server(self, server_name: str) -> None:
-        if server_name not in self.mcp_servers:
-            self.mcp_servers.append(server_name)
+        if not any(s.get("name") == server_name for s in self.mcp_servers):
+            self.mcp_servers.append({"name": server_name, "active": "true"})
             self.updated_at = datetime.now()
 
     def remove_mcp_server(self, server_name: str) -> None:
-        if server_name in self.mcp_servers:
-            self.mcp_servers.remove(server_name)
-            self.updated_at = datetime.now()
+        self.mcp_servers = [s for s in self.mcp_servers if s.get("name") != server_name]
+        self.updated_at = datetime.now()
 
     def get_mcp_servers(self) -> list[str]:
-        return self.mcp_servers.copy()
+        if self.mcp_servers and isinstance(self.mcp_servers[0], str):
+            return [s for s in self.mcp_servers]
+        return [s.get("name") for s in self.mcp_servers if isinstance(s, dict) and s.get("active") == "true"]
+
+    def get_all_mcp_servers(self) -> list[dict[str, str]]:
+        if self.mcp_servers and isinstance(self.mcp_servers[0], str):
+            return [{"name": s, "active": "true"} for s in self.mcp_servers]
+        return [s.copy() if isinstance(s, dict) else {"name": str(s), "active": "true"} for s in self.mcp_servers]
 
     def clear_mcp_servers(self) -> None:
         self.mcp_servers.clear()
+        self.updated_at = datetime.now()
+
+    def get_mcp_server_status(self, server_name: str) -> str | None:
+        for s in self.mcp_servers:
+            if isinstance(s, dict) and s.get("name") == server_name:
+                return s.get("active")
+        return None
+
+    def set_mcp_server_status(self, server_name: str, active: str) -> None:
+        for s in self.mcp_servers:
+            if isinstance(s, dict) and s.get("name") == server_name:
+                s["active"] = active
+                self.updated_at = datetime.now()
+                return
+        self.mcp_servers.append({"name": server_name, "active": active})
         self.updated_at = datetime.now()
 
     def get_current_usage(self) -> dict[str, int]:
@@ -849,6 +876,7 @@ class SessionManager:
                     }),
                     owner_id=data.get("owner_id"),
                     access=data.get("access", "owner"),
+                    mcp_servers=data.get("mcp_servers", []),
                 )
                 session._ensure_main_branch()
                 self._sessions[session_id] = session
@@ -1032,6 +1060,11 @@ class SessionManager:
     def save_session(self, session_id: str) -> None:
         if session_id in self._sessions:
             self._sessions[session_id].save()
+            try:
+                from app import events
+                events.publish(session_id, "session_updated", {"session_id": session_id})
+            except Exception:
+                pass
 
     def list_sessions(self, user_id: str | None = None, user_role: str = "user") -> list[dict]:
         if user_id is None and user_role != "admin":

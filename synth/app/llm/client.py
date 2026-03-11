@@ -111,34 +111,38 @@ class LLMClient:
     def send(self, 
              messages: list[Message], 
              system_prompt: str,
-             debug: bool = False) -> Any:
+             debug: bool = False,
+             tools: list | None = None) -> Any:
         """Отправить сообщение провайдеру (non-streaming).
         
         Args:
             messages: список Message объектов
             system_prompt: system prompt
             debug: режим отладки
+            tools: MCP tools (опционально)
             
         Returns:
             LLMResponse объект
         """
-        return self.provider.chat(messages, system_prompt, debug=debug)
+        return self.provider.chat(messages, system_prompt, debug=debug, tools=tools)
     
     def stream(self, 
                messages: list[Message], 
                system_prompt: str = None,
-               debug: bool = False) -> Generator:
+               debug: bool = False,
+               tools: list | None = None) -> Generator:
         """Отправить сообщение провайдеру (streaming).
         
         Args:
             messages: список Message объектов  
             system_prompt: system prompt (опционально, для некоторых провайдеров)
             debug: режим отладки
+            tools: MCP tools (опционально)
             
         Yields:
             Чанки ответа от LLM
         """
-        for chunk in self.provider.stream_chat(messages, system_prompt, debug=debug):
+        for chunk in self.provider.stream_chat(messages, system_prompt, debug=debug, tools=tools):
             yield chunk
 
 
