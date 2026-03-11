@@ -6,6 +6,15 @@ from app.llm.base import Message
 from app.storage import storage
 
 
+def _get_mcp_config():
+    """Lazy import mcp_config to avoid circular imports"""
+    try:
+        from app.mcp.config import mcp_config
+        return mcp_config
+    except ImportError:
+        return None
+
+
 def _clean_message_content(content: str) -> str:
     """Удалить JSON-блок статуса из содержимого сообщения"""
     if not content:
@@ -68,18 +77,7 @@ class Session:
     })
     owner_id: str | None = None
     access: str = "owner"
-    mcp_servers: list[str] = field(default_factory=list)
-
-    def can_access(self, user_id: str | None, user_role: str = "user") -> bool:
-        if user_role == "admin":
-            return True
-        if self.access == "public":
-            return True
-        if self.access == "team":
-            return True
-        if self.access == "owner" and self.owner_id == user_id:
-            return True
-        return False
+    mcp_servers: list[dict[str, str]] = field(default_factory=list)
 
     def _ensure_main_branch(self) -> None:
         """Ensure main branch exists"""
@@ -88,19 +86,47 @@ class Session:
         if self.current_branch not in [b.id for b in self.branches]:
             self.current_branch = "main"
 
-    def add_user_message(self, content: str, usage: dict[str, int] | None = None, source: str | None = None) -> None:
-        status = None
-        for msg in reversed(self.messages):
-            if msg.role == "assistant" and msg.status:
-                status = msg.status.copy()
-                break
-        
-        msg = Message(role="user", content=content, usage=usage or {}, branch_id=self.current_branch, source=source, status=status)
-        self.messages.append(msg)
+    def add_mcp_server(self, server_name: str) -> None:
+        if not any(s.get("name") == server_name for s in self.mcp_servers):
+            self.mcp_servers.append({"name": server_name, "active": "true"})
+            self.updated_at = datetime.now()
+
+    def remove_mcp_server(self, server_name: str) -> None:
+        self.mcp_servers = [s for s in self.mcp_servers if s.get("name") != server_name]
         self.updated_at = datetime.now()
 
-    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None) -> None:
-        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch, status=self.status.copy() if self.status else None)
+    def get_mcp_servers(self) -> list[str]:
+        # Handle both old format (list of strings) and new format (list of dicts)
+        if self.mcp_servers and isinstance(self.mcp_servers[0], str):
+            return [s for s in self.mcp_servers]
+        return [s.get("name") for s in self.mcp_servers if isinstance(s, dict) and s.get("active") == "true"]
+
+    def get_all_mcp_servers(self) -> list[dict[str, str]]:
+        # Handle both old format (list of strings) and new format (list of dicts)
+        if self.mcp_servers and isinstance(self.mcp_servers[0], str):
+            return [{"name": s, "active": "true"} for s in self.mcp_servers]
+        return [s.copy() if isinstance(s, dict) else {"name": str(s), "active": "true"} for s in self.mcp_servers]
+
+    def clear_mcp_servers(self) -> None:
+        self.mcp_servers.clear()
+        self.updated_at = datetime.now()
+
+    def set_mcp_server_inactive(self, server_name: str) -> None:
+        for s in self.mcp_servers:
+            # Handle both old format (string) and new format (dict)
+            if isinstance(s, dict):
+                if s.get("name") == server_name:
+                    s["active"] = "false"
+                    break
+            elif s == server_name:
+                # Migrate from old format to new format
+                idx = self.mcp_servers.index(s)
+                self.mcp_servers[idx] = {"name": server_name, "active": "false"}
+                break
+        self.updated_at = datetime.now()
+
+    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None, tool_use: list[dict] | None = None) -> None:
+        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch, status=self.status.copy() if self.status else None, tool_use=tool_use)
         self.messages.append(msg)
         if usage:
             self.total_tokens += usage.get("total_tokens", 0)
@@ -192,6 +218,11 @@ class Session:
 
     def add_note_message(self, content: str, usage: dict[str, int] | None = None) -> None:
         msg = Message(role="note", content=content, usage=usage or self.get_current_usage(), branch_id=self.current_branch)
+        self.messages.append(msg)
+        self.updated_at = datetime.now()
+
+    def add_user_message(self, content: str, source: str | None = None) -> None:
+        msg = Message(role="user", content=content, usage={}, branch_id=self.current_branch, source=source)
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
@@ -846,6 +877,8 @@ class SessionManager:
                         branch_id=m.get("branch_id", "main"),
                         source=m.get("source"),
                         status=m.get("status"),
+                        tool_call_id=m.get("tool_call_id"),
+                        tool_use=m.get("tool_use"),
                     ))
                 
                 branches = []
@@ -854,6 +887,29 @@ class SessionManager:
                         id=b["id"],
                         name=b["name"],
                     ))
+                
+                # Migrate mcp_servers from old format (list of strings) to new format (list of dicts)
+                # Also check if servers are still in config, mark as inactive if not
+                mcp_servers_raw = data.get("mcp_servers", [])
+                mcp_servers = []
+                mcp_config = _get_mcp_config()
+                
+                if mcp_servers_raw:
+                    if isinstance(mcp_servers_raw[0], str):
+                        # Old format: ["server1", "server2"] -> [{"name", "active": "true"}, ...]
+                        mcp_servers = [{"name": s, "active": "true"} for s in mcp_servers_raw]
+                    else:
+                        mcp_servers = mcp_servers_raw
+                
+                # Sync with config: if server is in config - make active, if not - make inactive
+                if mcp_config and mcp_servers:
+                    configured_servers = mcp_config.list_servers()
+                    for s in mcp_servers:
+                        if isinstance(s, dict):
+                            if s.get("name") in configured_servers:
+                                s["active"] = "true"
+                            else:
+                                s["active"] = "false"
                 
                 session = Session(
                     session_id=session_id,
@@ -869,6 +925,7 @@ class SessionManager:
                     session_settings=data.get("session_settings", {}),
                     owner_id=data.get("owner_id"),
                     access=data.get("access", "owner"),
+                    mcp_servers=mcp_servers,
                 )
                 session._ensure_main_branch()
                 self._sessions[session_id] = session
@@ -878,7 +935,76 @@ class SessionManager:
                 return self._sessions[session_id]
         
         if session_id not in self._sessions:
-            self._sessions[session_id] = Session(session_id=session_id)
+            # Try to load from storage
+            data = storage.load_session(session_id)
+            if data:
+                data = self._migrate_session_data(data)
+                messages = []
+                for m in data.get("messages", []):
+                    content = m.get("content", "")
+                    if m.get("role") == "assistant":
+                        content = _clean_message_content(content)
+                    messages.append(Message(
+                        role=m["role"],
+                        content=content,
+                        usage=m.get("usage", {}),
+                        debug=m.get("debug"),
+                        model=m.get("model"),
+                        summary_of=m.get("summary_of"),
+                        created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
+                        disabled=m.get("disabled", False),
+                        branch_id=m.get("branch_id", "main"),
+                        source=m.get("source"),
+                        status=m.get("status"),
+                        tool_call_id=m.get("tool_call_id"),
+                        tool_use=m.get("tool_use"),
+                    ))
+                
+                branches = []
+                for b in data.get("branches", []):
+                    branches.append(Branch(
+                        id=b["id"],
+                        name=b["name"],
+                    ))
+                
+                # Migrate mcp_servers from old format (list of strings) to new format (list of dicts)
+                mcp_servers_raw = data.get("mcp_servers", [])
+                mcp_servers = []
+                mcp_config = _get_mcp_config()
+                
+                if mcp_servers_raw:
+                    if isinstance(mcp_servers_raw[0], str):
+                        mcp_servers = [{"name": s, "active": "true"} for s in mcp_servers_raw]
+                    else:
+                        mcp_servers = mcp_servers_raw
+                
+                # Mark servers that are no longer in config as inactive
+                if mcp_config and mcp_servers:
+                    configured_servers = mcp_config.list_servers()
+                    for s in mcp_servers:
+                        if isinstance(s, dict) and s.get("active") == "true" and s.get("name") not in configured_servers:
+                            s["active"] = "false"
+                
+                session = Session(
+                    session_id=session_id,
+                    messages=messages,
+                    status=data.get("status", {}),
+                    branches=branches,
+                    current_branch=data.get("current_branch", "main"),
+                    provider=data.get("provider"),
+                    model=data.get("model"),
+                    total_tokens=data.get("total_tokens", 0),
+                    input_tokens=data.get("input_tokens", 0),
+                    output_tokens=data.get("output_tokens", 0),
+                    session_settings=data.get("session_settings", {}),
+                    owner_id=data.get("owner_id"),
+                    access=data.get("access", "owner"),
+                    mcp_servers=mcp_servers,
+                )
+                session._ensure_main_branch()
+                self._sessions[session_id] = session
+            else:
+                self._sessions[session_id] = Session(session_id=session_id)
         return self._sessions[session_id]
 
     def reset_session(self, session_id: str) -> None:

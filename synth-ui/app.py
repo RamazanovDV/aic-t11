@@ -1164,6 +1164,57 @@ def reset_user_password(user_id):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/mcp/servers", methods=["GET"])
+def list_mcp_servers():
+    url = f"{ui_config.backend_url}/api/mcp/servers"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/session/mcp", methods=["GET"])
+def get_session_mcp():
+    session_id = get_session_id()
+    url = f"{ui_config.backend_url}/api/session/mcp"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "X-Session-Id": session_id,
+    }
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/session/mcp", methods=["PUT"])
+def update_session_mcp():
+    session_id = get_session_id()
+    data = request.get_json()
+    if not data or "mcp_servers" not in data:
+        return jsonify({"error": "Missing 'mcp_servers' field"}), 400
+    
+    url = f"{ui_config.backend_url}/api/session/mcp"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "X-Session-Id": session_id,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.put(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     app.register_blueprint(ui_bp)

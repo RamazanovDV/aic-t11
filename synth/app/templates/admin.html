@@ -8,6 +8,7 @@
         <button class="tab-btn" data-tab="context" onclick="switchTab('context')">Контекст</button>
         <button class="tab-btn" data-tab="summarization" onclick="switchTab('summarization')">Суммаризация</button>
         <button class="tab-btn" data-tab="models" onclick="switchTab('models')">Модели</button>
+        <button class="tab-btn" data-tab="mcp" onclick="switchTab('mcp')">MCP Серверы</button>
         <button class="tab-btn" data-tab="users" onclick="switchTab('users')">Пользователи</button>
     </div>
 
@@ -124,6 +125,21 @@
             
             <div id="models-list" class="models-grid">
                 <div class="loading">Загрузка моделей...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-content" id="tab-mcp">
+        <div class="settings-section">
+            <h3>MCP Серверы</h3>
+            <p class="help-text">Настройка подключения к MCP (Model Context Protocol) серверам для расширения функциональности AI.</p>
+            
+            <div class="mcp-actions" style="margin-bottom: 1rem;">
+                <button class="btn btn-primary" onclick="showAddMCPServer()">Добавить сервер</button>
+            </div>
+            
+            <div id="mcp-servers-list">
+                <div class="loading">Загрузка серверов...</div>
             </div>
         </div>
     </div>
@@ -257,6 +273,61 @@
     </div>
 </div>
 
+<div id="mcp-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3 id="mcp-modal-title">Добавить MCP сервер</h3>
+        <input type="hidden" id="edit-mcp-name">
+        
+        <div class="form-group">
+            <label for="mcp-name">Имя сервера</label>
+            <input type="text" id="mcp-name" class="form-input" placeholder="my-mcp-server">
+            <p class="help-text">Уникальное имя для идентификации сервера</p>
+        </div>
+        
+        <div class="form-group">
+            <label for="mcp-type">Тип подключения</label>
+            <select id="mcp-type" class="form-input" onchange="updateMCPTypeFields()">
+                <option value="stdio">Stdio (локальный процесс)</option>
+                <option value="sse">SSE (удалённый HTTP)</option>
+            </select>
+        </div>
+        
+        <div id="mcp-stdio-fields">
+            <div class="form-group">
+                <label for="mcp-command">Команда</label>
+                <input type="text" id="mcp-command" class="form-input" placeholder="python">
+                <p class="help-text">Команда для запуска процесса (python, node, и т.д.)</p>
+            </div>
+            
+            <div class="form-group">
+                <label for="mcp-args">Аргументы (JSON массив)</label>
+                <input type="text" id="mcp-args" class="form-input" placeholder='["/path/to/server.py"]'>
+                <p class="help-text">Аргументы командной строки в формате JSON</p>
+            </div>
+            
+            <div class="form-group">
+                <label for="mcp-env">Переменные окружения (JSON)</label>
+                <input type="text" id="mcp-env" class="form-input" placeholder='{"KEY": "value"}'>
+                <p class="help-text">Дополнительные переменные окружения в формате JSON</p>
+            </div>
+        </div>
+        
+        <div id="mcp-sse-fields" style="display: none;">
+            <div class="form-group">
+                <label for="mcp-url">URL сервера</label>
+                <input type="text" id="mcp-url" class="form-input" placeholder="http://localhost:3000/sse">
+                <p class="help-text">Адрес MCP сервера с SSE endpoint</p>
+            </div>
+        </div>
+        
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeMCPCModal()">Отмена</button>
+            <button class="btn btn-primary" onclick="saveMCPServer()">Сохранить</button>
+            <button class="btn btn-danger" id="btn-delete-mcp" style="display: none;" onclick="deleteMCPServer()">Удалить</button>
+        </div>
+    </div>
+</div>
+
 <div class="tab-content" id="tab-users">
     <div class="settings-section">
         <h3>Пользователи</h3>
@@ -360,6 +431,7 @@
         loadContextFileList();
         loadSummarizerConfig();
         loadModelList();
+        loadMCPServers();
         loadUsers();
     }
 
@@ -1296,6 +1368,201 @@
         } catch (e) {
             console.error('Failed to load models:', e);
             document.getElementById('models-list').innerHTML = '<div class="error">Ошибка загрузки моделей</div>';
+        }
+    }
+
+    // MCP Server Functions
+    async function loadMCPServers() {
+        try {
+            const response = await fetch('/api/mcp/servers', { headers: getAuthHeaders() });
+            const data = await response.json();
+            renderMCPServers(data.servers || []);
+        } catch (e) {
+            console.error('Failed to load MCP servers:', e);
+            document.getElementById('mcp-servers-list').innerHTML = '<div class="error">Ошибка загрузки серверов</div>';
+        }
+    }
+
+    function renderMCPServers(serverNames) {
+        const container = document.getElementById('mcp-servers-list');
+        const mcpConfig = config.mcp || {};
+        const mcpServers = mcpConfig.servers || {};
+        
+        console.log('renderMCPServers: serverNames =', serverNames, 'mcpServers =', mcpServers);
+        
+        if (Object.keys(mcpServers).length === 0) {
+            container.innerHTML = '<p class="help-text">Нет настроенных MCP серверов</p>';
+            return;
+        }
+        
+        if (Object.keys(mcpServers).length === 0) {
+            container.innerHTML = '<p class="help-text">Нет настроенных MCP серверов</p>';
+            return;
+        }
+        
+        let html = '<div class="providers-cards">';
+        for (const [name, cfg] of Object.entries(mcpServers)) {
+            const type = cfg.type || 'stdio';
+            html += `
+                <div class="provider-card">
+                    <h4>${escapeHtml(name)}</h4>
+                    <div class="provider-info">
+                        <div><strong>Тип:</strong> ${type === 'stdio' ? 'Stdio (локальный)' : 'SSE (HTTP)'}</div>
+                        ${type === 'stdio' 
+                            ? `<div><strong>Команда:</strong> ${escapeHtml(cfg.command || '-')}</div>
+                               <div><strong>Аргументы:</strong> ${escapeHtml(JSON.stringify(cfg.args || []))}</div>`
+                            : `<div><strong>URL:</strong> ${escapeHtml(cfg.url || '-')}</div>`
+                        }
+                    </div>
+                    <div class="provider-actions">
+                        <button class="btn btn-small" onclick="editMCPServer('${name}')">Редактировать</button>
+                    </div>
+                </div>
+            `;
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function showAddMCPServer() {
+        document.getElementById('mcp-modal-title').textContent = 'Добавить MCP сервер';
+        document.getElementById('edit-mcp-name').value = '';
+        document.getElementById('mcp-name').value = '';
+        document.getElementById('mcp-type').value = 'stdio';
+        document.getElementById('mcp-command').value = '';
+        document.getElementById('mcp-args').value = '[]';
+        document.getElementById('mcp-env').value = '{}';
+        document.getElementById('mcp-url').value = '';
+        document.getElementById('btn-delete-mcp').style.display = 'none';
+        document.getElementById('mcp-name').disabled = false;
+        updateMCPTypeFields();
+        document.getElementById('mcp-modal').style.display = 'flex';
+    }
+
+    function editMCPServer(name) {
+        const mcpConfig = config.mcp || {};
+        const servers = mcpConfig.servers || {};
+        const server = servers[name];
+        
+        if (!server) return;
+        
+        document.getElementById('mcp-modal-title').textContent = 'Редактировать MCP сервер';
+        document.getElementById('edit-mcp-name').value = name;
+        document.getElementById('mcp-name').value = name;
+        document.getElementById('mcp-type').value = server.type || 'stdio';
+        document.getElementById('mcp-command').value = server.command || '';
+        document.getElementById('mcp-args').value = JSON.stringify(server.args || []);
+        document.getElementById('mcp-env').value = JSON.stringify(server.env || {});
+        document.getElementById('mcp-url').value = server.url || '';
+        document.getElementById('btn-delete-mcp').style.display = 'inline-block';
+        document.getElementById('mcp-name').disabled = true;
+        updateMCPTypeFields();
+        document.getElementById('mcp-modal').style.display = 'flex';
+    }
+
+    function updateMCPTypeFields() {
+        const type = document.getElementById('mcp-type').value;
+        document.getElementById('mcp-stdio-fields').style.display = type === 'stdio' ? 'block' : 'none';
+        document.getElementById('mcp-sse-fields').style.display = type === 'sse' ? 'block' : 'none';
+    }
+
+    function closeMCPCModal() {
+        document.getElementById('mcp-modal').style.display = 'none';
+    }
+
+    async function saveMCPServer() {
+        const oldName = document.getElementById('edit-mcp-name').value;
+        const name = document.getElementById('mcp-name').value.trim();
+        const type = document.getElementById('mcp-type').value;
+        
+        if (!name) {
+            alert('Введите имя сервера');
+            return;
+        }
+
+        let serverConfig = { type: type };
+        
+        if (type === 'stdio') {
+            const command = document.getElementById('mcp-command').value.trim();
+            if (!command) {
+                alert('Введите команду');
+                return;
+            }
+            serverConfig.command = command;
+            
+            try {
+                serverConfig.args = JSON.parse(document.getElementById('mcp-args').value || '[]');
+            } catch (e) {
+                alert('Неверный формат аргументов (ожидается JSON массив)');
+                return;
+            }
+            
+            try {
+                serverConfig.env = JSON.parse(document.getElementById('mcp-env').value || '{}');
+            } catch (e) {
+                alert('Неверный формат переменных окружения (ожидается JSON объект)');
+                return;
+            }
+        } else {
+            const url = document.getElementById('mcp-url').value.trim();
+            if (!url) {
+                alert('Введите URL сервера');
+                return;
+            }
+            serverConfig.url = url;
+        }
+
+        const mcpConfig = { ...(config.mcp || {}) };
+        if (!mcpConfig.servers) mcpConfig.servers = {};
+        
+        if (oldName && oldName !== name) {
+            delete mcpConfig.servers[oldName];
+        }
+        
+        mcpConfig.servers[name] = serverConfig;
+
+        try {
+            const response = await fetch('/admin/config', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ mcp: mcpConfig })
+            });
+            
+            if (response.ok) {
+                closeMCPCModal();
+                loadConfig();
+            } else {
+                alert('Ошибка сохранения');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function deleteMCPServer() {
+        const name = document.getElementById('edit-mcp-name').value;
+        if (!confirm(`Удалить MCP сервер "${name}"?`)) return;
+        
+        const mcpConfig = { ...(config.mcp || {}) };
+        if (mcpConfig.servers) {
+            delete mcpConfig.servers[name];
+        }
+
+        try {
+            const response = await fetch('/admin/config', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ mcp: mcpConfig })
+            });
+            
+            if (response.ok) {
+                closeMCPCModal();
+                loadConfig();
+            } else {
+                alert('Ошибка удаления');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
         }
     }
 

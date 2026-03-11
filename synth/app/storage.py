@@ -41,6 +41,8 @@ class FileStorage:
                     "branch_id": m.branch_id,
                     "source": m.source,
                     "status": m.status,
+                    "tool_call_id": m.tool_call_id,
+                    "tool_use": m.tool_use,
                 }
                 for m in session.messages
             ],
@@ -77,6 +79,7 @@ class FileStorage:
             "status": session.status,
             "owner_id": session.owner_id,
             "access": session.access,
+            "mcp_servers": session.mcp_servers,
         }
 
         with open(session_file, "w") as f:

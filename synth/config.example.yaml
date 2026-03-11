@@ -34,5 +34,17 @@ summarizer:
   temperature: 0.3
   prompt_source: "SUMMARIZER.md"
 
+mcp:
+  servers:
+    filesystem:
+      type: stdio
+      command: "python"
+      args: ["/path/to/mcp-filesystem/server.py"]
+      env:
+        ALLOWED_DIRS: "/home/user"
+    brave-search:
+      type: sse
+      url: "http://localhost:3000/sse"
+
 storage:
   data_dir: "/home/eof/dev/aic/synth/data"

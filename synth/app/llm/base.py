@@ -18,6 +18,7 @@ class Message:
     source: str | None = None
     status: dict | None = None
     tool_call_id: str | None = None
+    tool_use: list[dict] | None = None
 
 
 @dataclass

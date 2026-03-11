@@ -195,6 +195,25 @@
     </div>
 </div>
 
+<div id="mcp-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3>MCP Серверы</h3>
+        
+        <div class="settings-section">
+            <p class="help-text">Выберите MCP серверы для подключения к этой сессии.</p>
+            <div id="mcp-servers-list" class="checkbox-group">
+                <div class="loading">Загрузка...</div>
+            </div>
+            <p id="mcp-no-servers" class="help-text" style="display: none;">Нет настроенных MCP серверов. Добавьте их в админке.</p>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeMcpModal()">Отмена</button>
+            <button class="btn btn-primary" onclick="saveMcpSettings()">Сохранить</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const PANEL_MODE_KEY = 't6_panel_mode';
     const PANEL_0_SESSION_KEY = 't6_panel_0_session';
@@ -311,6 +330,7 @@
                         </label>
                         <button class="btn btn-icon" onclick="openSummarizationModal(${index})" title="Настройки суммаризации">📝</button>
                         <button class="btn btn-icon" onclick="openTsmModal(${index})" title="Task State Machine">🔄</button>
+                        <button class="btn btn-icon" onclick="openMcpModal(${index})" title="MCP Серверы">🔌</button>
                     </div>
                     <button class="btn btn-secondary btn-small" onclick="resetPanelChat(${index})" title="Сбросить чат">🗑️</button>
                 </div>
@@ -2457,6 +2477,104 @@
         } catch (err) {
             console.error('Failed to save TSM settings:', err);
             alert('Ошибка сохранения настроек TSM');
+        }
+    }
+
+    // MCP Modal Functions
+    let currentMcpPanelIndex = 0;
+
+    async function openMcpModal(panelIndex) {
+        currentMcpPanelIndex = panelIndex;
+        const sessionId = panels[panelIndex] ? panels[panelIndex].sessionId : 'default';
+        const modal = document.getElementById('mcp-modal');
+        
+        try {
+            const [serversRes, sessionRes] = await Promise.all([
+                fetch('/api/mcp/servers', { credentials: 'include' }),
+                fetch(`/api/session/mcp`, { 
+                    headers: { 'X-Session-Id': sessionId },
+                    credentials: 'include'
+                })
+            ]);
+            
+            if (!serversRes.ok || !sessionRes.ok) {
+                alert('Ошибка загрузки: серверы=' + serversRes.status + ', сессия=' + sessionRes.status);
+                return;
+            }
+            
+            const serversData = await serversRes.json();
+            const sessionData = await sessionRes.json();
+            
+            const availableServers = serversData.servers || [];
+            // mcp_servers now contains objects with name/active fields
+            const allSessionServers = sessionData.all_mcp_servers || [];
+            const selectedServers = allSessionServers
+                .filter(s => s.active === 'true')
+                .map(s => s.name);
+            
+            const container = document.getElementById('mcp-servers-list');
+            const noServersMsg = document.getElementById('mcp-no-servers');
+            
+            if (availableServers.length === 0) {
+                container.style.display = 'none';
+                noServersMsg.style.display = 'block';
+            } else {
+                container.style.display = 'block';
+                noServersMsg.style.display = 'none';
+                
+                let html = '';
+                for (const serverName of availableServers) {
+                    const isSelected = selectedServers.includes(serverName);
+                    const sessionServer = allSessionServers.find(s => s.name === serverName);
+                    const isInactive = sessionServer && sessionServer.active === 'false';
+                    html += '<label class="checkbox-label">' +
+                        '<input type="checkbox" class="mcp-server-checkbox" value="' + serverName + '"' + 
+                        (isSelected ? ' checked' : '') + (isInactive ? ' disabled' : '') + '>' +
+                        '<span>' + serverName + (isInactive ? ' (недоступен)' : '') + '</span>' +
+                        '</label>';
+                }
+                container.innerHTML = html;
+            }
+            
+            modal.dataset.sessionId = sessionId;
+            modal.style.display = 'flex';
+        } catch (err) {
+            console.error('Failed to load MCP servers:', err);
+            alert('Ошибка загрузки MCP серверов');
+        }
+    }
+
+    function closeMcpModal() {
+        document.getElementById('mcp-modal').style.display = 'none';
+    }
+
+    async function saveMcpSettings() {
+        const modal = document.getElementById('mcp-modal');
+        const sessionId = modal.dataset.sessionId;
+        
+        const checkboxes = document.querySelectorAll('.mcp-server-checkbox:checked');
+        const selectedServers = Array.from(checkboxes).map(cb => cb.value);
+        
+        try {
+            const response = await fetch(`/api/session/mcp`, {
+                method: 'PUT',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-Session-Id': sessionId
+                },
+                credentials: 'include',
+                body: JSON.stringify({ mcp_servers: selectedServers })
+            });
+            
+            if (response.ok) {
+                closeMcpModal();
+            } else {
+                const err = await response.json();
+                alert('Ошибка: ' + (err.error || 'Unknown'));
+            }
+        } catch (err) {
+            console.error('Failed to save MCP settings:', err);
+            alert('Ошибка сохранения настроек MCP');
         }
     }
 

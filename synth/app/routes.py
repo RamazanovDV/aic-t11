@@ -493,7 +493,7 @@ def get_mcp_server_tools(server_name):
 def get_session_mcp_servers():
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
-    return jsonify({"mcp_servers": session.get_mcp_servers()})
+    return jsonify({"mcp_servers": session.get_mcp_servers(), "all_mcp_servers": session.get_all_mcp_servers()})
 
 
 @mcp_bp.route("/session/mcp", methods=["PUT"])
@@ -511,8 +511,14 @@ def update_session_mcp_servers():
     
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
+    
+    # Preserve inactive servers from before
+    existing_inactive = {s.get("name"): s for s in session.get_all_mcp_servers() if s.get("active") == "false"}
+    
     session.clear_mcp_servers()
     for server_name in mcp_servers:
+        if server_name in existing_inactive:
+            return jsonify({"error": f"MCP server '{server_name}' недоступен (ранее был недоступен). Невозможно включить."}), 400
         session.add_mcp_server(server_name)
     session_manager.save_session(session_id)
     
@@ -533,6 +539,16 @@ def add_session_mcp_server():
     
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
+    
+    # Check if server is already in the list as inactive
+    all_servers = session.get_all_mcp_servers()
+    for s in all_servers:
+        if s.get("name") == server_name:
+            if s.get("active") == "false":
+                return jsonify({"error": f"MCP server '{server_name}' недоступен (ранее был недоступен). Невозможно включить."}), 400
+            # Already active, nothing to do
+            return jsonify({"message": "MCP server already active", "mcp_servers": session.get_mcp_servers()})
+    
     session.add_mcp_server(server_name)
     session_manager.save_session(session_id)
     
@@ -593,13 +609,22 @@ async def _get_mcp_tools(session, provider_name: str) -> list[dict]:
     if not mcp_servers:
         return []
     
-    try:
-        from app.mcp import MCPManager, tools_to_provider_format
-        tools = await MCPManager.get_tools(mcp_servers)
-        return tools_to_provider_format(tools, provider_name)
-    except Exception as e:
-        print(f"[MCP] Failed to get tools: {e}")
-        return []
+    all_tools = []
+    failed_servers = []
+    
+    for server_name in mcp_servers:
+        try:
+            from app.mcp import MCPManager, tools_to_provider_format
+            server_tools = await MCPManager.get_tools([server_name])
+            if server_tools:
+                all_tools.extend(tools_to_provider_format(server_tools, provider_name))
+            else:
+                print(f"[MCP] No tools returned from {server_name}")
+        except Exception as e:
+            error_msg = str(e)
+            print(f"[MCP] Failed to get tools from {server_name}: {error_msg}")
+    
+    return all_tools
 
 
 async def _process_status_block(
@@ -682,10 +707,10 @@ async def _process_status_block(
                     })
                 
                 tool_messages = list(llm_messages)
-                tool_messages.append(Message(role="assistant", content=response.content or "", usage={}))
+                tool_messages.append(Message(role="assistant", content=response.content or "", usage={}, tool_use=response.tool_calls))
                 for tc_result in tool_call_results:
                     tool_messages.append(Message(
-                        role="user",
+                        role="tool",
                         content=tc_result["content"],
                         tool_call_id=tc_result.get("tool_call_id"),
                         usage={}
@@ -1069,11 +1094,9 @@ def chat():
             debug_info['status'] = session.status
             debug_info['subtasks'] = session.status.get('subtasks', [])
 
-    session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model)
+    session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls)
     
-    print(f"[DEBUG] Before save: session.messages count = {len(session.messages)}")
     session_manager.save_session(session_id)
-    print(f"[DEBUG] After save: session saved successfully")
 
     disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
 
@@ -1465,12 +1488,12 @@ def chat_stream():
                                 "content": tool_result_content,
                             })
                         
-                        assistant_msg = Message(role="assistant", content=chunk.content or "", usage=chunk.usage)
+                        assistant_msg = Message(role="assistant", content=chunk.content or "", usage=chunk.usage, tool_use=chunk.tool_calls)
                         tool_messages = list(llm_msgs)
                         tool_messages.append(assistant_msg)
                         for tc_result in tool_call_results:
                             tool_messages.append(Message(
-                                role="user",
+                                role="tool",
                                 content=tc_result["content"],
                                 tool_call_id=tc_result.get("tool_call_id"),
                                 usage={}
@@ -1486,7 +1509,7 @@ def chat_stream():
                                 debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
                                 break
                         
-                        continue
+                        break
                         
                     except Exception as e:
                         print(f"[MCP] Tool handling error: {e}")

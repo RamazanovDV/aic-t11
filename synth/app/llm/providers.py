@@ -62,7 +62,12 @@ class GenericOpenAIProvider(BaseProvider):
             formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
 
         for msg in messages:
-            formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
+            if msg.role in ("info", "model"):
+                continue
+            msg_dict = {"role": msg.role, "content": [{"type": "text", "text": msg.content}]}
+            if msg.role == "assistant" and msg.tool_use:
+                msg_dict["tool_calls"] = msg.tool_use
+            formatted_messages.append(msg_dict)
 
         payload = {
             "model": self.model,
@@ -310,6 +315,11 @@ class AnthropicProvider(BaseProvider):
         
         print(f"[ANTHROPIC] STEP3: Formatting {len(messages)} messages")
         for msg in messages:
+            # Skip info and model roles - they are for UI only, not for LLM
+            if msg.role in ("info", "model"):
+                continue
+            
+            # Handle tool role: convert to anthropic format
             if msg.role == "tool":
                 formatted_messages.append({
                     "role": "user",
@@ -319,8 +329,22 @@ class AnthropicProvider(BaseProvider):
                         "content": msg.content
                     }]
                 })
+            # Handle summary role: convert to user for anthropic
+            elif msg.role == "summary":
+                formatted_messages.append({"role": "user", "content": [{"type": "text", "text": f"[Summary of previous conversation]\n{msg.content}"}]})
+            # Keep system, user, assistant as is
             else:
-                formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
+                content_blocks = [{"type": "text", "text": msg.content}]
+                if msg.role == "assistant" and msg.tool_use:
+                    for tool_use_block in msg.tool_use:
+                        func = tool_use_block.get("function", {})
+                        content_blocks.append({
+                            "type": "tool_use",
+                            "id": tool_use_block.get("id", ""),
+                            "name": func.get("name", ""),
+                            "input": func.get("arguments", {}),
+                        })
+                formatted_messages.append({"role": msg.role, "content": content_blocks})
 
         print(f"[ANTHROPIC] STEP4: Creating payload")
         payload = {
@@ -469,7 +493,35 @@ class AnthropicProvider(BaseProvider):
             formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
 
         for msg in messages:
-            formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
+            # Skip info and model roles - they are for UI only
+            if msg.role in ("info", "model"):
+                continue
+            
+            # Handle tool role: convert to anthropic format
+            if msg.role == "tool":
+                formatted_messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": msg.tool_call_id or "",
+                        "content": msg.content
+                    }]
+                })
+            # Handle summary role: convert to user
+            elif msg.role == "summary":
+                formatted_messages.append({"role": "user", "content": [{"type": "text", "text": f"[Summary of previous conversation]\n{msg.content}"}]})
+            else:
+                content_blocks = [{"type": "text", "text": msg.content}]
+                if msg.role == "assistant" and msg.tool_use:
+                    for tool_use_block in msg.tool_use:
+                        func = tool_use_block.get("function", {})
+                        content_blocks.append({
+                            "type": "tool_use",
+                            "id": tool_use_block.get("id", ""),
+                            "name": func.get("name", ""),
+                            "input": func.get("arguments", {}),
+                        })
+                formatted_messages.append({"role": msg.role, "content": content_blocks})
 
         payload = {
             "model": self.model,
@@ -540,9 +592,11 @@ class AnthropicProvider(BaseProvider):
                             delta = data.get("delta", {})
                             
                             if delta.get("type") == "text_delta":
-                                content = delta.get("text", "")
-                                full_content += content
-                                yield LLMChunk(content=full_content, is_final=False)
+                                # Skip text deltas inside tool_use blocks - they contain tool call markers, not user-visible content
+                                if current_tool is None:
+                                    content = delta.get("text", "")
+                                    full_content += content
+                                    yield LLMChunk(content=full_content, is_final=False)
                             
                             elif delta.get("type") == "input_json_delta":
                                 partial_json = delta.get("partial_json", "")
@@ -581,6 +635,11 @@ class OllamaProvider(BaseProvider):
             formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
 
         for msg in messages:
+            # Skip info and model roles - they are for UI only
+            if msg.role in ("info", "model"):
+                continue
+            
+            # Keep tool role as is for Ollama (OpenAI-compatible)
             if msg.role == "tool":
                 formatted_messages.append({
                     "role": "user",
@@ -590,8 +649,21 @@ class OllamaProvider(BaseProvider):
                         "content": msg.content
                     }]
                 })
+            # Handle summary role: convert to user
+            elif msg.role == "summary":
+                formatted_messages.append({"role": "user", "content": [{"type": "text", "text": f"[Summary of previous conversation]\n{msg.content}"}]})
             else:
-                formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
+                content_blocks = [{"type": "text", "text": msg.content}]
+                if msg.role == "assistant" and msg.tool_use:
+                    for tool_use_block in msg.tool_use:
+                        func = tool_use_block.get("function", {})
+                        content_blocks.append({
+                            "type": "tool_use",
+                            "id": tool_use_block.get("id", ""),
+                            "name": func.get("name", ""),
+                            "input": func.get("arguments", {}),
+                        })
+                formatted_messages.append({"role": msg.role, "content": content_blocks})
 
         payload = {
             "model": self.model,
@@ -696,7 +768,10 @@ class OllamaProvider(BaseProvider):
             formatted_messages.append({"role": "system", "content": system_prompt})
 
         for msg in messages:
-            formatted_messages.append({"role": msg.role, "content": msg.content})
+            msg_dict = {"role": msg.role, "content": msg.content}
+            if msg.role == "assistant" and msg.tool_use:
+                msg_dict["tool_calls"] = msg.tool_use
+            formatted_messages.append(msg_dict)
 
         payload = {
             "model": self.model,
