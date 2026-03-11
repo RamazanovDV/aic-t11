@@ -51,7 +51,7 @@ class ContextLengthExceededError(Exception):
 
 
 class GenericOpenAIProvider(BaseProvider):
-    def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> LLMResponse:
+    def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False, tools: list[dict] | None = None) -> LLMResponse:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -69,6 +69,9 @@ class GenericOpenAIProvider(BaseProvider):
             "messages": formatted_messages,
             "temperature": self.temperature,
         }
+
+        if tools:
+            payload["tools"] = tools
 
         debug_request = None
         debug_response = None
@@ -98,7 +101,12 @@ class GenericOpenAIProvider(BaseProvider):
             raise
 
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
+        message_data = data["choices"][0]["message"]
+        content = message_data.get("content", "")
+        
+        tool_calls = None
+        if "tool_calls" in message_data:
+            tool_calls = message_data["tool_calls"]
         
         usage = extract_usage(data)
 
@@ -111,6 +119,7 @@ class GenericOpenAIProvider(BaseProvider):
             usage=usage,
             debug_request=debug_request,
             debug_response=debug_response,
+            tool_calls=tool_calls,
         )
 
     def list_models(self) -> list[str]:
@@ -140,7 +149,7 @@ class GenericOpenAIProvider(BaseProvider):
     def get_provider_name(self) -> str:
         return "generic"
 
-    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> Generator[LLMChunk, None, None]:
+    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False, tools: list | None = None) -> Generator[LLMChunk, None, None]:
         from app.llm.base import LLMChunk
 
         headers = {
@@ -161,6 +170,9 @@ class GenericOpenAIProvider(BaseProvider):
             "temperature": self.temperature,
             "stream": True,
         }
+
+        if tools:
+            payload["tools"] = tools
 
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout, stream=True)
         try:
@@ -205,7 +217,7 @@ class GenericOpenAIProvider(BaseProvider):
 
 
 class OpenAIProvider(GenericOpenAIProvider):
-    def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> LLMResponse:
+    def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False, tools: list | None = None) -> LLMResponse:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -223,6 +235,9 @@ class OpenAIProvider(GenericOpenAIProvider):
             "messages": formatted_messages,
             "temperature": self.temperature,
         }
+
+        if tools:
+            payload["tools"] = tools
 
         debug_request = None
         debug_response = None
@@ -278,28 +293,69 @@ class OpenAIProvider(GenericOpenAIProvider):
 
 
 class AnthropicProvider(BaseProvider):
-    def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> LLMResponse:
+    def chat(self, messages, system_prompt=None, debug=False, tools=None) -> LLMResponse:
+        print(f"[ANTHROPIC] STEP1: Entered chat(), messages={len(messages)}, tools={bool(tools)}")
+        
         headers = {
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         }
+        
+        print(f"[ANTHROPIC] STEP2: Starting to format messages")
 
         formatted_messages = []
         if system_prompt:
             formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
-
+        
+        print(f"[ANTHROPIC] STEP3: Formatting {len(messages)} messages")
         for msg in messages:
-            formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
+            if msg.role == "tool":
+                formatted_messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": msg.tool_call_id or "",
+                        "content": msg.content
+                    }]
+                })
+            else:
+                formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
 
+        print(f"[ANTHROPIC] STEP4: Creating payload")
         payload = {
             "model": self.model,
             "messages": formatted_messages,
             "temperature": self.temperature,
         }
 
+        if tools:
+            payload["tools"] = tools
+            print(f"[ANTHROPIC] STEP5: Added {len(tools)} tools to payload")
+
+        print(f"[ANTHROPIC] STEP6: Sending request to {self.url}")
+        
+        # Print the full payload for debugging
+        import json
+        print(f"[ANTHROPIC] FULL REQUEST: ", end="")
+        try:
+            payload_str = json.dumps(payload, ensure_ascii=False)
+            print(f"{payload_str}")
+        except Exception as e:
+            print(f"JSON ENCODE ERROR: {e}")
+            print(f"[ANTHROPIC] Trying to find problematic message...")
+            for i, msg in enumerate(formatted_messages):
+                try:
+                    json.dumps(msg)
+                    print(f"  Message {i}: OK")
+                except Exception as me:
+                    print(f"  Message {i}: PROBLEM - {me}")
+                    print(f"    Content: {str(msg.get('content', ''))[:500]}")
+
         debug_request = None
         debug_response = None
+        
+        print(f"[ANTHROPIC] chat() STEP7: Calling requests.post()...")
         
         if debug:
             debug_request = {
@@ -310,14 +366,20 @@ class AnthropicProvider(BaseProvider):
             }
 
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
+        
+        print(f"[ANTHROPIC] chat() STEP8: Got response, status={response.status_code}")
+        
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
+            print(f"[ANTHROPIC] ERROR: Status={response.status_code}")
+            print(f"[ANTHROPIC] ERROR Response body: {response.text[:1000]}")
             if response.status_code in (400, 422):
                 error_data = response.json() if response.content else {}
                 error_message = ""
                 if isinstance(error_data, dict):
                     error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+                print(f"[ANTHROPIC] ERROR parsed: {error_message}")
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
@@ -327,10 +389,21 @@ class AnthropicProvider(BaseProvider):
 
         data = response.json()
         content = ""
+        tool_calls = []
         for block in data.get("content", []):
             if block.get("type") == "text":
                 content = block.get("text", "")
-                break
+            elif block.get("type") == "tool_use":
+                tool_call = {
+                    "id": block.get("id"),
+                    "type": "function",
+                    "function": {
+                        "name": block.get("name"),
+                        "arguments": block.get("input", {})
+                    }
+                }
+                tool_calls.append(tool_call)
+        
         if not content:
             content = data.get("content", [{}])[0].get("text", "") or data.get("content", [{}])[0].get("thinking", "")
         
@@ -345,6 +418,7 @@ class AnthropicProvider(BaseProvider):
             usage=usage,
             debug_request=debug_request,
             debug_response=debug_response,
+            tool_calls=tool_calls if tool_calls else None,
         )
 
     def list_models(self) -> list[str]:
@@ -381,7 +455,7 @@ class AnthropicProvider(BaseProvider):
     def get_provider_name(self) -> str:
         return "anthropic"
 
-    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> Generator[LLMChunk, None, None]:
+    def stream_chat(self, messages, system_prompt=None, debug=False, tools=None):
         from app.llm.base import LLMChunk
 
         headers = {
@@ -404,24 +478,30 @@ class AnthropicProvider(BaseProvider):
             "stream": True,
         }
 
+        if tools:
+            payload["tools"] = tools
+
         debug_request = None
         if debug:
             debug_request = {
                 "url": self.url,
                 "method": "POST",
-                "headers": {**headers, "x-api-key": API_KEY_MASK},
+                "headers": {**headers, "Authorization": f"Bearer {API_KEY_MASK}"},
                 "body": payload,
             }
 
-        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout, stream=True)
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
+            print(f"[ERROR] API Error: {response.status_code}")
+            print(f"[ERROR] Response body: {response.text[:500]}")
             if response.status_code in (400, 422):
                 error_data = response.json() if response.content else {}
                 error_message = ""
                 if isinstance(error_data, dict):
                     error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+                print(f"[ERROR] Parsed error: {error_message}")
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
@@ -431,6 +511,9 @@ class AnthropicProvider(BaseProvider):
 
         full_content = ""
         total_usage = {}
+        tool_calls = []
+        current_tool = None
+        current_tool_input = ""
 
         for line in response.iter_lines():
             if line:
@@ -439,23 +522,53 @@ class AnthropicProvider(BaseProvider):
                     data_str = line[6:]
                     try:
                         data = json.loads(data_str)
-                        if data.get("type") == "content_block_delta":
+                        
+                        if data.get("type") == "content_block_start":
+                            block = data.get("content_block", {})
+                            if block.get("type") == "tool_use":
+                                current_tool = {
+                                    "id": block.get("id"),
+                                    "type": "function",
+                                    "function": {
+                                        "name": block.get("name"),
+                                        "arguments": {}
+                                    }
+                                }
+                                current_tool_input = ""
+                        
+                        elif data.get("type") == "content_block_delta":
                             delta = data.get("delta", {})
+                            
                             if delta.get("type") == "text_delta":
                                 content = delta.get("text", "")
                                 full_content += content
                                 yield LLMChunk(content=full_content, is_final=False)
+                            
+                            elif delta.get("type") == "input_json_delta":
+                                partial_json = delta.get("partial_json", "")
+                                current_tool_input += partial_json
+                        
+                        elif data.get("type") == "content_block_stop":
+                            if current_tool:
+                                try:
+                                    current_tool["function"]["arguments"] = json.loads(current_tool_input) if current_tool_input else {}
+                                except json.JSONDecodeError:
+                                    current_tool["function"]["arguments"] = {"_raw": current_tool_input}
+                                tool_calls.append(current_tool)
+                                current_tool = None
+                                current_tool_input = ""
+                        
                         elif data.get("type") == "message_delta":
                             if "usage" in data:
                                 total_usage = extract_usage(data)
                     except json.JSONDecodeError:
                         continue
 
-        yield LLMChunk(content=full_content, is_final=True, usage=total_usage)
+        yield LLMChunk(content=full_content, is_final=True, usage=total_usage, tool_calls=tool_calls if tool_calls else None)
 
 
 class OllamaProvider(BaseProvider):
-    def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> LLMResponse:
+    def chat(self, messages, system_prompt=None, debug=False, tools=None):
         headers = {
             "Content-Type": "application/json",
         }
@@ -468,13 +581,38 @@ class OllamaProvider(BaseProvider):
             formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
 
         for msg in messages:
-            formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
+            if msg.role == "tool":
+                formatted_messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": msg.tool_call_id or "",
+                        "content": msg.content
+                    }]
+                })
+            else:
+                formatted_messages.append({"role": msg.role, "content": [{"type": "text", "text": msg.content}]})
 
         payload = {
             "model": self.model,
             "messages": formatted_messages,
-            "stream": False,
+            "temperature": self.temperature,
         }
+
+        if tools:
+            payload["tools"] = tools
+            print(f"[DEBUG] Sending {len(tools)} tools to API")
+
+        print(f"[DEBUG] Messages count: {len(formatted_messages)}")
+        for i, msg in enumerate(formatted_messages[:5]):
+            content = msg.get('content', [])
+            content_type = content[0].get('type') if content else 'none'
+            print(f"[DEBUG] Message {i}: role={msg.get('role')}, content_type={content_type}")
+        
+        # Log the actual payload for debugging
+        if debug:
+            import json
+            print(f"[DEBUG] Full payload: {json.dumps(payload, indent=2)[:1000]}")
 
         debug_request = None
         debug_response = None
@@ -513,6 +651,10 @@ class OllamaProvider(BaseProvider):
         else:
             content = data.get("content", "") or data.get("message", {}).get("content", "")
         
+        tool_calls = None
+        if "message" in data and "tool_calls" in data["message"]:
+            tool_calls = data["message"]["tool_calls"]
+        
         usage = {}
         if "usage" in data:
             usage = {
@@ -538,9 +680,10 @@ class OllamaProvider(BaseProvider):
             usage=usage,
             debug_request=debug_request,
             debug_response=debug_response,
+            tool_calls=tool_calls,
         )
 
-    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> Generator[LLMChunk, None, None]:
+    def stream_chat(self, messages, system_prompt=None, debug=False, tools=None):
         from app.llm.base import LLMChunk
 
         headers = {
@@ -562,6 +705,9 @@ class OllamaProvider(BaseProvider):
             "stream": True,
         }
 
+        if tools:
+            payload["tools"] = tools
+
         debug_request = None
         if debug:
             debug_request = {
@@ -571,15 +717,20 @@ class OllamaProvider(BaseProvider):
                 "body": payload,
             }
 
-        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout, stream=True)
+        print(f"[ANTHROPIC] STEP7: Sending POST request...")
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
+        print(f"[ANTHROPIC] STEP8: Got response, status={response.status_code}")
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
+            print(f"[ANTHROPIC] ERROR: Status={response.status_code}")
+            print(f"[ANTHROPIC] ERROR Response body: {response.text[:1000]}")
             if response.status_code in (400, 422):
                 error_data = response.json() if response.content else {}
                 error_message = ""
                 if isinstance(error_data, dict):
                     error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
+                print(f"[ANTHROPIC] ERROR parsed: {error_message}")
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
@@ -589,6 +740,7 @@ class OllamaProvider(BaseProvider):
 
         full_content = ""
         total_usage = {}
+        tool_calls = None
 
         for line in response.iter_lines():
             if line:
@@ -600,11 +752,18 @@ class OllamaProvider(BaseProvider):
                     try:
                         data = json.loads(data_str)
                         
-                        if "message" in data and "content" in data["message"]:
-                            delta = data["message"].get("content", "")
-                            if delta:
-                                full_content += delta
-                                yield LLMChunk(content=full_content, is_final=False)
+                        if "message" in data:
+                            msg = data["message"]
+                            
+                            if "content" in msg:
+                                delta = msg.get("content", "")
+                                if delta:
+                                    full_content += delta
+                                    yield LLMChunk(content=full_content, is_final=False)
+                            
+                            if "tool_calls" in msg and msg["tool_calls"]:
+                                tool_calls = msg["tool_calls"]
+                        
                         elif "choices" in data:
                             delta = data.get("choices", [{}])[0].get("delta", {})
                             content = delta.get("content", "")
@@ -624,7 +783,7 @@ class OllamaProvider(BaseProvider):
         if not total_usage and full_content:
             total_usage = estimate_tokens(full_content)
 
-        yield LLMChunk(content=full_content, is_final=True, usage=total_usage)
+        yield LLMChunk(content=full_content, is_final=True, usage=total_usage, tool_calls=tool_calls)
 
     def list_models(self) -> list[str]:
         try:

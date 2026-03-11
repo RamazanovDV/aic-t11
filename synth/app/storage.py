@@ -24,6 +24,8 @@ class FileStorage:
     def save_session(self, session) -> None:
         session_file = self._session_file(session.session_id)
         
+        print(f"[STORAGE] Saving session {session.session_id}, messages count: {len(session.messages)}")
+        
         data = {
             "schema_version": "1.0.0",
             "session_id": session.session_id,

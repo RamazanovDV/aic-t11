@@ -68,6 +68,7 @@ class Session:
     })
     owner_id: str | None = None
     access: str = "owner"
+    mcp_servers: list[str] = field(default_factory=list)
 
     def can_access(self, user_id: str | None, user_role: str = "user") -> bool:
         if user_role == "admin":
@@ -164,6 +165,23 @@ class Session:
     def set_provider_model(self, provider: str, model: str) -> None:
         self.provider = provider
         self.model = model
+
+    def add_mcp_server(self, server_name: str) -> None:
+        if server_name not in self.mcp_servers:
+            self.mcp_servers.append(server_name)
+            self.updated_at = datetime.now()
+
+    def remove_mcp_server(self, server_name: str) -> None:
+        if server_name in self.mcp_servers:
+            self.mcp_servers.remove(server_name)
+            self.updated_at = datetime.now()
+
+    def get_mcp_servers(self) -> list[str]:
+        return self.mcp_servers.copy()
+
+    def clear_mcp_servers(self) -> None:
+        self.mcp_servers.clear()
+        self.updated_at = datetime.now()
 
     def get_current_usage(self) -> dict[str, int]:
         return {

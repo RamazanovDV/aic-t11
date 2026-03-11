@@ -17,6 +17,7 @@ class Message:
     branch_id: str = "main"
     source: str | None = None
     status: dict | None = None
+    tool_call_id: str | None = None
 
 
 @dataclass
@@ -26,6 +27,7 @@ class LLMResponse:
     usage: dict[str, int] = field(default_factory=dict)
     debug_request: dict | None = None
     debug_response: dict | None = None
+    tool_calls: list[dict] | None = None
 
 
 @dataclass
@@ -33,6 +35,7 @@ class LLMChunk:
     content: str
     is_final: bool
     usage: dict[str, int] = field(default_factory=dict)
+    tool_calls: list[dict] | None = None
 
 
 class BaseProvider(ABC):
@@ -44,11 +47,11 @@ class BaseProvider(ABC):
         self.temperature = temperature
 
     @abstractmethod
-    def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> LLMResponse:
+    def chat(self, messages, system_prompt=None, debug=False, tools=None):
         pass
 
     @abstractmethod
-    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False) -> Generator[LLMChunk, None, None]:
+    def stream_chat(self, messages, system_prompt=None, debug=False, tools=None):
         pass
 
     @abstractmethod

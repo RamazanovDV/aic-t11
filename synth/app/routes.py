@@ -1,5 +1,6 @@
 import json
 import re
+import asyncio
 
 import requests
 from flask import Blueprint, jsonify, render_template, request, Response
@@ -7,6 +8,7 @@ from flask import Blueprint, jsonify, render_template, request, Response
 from app.config import config
 from app.context import get_system_prompt
 from app.llm import ProviderFactory
+from app.llm.base import Message
 from app.llm.providers import ContextLengthExceededError
 from app.llm.client import PromptBuilder, LLMClient, create_llm_client, create_prompt_builder
 from app.session import session_manager
@@ -16,10 +18,25 @@ from app import project_manager
 from app import storage
 from app import tsm
 from app.auth import get_auth_provider, require_user, require_admin, get_current_user
+from app.mcp import mcp_available, mcp_config
+
+_mcp_event_loop: asyncio.AbstractEventLoop | None = None
+
+def get_mcp_loop() -> asyncio.AbstractEventLoop:
+    global _mcp_event_loop
+    if _mcp_event_loop is None or _mcp_event_loop.is_closed():
+        _mcp_event_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_mcp_event_loop)
+    return _mcp_event_loop
+
+def run_mcp_async(coro):
+    loop = get_mcp_loop()
+    return loop.run_until_complete(coro)
 
 api_bp = Blueprint("api", __name__)
 admin_bp = Blueprint("admin", __name__)
 auth_bp = Blueprint("auth", __name__)
+mcp_bp = Blueprint("mcp", __name__)
 
 
 def get_interview_prompt() -> str:
@@ -432,6 +449,118 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@mcp_bp.route("/mcp/servers", methods=["GET"])
+@require_user
+def list_mcp_servers():
+    if not mcp_available():
+        return jsonify({"error": "MCP not available. Install: pip install mcp"}), 400
+    
+    servers = mcp_config.list_servers()
+    return jsonify({"servers": servers})
+
+
+@mcp_bp.route("/mcp/servers/<server_name>/tools", methods=["GET"])
+@require_user
+def get_mcp_server_tools(server_name):
+    import asyncio
+    
+    if not mcp_available():
+        return jsonify({"error": "MCP not available. Install: pip install mcp"}), 400
+    
+    if not mcp_config.is_server_configured(server_name):
+        return jsonify({"error": f"Server '{server_name}' not configured"}), 404
+    
+    try:
+        from app.mcp import MCPManager
+        tools = run_mcp_async(MCPManager.get_tools([server_name]))
+        return jsonify({
+            "server": server_name,
+            "tools": [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.input_schema
+                }
+                for t in tools
+            ]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@mcp_bp.route("/session/mcp", methods=["GET"])
+@require_user
+def get_session_mcp_servers():
+    session_id = get_session_id()
+    session = session_manager.get_session(session_id)
+    return jsonify({"mcp_servers": session.get_mcp_servers()})
+
+
+@mcp_bp.route("/session/mcp", methods=["PUT"])
+@require_user
+def update_session_mcp_servers():
+    data = request.get_json()
+    if not data or "mcp_servers" not in data:
+        return jsonify({"error": "Missing 'mcp_servers' field"}), 400
+    
+    mcp_servers = data["mcp_servers"]
+    
+    for server_name in mcp_servers:
+        if not mcp_config.is_server_configured(server_name):
+            return jsonify({"error": f"MCP server '{server_name}' not configured"}), 400
+    
+    session_id = get_session_id()
+    session = session_manager.get_session(session_id)
+    session.clear_mcp_servers()
+    for server_name in mcp_servers:
+        session.add_mcp_server(server_name)
+    session_manager.save_session(session_id)
+    
+    return jsonify({"message": "MCP servers updated", "mcp_servers": session.get_mcp_servers()})
+
+
+@mcp_bp.route("/session/mcp", methods=["POST"])
+@require_user
+def add_session_mcp_server():
+    data = request.get_json()
+    if not data or "server_name" not in data:
+        return jsonify({"error": "Missing 'server_name' field"}), 400
+    
+    server_name = data["server_name"]
+    
+    if not mcp_config.is_server_configured(server_name):
+        return jsonify({"error": f"MCP server '{server_name}' not configured"}), 400
+    
+    session_id = get_session_id()
+    session = session_manager.get_session(session_id)
+    session.add_mcp_server(server_name)
+    session_manager.save_session(session_id)
+    
+    return jsonify({"message": "MCP server added", "mcp_servers": session.get_mcp_servers()})
+
+
+@mcp_bp.route("/session/mcp/<server_name>", methods=["DELETE"])
+@require_user
+def remove_session_mcp_server(server_name):
+    session_id = get_session_id()
+    session = session_manager.get_session(session_id)
+    session.remove_mcp_server(server_name)
+    session_manager.save_session(session_id)
+    
+    return jsonify({"message": "MCP server removed", "mcp_servers": session.get_mcp_servers()})
+
+
+@mcp_bp.route("/session/mcp", methods=["DELETE"])
+@require_user
+def clear_session_mcp_servers():
+    session_id = get_session_id()
+    session = session_manager.get_session(session_id)
+    session.clear_mcp_servers()
+    session_manager.save_session(session_id)
+    
+    return jsonify({"message": "MCP servers cleared", "mcp_servers": session.get_mcp_servers()})
+
+
 @api_bp.route("/note", methods=["POST"])
 @require_user
 def add_note():
@@ -455,7 +584,25 @@ def add_note():
     })
 
 
-def _process_status_block(
+async def _get_mcp_tools(session, provider_name: str) -> list[dict]:
+    """Get MCP tools for the session's configured MCP servers."""
+    if not mcp_available():
+        return []
+    
+    mcp_servers = session.get_mcp_servers()
+    if not mcp_servers:
+        return []
+    
+    try:
+        from app.mcp import MCPManager, tools_to_provider_format
+        tools = await MCPManager.get_tools(mcp_servers)
+        return tools_to_provider_format(tools, provider_name)
+    except Exception as e:
+        print(f"[MCP] Failed to get tools: {e}")
+        return []
+
+
+async def _process_status_block(
     provider,
     llm_messages: list,
     system_prompt: str,
@@ -464,6 +611,7 @@ def _process_status_block(
     debug_mode: bool,
     user_id: str | None = None,
     max_retries: int = 3,
+    mcp_tools: list | None = None,
 ):
     """Обработать ответ LLM с валидацией статуса.
     
@@ -494,11 +642,60 @@ def _process_status_block(
     for attempt in range(max_retries):
         try:
             prompt_with_reminder = system_prompt + status_reminder if attempt > 0 else system_prompt
-            response = provider.chat(llm_messages, prompt_with_reminder, debug=debug_mode)
+            response = provider.chat(llm_messages, prompt_with_reminder, debug=debug_mode, tools=mcp_tools)
         except Exception as e:
+            import traceback
+            print(f"[ERROR] provider.chat() failed: {e}")
+            print(traceback.format_exc())
             if attempt == max_retries - 1:
                 raise
             continue
+
+        if mcp_tools and response.tool_calls:
+            try:
+                from app.mcp import MCPManager
+                tool_call_results = []
+                
+                for tc in response.tool_calls:
+                    tool_name = tc.get("function", {}).get("name") or tc.get("name", "")
+                    tool_args = tc.get("function", {}).get("arguments") or tc.get("arguments", {}) or {}
+                    
+                    if isinstance(tool_args, str):
+                        try:
+                            tool_args = json.loads(tool_args)
+                        except:
+                            tool_args = {}
+                    
+                    print(f"[MCP] Calling tool: {tool_name}")
+                    
+                    try:
+                        result = await MCPManager.call_tool(tool_name, tool_args)
+                        tool_result_content = result.content
+                    except Exception as e:
+                        tool_result_content = f"Error: {str(e)}"
+                        print(f"[MCP] Tool error: {e}")
+                    
+                    tool_call_results.append({
+                        "role": "tool",
+                        "tool_call_id": tc.get("id"),
+                        "content": tool_result_content,
+                    })
+                
+                tool_messages = list(llm_messages)
+                tool_messages.append(Message(role="assistant", content=response.content or "", usage={}))
+                for tc_result in tool_call_results:
+                    tool_messages.append(Message(
+                        role="user",
+                        content=tc_result["content"],
+                        tool_call_id=tc_result.get("tool_call_id"),
+                        usage={}
+                    ))
+                
+                response = provider.chat(tool_messages, prompt_with_reminder, debug=debug_mode, tools=None)
+                
+                print(f"[DEBUG] After MCP call, response.content: {response.content[:200] if response.content else 'EMPTY'}")
+            except Exception as e:
+                print(f"[MCP] Tool handling error: {e}")
 
         parsed_status, cleaned_content = status_validator.validate_status_block(response.content)
 
@@ -579,7 +776,7 @@ def _process_status_block(
             status_format += '"current_task_info": "текущая задача", "approved_plan": "план", '
             status_format += '"already_done": "сделано", "currently_doing": "текущее", '
             status_format += '"invariants": {"язык": "Python", "не использовать": ["материал1"]} или null}}'
-            llm_messages.append({"role": "user", "content": status_format})
+            llm_messages.append(Message(role="user", content=status_format, usage={}))
 
     return response, response.content, "Модель не формирует блок статуса в ответе", None
 
@@ -737,6 +934,7 @@ def chat():
     model = data.get("model")
     debug_mode = data.get("debug", False)
     source_type = data.get("source", "web")
+    mcp_servers = data.get("mcp_servers", [])
     
     current_user = get_current_user()
     if current_user:
@@ -828,10 +1026,14 @@ def chat():
         result = {"error": f"LLM error: {str(e)}", "model": provider.model}
         return jsonify(result), 500
 
+    import asyncio
+    actual_provider_type = provider.get_provider_name()
+    mcp_tools = run_mcp_async(_get_mcp_tools(session, actual_provider_type))
+
     try:
-        response, message_for_user, status_error, orchestrator_debug = _process_status_block(
-            provider, llm_messages, system_prompt, session, session_id, debug_mode, request.headers.get("X-User-Id")
-        )
+        response, message_for_user, status_error, orchestrator_debug = run_mcp_async(_process_status_block(
+            provider, llm_messages, system_prompt, session, session_id, debug_mode, request.headers.get("X-User-Id"), mcp_tools=mcp_tools
+        ))
         if status_error:
             result = {
                 "error": status_error,
@@ -868,8 +1070,10 @@ def chat():
             debug_info['subtasks'] = session.status.get('subtasks', [])
 
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model)
-
+    
+    print(f"[DEBUG] Before save: session.messages count = {len(session.messages)}")
     session_manager.save_session(session_id)
+    print(f"[DEBUG] After save: session saved successfully")
 
     disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
 
@@ -900,6 +1104,7 @@ def chat_stream():
     model = data.get("model")
     debug_mode = data.get("debug", False)
     source_type = data.get("source", "web")
+    mcp_servers = data.get("mcp_servers", [])
     
     current_user = get_current_user()
     if current_user:
@@ -1010,6 +1215,11 @@ def chat_stream():
         # Используем get_messages_for_llm() для поддержки скользящего окна
         llm_messages = session.get_messages_for_llm()
         session_manager.save_session(session_id)
+
+        # Получаем MCP инструменты
+        import asyncio
+        actual_provider_type = provider.get_provider_name()
+        mcp_tools = run_mcp_async(_get_mcp_tools(session, actual_provider_type))
 
         # Формируем сообщения для LLM (до проверки tsm_mode)
         formatted_messages = []
@@ -1220,7 +1430,67 @@ def chat_stream():
             # Конвертируем в Message объекты
             from app.llm.base import Message
             llm_msgs = [Message(role=m["role"], content=m["content"], usage={}) for m in formatted_messages]
-            for chunk in provider.stream_chat(llm_msgs, None, debug=debug_mode):
+            
+            tool_calls_handled = False
+            for chunk in provider.stream_chat(llm_msgs, None, debug=debug_mode, tools=mcp_tools):
+                if chunk.tool_calls and not tool_calls_handled:
+                    tool_calls_handled = True
+                    try:
+                        from app.mcp import MCPManager
+                        import asyncio
+                        tool_call_results = []
+                        
+                        for tc in chunk.tool_calls:
+                            tool_name = tc.get("function", {}).get("name") or tc.get("name", "")
+                            tool_args = tc.get("function", {}).get("arguments") or tc.get("arguments", {}) or {}
+                            
+                            if isinstance(tool_args, str):
+                                try:
+                                    tool_args = json.loads(tool_args)
+                                except:
+                                    tool_args = {}
+                            
+                            print(f"[MCP] Calling tool: {tool_name}")
+                            
+                            try:
+                                result = run_mcp_async(MCPManager.call_tool(tool_name, tool_args))
+                                tool_result_content = result.content
+                            except Exception as e:
+                                tool_result_content = f"Error: {str(e)}"
+                                print(f"[MCP] Tool error: {e}")
+                            
+                            tool_call_results.append({
+                                "role": "tool",
+                                "tool_call_id": tc.get("id"),
+                                "content": tool_result_content,
+                            })
+                        
+                        assistant_msg = Message(role="assistant", content=chunk.content or "", usage=chunk.usage)
+                        tool_messages = list(llm_msgs)
+                        tool_messages.append(assistant_msg)
+                        for tc_result in tool_call_results:
+                            tool_messages.append(Message(
+                                role="user",
+                                content=tc_result["content"],
+                                tool_call_id=tc_result.get("tool_call_id"),
+                                usage={}
+                            ))
+                        
+                        print(f"[MCP] Executing {len(tool_call_results)} tool(s), continuing stream...")
+                        
+                        for new_chunk in provider.stream_chat(tool_messages, None, debug=debug_mode, tools=None):
+                            full_content = new_chunk.content
+                            yield f"data: {json.dumps({'content': full_content, 'done': new_chunk.is_final})}\n\n"
+                            if new_chunk.is_final:
+                                total_usage = new_chunk.usage
+                                debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
+                                break
+                        
+                        continue
+                        
+                    except Exception as e:
+                        print(f"[MCP] Tool handling error: {e}")
+                
                 if chunk.is_final:
                     total_usage = chunk.usage
                     print(f"[STREAM] Usage: {total_usage}")
@@ -1329,7 +1599,7 @@ def chat_stream():
                         retry_system = system_prompt + "\n\nВАЖНО: Ты ОБЯЗАН добавить JSON-блок со статусом задачи в конце ответа!"
                         
                         try:
-                            retry_response = provider.chat(retry_msgs, retry_system, debug=debug_mode)
+                            retry_response = provider.chat(retry_msgs, retry_system, debug=debug_mode, tools=mcp_tools)
                             retry_status, retry_cleaned = status_validator.validate_status_block(retry_response.content)
                             
                             if retry_status:
@@ -2022,6 +2292,7 @@ def get_config():
         "default_models": default_models,
         "summarizer": config.summarizer_config,
         "summarization": config.summarization_config,
+        "mcp": config._config.get("mcp", {}),
     })
 
 
@@ -2045,10 +2316,20 @@ def save_config():
             if "summarization" not in config._config:
                 config._config["summarization"] = {}
             config._config["summarization"].update(data["summarization"])
+        if "mcp" in data:
+            if "mcp" not in config._config:
+                config._config["mcp"] = {}
+            config._config["mcp"] = data["mcp"]
+            print(f"[DEBUG] Saving MCP config: {data['mcp']}")
         
         config.save()
+        config.reload()
+        print(f"[DEBUG] Config saved. MCP in config: {config._config.get('mcp')}")
         return jsonify({"status": "saved"})
     except Exception as e:
+        import traceback
+        print(f"[DEBUG] Error saving config: {e}")
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
