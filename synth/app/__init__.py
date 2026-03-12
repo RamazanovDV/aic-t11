@@ -6,8 +6,24 @@ from flask import Flask
 from app.routes import api_bp, admin_bp, auth_bp, mcp_bp
 from app.config import config
 from app.scheduler import scheduler
+from app.context import DEFAULT_CONTEXT_FILES, ContextManager
 
 BASE_DIR = Path(__file__).parent
+
+
+def init_default_context_files() -> None:
+    """Копировать дефолтные файлы в data/context/ если их нет."""
+    ctx_mgr = ContextManager()
+    ctx_mgr.user_dir.mkdir(parents=True, exist_ok=True)
+    
+    for filename in DEFAULT_CONTEXT_FILES:
+        user_path = ctx_mgr.user_dir / filename
+        if not user_path.exists():
+            default_filename = f"DEFAULT_{filename}"
+            default_path = ctx_mgr.system_dir / default_filename
+            if default_path.exists():
+                user_path.write_text(default_path.read_text(encoding="utf-8"), encoding="utf-8")
+                print(f"[INIT] Created default context file: {filename}")
 
 
 def create_app() -> Flask:
@@ -22,6 +38,7 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(mcp_bp, url_prefix="/api")
 
+    init_default_context_files()
     scheduler.start()
 
     return app

@@ -17,6 +17,12 @@ SYSTEM_CONTEXT_FILES = [
     "SCHEDULER.md",
 ]
 
+DEFAULT_CONTEXT_FILES = [
+    "COMPANY.md",
+    "ABOUT.md",
+    "SOUL.md",
+]
+
 
 class ContextManager:
     def __init__(self, system_dir: Path | None = None, user_dir: Path | None = None):
@@ -47,6 +53,9 @@ class ContextManager:
 
     def is_system_file(self, filename: str) -> bool:
         return filename in SYSTEM_CONTEXT_FILES
+
+    def is_default_file(self, filename: str) -> bool:
+        return filename in DEFAULT_CONTEXT_FILES
 
     def is_overridden(self, filename: str) -> bool:
         user_path = self.user_dir / filename
@@ -84,17 +93,80 @@ class ContextManager:
     def list_user_files(self) -> list[dict[str, Any]]:
         self.user_dir.mkdir(parents=True, exist_ok=True)
         result = []
+        
+        for filename in DEFAULT_CONTEXT_FILES:
+            user_path = self.user_dir / filename
+            is_overridden = user_path.exists()
+            
+            default_filename = f"DEFAULT_{filename}"
+            default_path = self.system_dir / default_filename
+            
+            content = ""
+            if user_path.exists():
+                content = user_path.read_text(encoding="utf-8")
+            elif default_path.exists():
+                content = default_path.read_text(encoding="utf-8")
+            
+            result.append({
+                "filename": filename,
+                "is_system": False,
+                "is_default": True,
+                "is_overridden": is_overridden,
+                "source": "user",
+                "content": content,
+            })
+        
         for filepath in sorted(self.user_dir.glob("*.md")):
-            if self.is_system_file(filepath.name):
+            if self.is_system_file(filepath.name) or self.is_default_file(filepath.name):
                 continue
             result.append({
                 "filename": filepath.name,
                 "is_system": False,
+                "is_default": False,
                 "is_overridden": False,
                 "source": "user",
                 "content": filepath.read_text(encoding="utf-8"),
             })
         return result
+
+    def list_default_files(self) -> list[dict[str, Any]]:
+        result = []
+        for filename in DEFAULT_CONTEXT_FILES:
+            user_path = self.user_dir / filename
+            default_filename = f"DEFAULT_{filename}"
+            default_path = self.system_dir / default_filename
+            
+            user_content = ""
+            default_content = ""
+            
+            if user_path.exists():
+                user_content = user_path.read_text(encoding="utf-8")
+            if default_path.exists():
+                default_content = default_path.read_text(encoding="utf-8")
+            
+            result.append({
+                "filename": filename,
+                "content": user_content or default_content,
+                "is_overridden": user_path.exists(),
+            })
+        return result
+
+    def restore_default_file(self, filename: str) -> bool:
+        if not self.is_default_file(filename):
+            return False
+        
+        user_path = self.user_dir / filename
+        default_filename = f"DEFAULT_{filename}"
+        default_path = self.system_dir / default_filename
+        
+        if user_path.exists():
+            user_path.unlink()
+        
+        if default_path.exists():
+            user_path.write_text(default_path.read_text(encoding="utf-8"), encoding="utf-8")
+            return True
+        
+        return False
 
     def list_all_files(self) -> list[dict[str, Any]]:
         return self.list_system_files() + self.list_user_files()

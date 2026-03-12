@@ -1232,19 +1232,32 @@
         userFiles.forEach(file => {
             const option = document.createElement('option');
             option.value = file.filename;
-            option.textContent = file.filename;
+            option.textContent = file.is_default ? file.filename + ' (по умолчанию)' : file.filename;
             select.appendChild(option);
             
             const isEnabled = enabledContextFiles.includes(file.filename);
+            
+            let actions = '';
+            if (file.is_default) {
+                actions = `
+                    ${file.is_overridden ? '<button class="btn btn-small" onclick="restoreDefaultFile(\'' + file.filename + '\')">Восстановить</button>' : ''}
+                `;
+            } else {
+                actions = `
+                    <button class="btn btn-small" onclick="renameContextFile('${file.filename}')">Переименовать</button>
+                    <button class="btn btn-small btn-danger" onclick="deleteContextFile('${file.filename}')">Удалить</button>
+                `;
+            }
+            
             html += `
-                <div class="context-file-item">
+                <div class="context-file-item ${file.is_default ? 'default-file' : ''}">
                     <label class="context-file-label">
-                        <input type="checkbox" class="context-file-checkbox" data-filename="${file.filename}" ${isEnabled ? 'checked' : ''}>
+                        <input type="checkbox" class="context-file-checkbox" data-filename="${file.filename}" ${isEnabled ? 'checked' : ''} ${file.is_default ? 'disabled' : ''}>
                         <span class="context-file-name">${file.filename}</span>
+                        ${file.is_default ? '<span class="badge badge-info">по умолчанию</span>' : ''}
                     </label>
                     <div class="context-file-actions">
-                        <button class="btn btn-small" onclick="renameContextFile('${file.filename}')">Переименовать</button>
-                        <button class="btn btn-small btn-danger" onclick="deleteContextFile('${file.filename}')">Удалить</button>
+                        ${actions}
                     </div>
                 </div>
             `;
@@ -1481,6 +1494,27 @@
             if (response.ok) {
                 await loadContextFileList();
                 alert('Файл удалён');
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function restoreDefaultFile(filename) {
+        if (!confirm(`Восстановить "${filename}" к версии по умолчанию?`)) return;
+        
+        try {
+            const response = await fetch(`/admin/context/${encodeURIComponent(filename)}/restore`, {
+                method: 'POST',
+                headers: getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                await loadContextFileList();
+                alert('Файл восстановлен');
             } else {
                 const data = await response.json();
                 alert('Ошибка: ' + (data.error || 'Unknown error'));
@@ -2128,6 +2162,10 @@
         border: 1px solid var(--border);
         border-radius: 6px;
         margin-bottom: 0.5rem;
+    }
+
+    .context-file-item.default-file {
+        opacity: 0.8;
     }
 
     .context-file-label {

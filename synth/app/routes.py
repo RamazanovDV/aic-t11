@@ -2730,6 +2730,22 @@ def delete_context_file(filename: str):
         return jsonify({"status": "deleted"})
 
 
+@admin_bp.route("/context/<filename>/restore", methods=["POST"])
+@require_user
+def restore_default_context_file(filename: str):
+    ctx_mgr = config.context_manager
+    if not ctx_mgr.is_default_file(filename):
+        return jsonify({"error": "Not a default file"}), 400
+    
+    try:
+        success = ctx_mgr.restore_default_file(filename)
+        if success:
+            return jsonify({"status": "restored"})
+        return jsonify({"error": "Failed to restore"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @admin_bp.route("/context/<filename>/rename", methods=["POST"])
 @require_user
 def rename_context_file(filename: str):
