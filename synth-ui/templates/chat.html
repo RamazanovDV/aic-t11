@@ -851,9 +851,9 @@
                 return;
             }
             
-            panel.totalInput = 0;
-            panel.totalOutput = 0;
-            panel.totalTokens = 0;
+            panel.totalInput = data.input_tokens || 0;
+            panel.totalOutput = data.output_tokens || 0;
+            panel.totalTokens = data.total_tokens || 0;
             
             panel.messages.forEach((msg, idx) => {
                 let statusClass = 'state-free';
@@ -875,11 +875,6 @@
                 
                 addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass);
                 panel.messages[idx]._renderIndex = idx;
-                if (msg.usage && msg.role !== 'note' && msg.role !== 'info') {
-                    panel.totalInput += msg.usage.input_tokens || 0;
-                    panel.totalOutput += msg.usage.output_tokens || 0;
-                    panel.totalTokens += msg.usage.total_tokens || 0;
-                }
             });
             
             const lastMsg = panel.messages[panel.messages.length - 1];

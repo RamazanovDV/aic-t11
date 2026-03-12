@@ -510,7 +510,23 @@ class Session:
     def toggle_message(self, index: int) -> bool:
         """Переключить состояние disabled сообщения"""
         if 0 <= index < len(self.messages):
-            self.messages[index].disabled = not self.messages[index].disabled
+            msg = self.messages[index]
+            was_enabled = not msg.disabled
+            
+            msg.disabled = not msg.disabled
+            is_now_disabled = msg.disabled
+            
+            if was_enabled and is_now_disabled:
+                usage = msg.usage or {}
+                self.total_tokens -= usage.get("total_tokens", 0)
+                self.input_tokens -= usage.get("input_tokens", 0)
+                self.output_tokens -= usage.get("output_tokens", 0)
+            elif not was_enabled and not is_now_disabled:
+                usage = msg.usage or {}
+                self.total_tokens += usage.get("total_tokens", 0)
+                self.input_tokens += usage.get("input_tokens", 0)
+                self.output_tokens += usage.get("output_tokens", 0)
+            
             self.updated_at = datetime.now()
             return True
         return False

@@ -157,13 +157,14 @@ def get_project_prompt(session) -> str:
     
     schedules = scheduler.scheduler.get_schedules(project_name)
     enabled_schedules = [s for s in schedules if s.enabled]
-    if enabled_schedules:
+    if project_name:
         result += f"\n[ЗАДАНИЯ ПО РАСПИСАНИЮ]\n"
-        result += "В этом проекте настроены автоматические задания:\n"
-        for s in enabled_schedules:
-            next_run_str = s.next_run.strftime("%Y-%m-%d %H:%M") if s.next_run else "неизвестно"
-            result += f"- {s.name}: cron={s.cron}, следующий запуск: {next_run_str}\n"
-        result += "Можно создать новое задание, указав его параметры в поле schedule.status.\n"
+        if enabled_schedules:
+            result += "В этом проекте настроены автоматические задания:\n"
+            for s in enabled_schedules:
+                next_run_str = s.next_run.strftime("%Y-%m-%d %H:%M") if s.next_run else "неизвестно"
+                result += f"- {s.name}: cron={s.cron}, следующий запуск: {next_run_str}\n"
+        result += "Можно создать новое задание, указав его параметры в поле schedule.status.status блока.\n"
     
     return result
 
