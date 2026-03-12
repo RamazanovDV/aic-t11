@@ -680,6 +680,8 @@ async def _process_status_block(
     for attempt in range(max_retries):
         try:
             prompt_with_reminder = system_prompt + status_reminder if attempt > 0 else system_prompt
+            if mcp_tools:
+                print(f"[MCP] Sending {len(mcp_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in mcp_tools]}")
             response = provider.chat(llm_messages, prompt_with_reminder, debug=debug_mode, tools=mcp_tools)
         except Exception as e:
             import traceback
@@ -690,6 +692,8 @@ async def _process_status_block(
             continue
 
         if mcp_tools and response.tool_calls:
+            print(f"[MCP] Detected {len(response.tool_calls)} tool call(s)")
+            print(f"[MCP] Tool calls: {json.dumps(response.tool_calls, ensure_ascii=False)[:500]}")
             try:
                 from app.mcp import MCPManager
                 tool_call_results = []
@@ -705,13 +709,25 @@ async def _process_status_block(
                             tool_args = {}
                     
                     print(f"[MCP] Calling tool: {tool_name}")
+                    print(f"[MCP] Arguments: {json.dumps(tool_args, ensure_ascii=False)[:500]}")
                     
                     try:
                         result = await MCPManager.call_tool(tool_name, tool_args)
                         tool_result_content = result.content
+                        is_error = getattr(result, 'is_error', False)
+                        print(f"[MCP] Result: {tool_result_content[:500] if tool_result_content else 'empty'}")
+                        print(f"[MCP] Is error: {is_error}")
                     except Exception as e:
                         tool_result_content = f"Error: {str(e)}"
+                        is_error = True
                         print(f"[MCP] Tool error: {e}")
+                    
+                    mcp_calls.append({
+                        "tool": tool_name,
+                        "arguments": tool_args,
+                        "result": tool_result_content,
+                        "is_error": is_error
+                    })
                     
                     tool_call_results.append({
                         "role": "tool",
@@ -731,7 +747,7 @@ async def _process_status_block(
                 
                 response = provider.chat(tool_messages, prompt_with_reminder, debug=debug_mode, tools=None)
                 
-                print(f"[DEBUG] After MCP call, response.content: {response.content[:200] if response.content else 'EMPTY'}")
+                print(f"[MCP] After tool execution, response: content='{response.content[:100] if response.content else 'EMPTY'}', tool_calls={response.tool_calls}")
             except Exception as e:
                 print(f"[MCP] Tool handling error: {e}")
 
@@ -1135,6 +1151,7 @@ def chat():
     debug_mode = data.get("debug", False)
     source_type = data.get("source", "web")
     mcp_servers = data.get("mcp_servers", [])
+    mcp_calls = []
     
     current_user = get_current_user()
     if current_user:
@@ -1268,6 +1285,8 @@ def chat():
         if session.status:
             debug_info['status'] = session.status
             debug_info['subtasks'] = session.status.get('subtasks', [])
+        if mcp_calls:
+            debug_info['mcp_calls'] = mcp_calls
 
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls)
     
@@ -1303,6 +1322,7 @@ def chat_stream():
     debug_mode = data.get("debug", False)
     source_type = data.get("source", "web")
     mcp_servers = data.get("mcp_servers", [])
+    mcp_calls = []
     
     current_user = get_current_user()
     if current_user:
@@ -1319,7 +1339,7 @@ def chat_stream():
         return jsonify({"error": f"Unknown provider: {provider_name}"}), 400
 
     provider_config = provider_config.copy()
-    
+
     if model:
         provider_config["model"] = model
     else:
@@ -1352,7 +1372,7 @@ def chat_stream():
     needs_summarization, summarize_reason = summarizer.should_summarize(session, 0)
 
     def generate():
-        nonlocal needs_summarization
+        nonlocal needs_summarization, mcp_calls
 
         previous_status = {
             "project": session.status.get("project") if session.status else None,
@@ -1589,6 +1609,11 @@ def chat_stream():
                     debug_info = {}
                 debug_info['status'] = session.status
                 debug_info['subtasks'] = session.status.get('subtasks', [])
+            
+            if mcp_calls:
+                if debug_info is None:
+                    debug_info = {}
+                debug_info['mcp_calls'] = mcp_calls
                 
             session.add_assistant_message(final_content, usage, debug=debug_info, model=provider.model)
             
@@ -1630,9 +1655,13 @@ def chat_stream():
             llm_msgs = [Message(role=m["role"], content=m["content"], usage={}) for m in formatted_messages]
             
             tool_calls_handled = False
+            if mcp_tools:
+                print(f"[MCP] Stream: Sending {len(mcp_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in mcp_tools]}")
             for chunk in provider.stream_chat(llm_msgs, None, debug=debug_mode, tools=mcp_tools):
                 if chunk.tool_calls and not tool_calls_handled:
                     tool_calls_handled = True
+                    print(f"[MCP] Stream: Detected {len(chunk.tool_calls)} tool call(s)")
+                    print(f"[MCP] Stream: Tool calls: {json.dumps(chunk.tool_calls, ensure_ascii=False)[:500]}")
                     try:
                         from app.mcp import MCPManager
                         import asyncio
@@ -1649,13 +1678,25 @@ def chat_stream():
                                     tool_args = {}
                             
                             print(f"[MCP] Calling tool: {tool_name}")
+                            print(f"[MCP] Arguments: {json.dumps(tool_args, ensure_ascii=False)[:500]}")
                             
                             try:
                                 result = run_mcp_async(MCPManager.call_tool(tool_name, tool_args))
                                 tool_result_content = result.content
+                                is_error = getattr(result, 'is_error', False)
+                                print(f"[MCP] Result: {tool_result_content[:500] if tool_result_content else 'empty'}")
+                                print(f"[MCP] Is error: {is_error}")
                             except Exception as e:
                                 tool_result_content = f"Error: {str(e)}"
+                                is_error = True
                                 print(f"[MCP] Tool error: {e}")
+                            
+                            mcp_calls.append({
+                                "tool": tool_name,
+                                "arguments": tool_args,
+                                "result": tool_result_content,
+                                "is_error": is_error
+                            })
                             
                             tool_call_results.append({
                                 "role": "tool",
@@ -1678,6 +1719,7 @@ def chat_stream():
                         
                         for new_chunk in provider.stream_chat(tool_messages, None, debug=debug_mode, tools=None):
                             full_content = new_chunk.content
+                            print(f"[MCP] Stream after tool: content='{full_content[:100] if full_content else 'EMPTY'}', is_final={new_chunk.is_final}, tool_calls={new_chunk.tool_calls}")
                             yield f"data: {json.dumps({'content': full_content, 'done': new_chunk.is_final})}\n\n"
                             if new_chunk.is_final:
                                 total_usage = new_chunk.usage
@@ -1832,6 +1874,10 @@ def chat_stream():
                 if debug_info is None:
                     debug_info = {}
                 debug_info['status_error'] = status_error
+            if mcp_calls:
+                if debug_info is None:
+                    debug_info = {}
+                debug_info['mcp_calls'] = mcp_calls
                 
             session.add_assistant_message(content_for_user, total_usage, debug=debug_info, model=provider.model)
 

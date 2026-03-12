@@ -356,6 +356,14 @@
                 <p class="help-text">Адрес MCP сервера с SSE endpoint</p>
             </div>
         </div>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="mcp-enabled-by-default">
+                Включён по умолчанию для новых сессий
+            </label>
+            <p class="help-text">При создании новой сессии этот сервер будет добавлен автоматически</p>
+        </div>
         
         <div class="modal-actions">
             <button class="btn btn-secondary" onclick="closeMCPCModal()">Отмена</button>
@@ -1631,9 +1639,11 @@
         let html = '<div class="providers-cards">';
         for (const [name, cfg] of Object.entries(mcpServers)) {
             const type = cfg.type || 'stdio';
+            const isDefault = cfg.enabled_by_default === true;
+            const defaultBadge = isDefault ? '<span class="badge" style="background: #4CAF50; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">по умолчанию</span>' : '';
             html += `
                 <div class="provider-card">
-                    <h4>${escapeHtml(name)}</h4>
+                    <h4>${escapeHtml(name)} ${defaultBadge}</h4>
                     <div class="provider-info">
                         <div><strong>Тип:</strong> ${type === 'stdio' ? 'Stdio (локальный)' : 'SSE (HTTP)'}</div>
                         ${type === 'stdio' 
@@ -1661,6 +1671,7 @@
         document.getElementById('mcp-args').value = '[]';
         document.getElementById('mcp-env').value = '{}';
         document.getElementById('mcp-url').value = '';
+        document.getElementById('mcp-enabled-by-default').checked = false;
         document.getElementById('btn-delete-mcp').style.display = 'none';
         document.getElementById('mcp-name').disabled = false;
         updateMCPTypeFields();
@@ -1682,6 +1693,7 @@
         document.getElementById('mcp-args').value = JSON.stringify(server.args || []);
         document.getElementById('mcp-env').value = JSON.stringify(server.env || {});
         document.getElementById('mcp-url').value = server.url || '';
+        document.getElementById('mcp-enabled-by-default').checked = server.enabled_by_default === true;
         document.getElementById('btn-delete-mcp').style.display = 'inline-block';
         document.getElementById('mcp-name').disabled = true;
         updateMCPTypeFields();
@@ -1738,6 +1750,11 @@
                 return;
             }
             serverConfig.url = url;
+        }
+
+        const enabledByDefault = document.getElementById('mcp-enabled-by-default').checked;
+        if (enabledByDefault) {
+            serverConfig.enabled_by_default = true;
         }
 
         const mcpConfig = { ...(config.mcp || {}) };

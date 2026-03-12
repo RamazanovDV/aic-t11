@@ -976,7 +976,13 @@ class SessionManager:
                 self._sessions[session_id] = session
                 return session
             else:
-                self._sessions[session_id] = Session(session_id=session_id)
+                new_session = Session(session_id=session_id)
+                mcp_cfg = _get_mcp_config()
+                if mcp_cfg:
+                    default_servers = mcp_cfg.get_default_enabled_servers()
+                    for server_name in default_servers:
+                        new_session.add_mcp_server(server_name)
+                self._sessions[session_id] = new_session
                 return self._sessions[session_id]
         
         if session_id not in self._sessions:

@@ -20,5 +20,11 @@ class MCPConfig:
     def is_server_configured(self, name: str) -> bool:
         return name in self.servers
 
+    def get_default_enabled_servers(self) -> list[str]:
+        return [
+            name for name, cfg in self.servers.items()
+            if cfg.get("enabled_by_default", False)
+        ]
+
 
 mcp_config = MCPConfig()

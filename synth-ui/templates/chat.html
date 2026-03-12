@@ -24,6 +24,7 @@
             <button class="debug-tab" data-tab="status" onclick="switchDebugTab('status')">Status</button>
             <button class="debug-tab" data-tab="raw" onclick="switchDebugTab('raw')">Raw</button>
             <button class="debug-tab" data-tab="session" onclick="switchDebugTab('session')">Session</button>
+            <button class="debug-tab" data-tab="mcp" onclick="switchDebugTab('mcp')">MCP</button>
         </div>
         <div class="debug-content">
             <pre id="debug-json"></pre>
@@ -1693,6 +1694,12 @@
         const hasSubagents = debugData && (debugData.subagents || debugData.subagent_calls) && 
                            (debugData.subagents?.length > 0 || debugData.subagent_calls?.length > 0);
         
+        const hasMcpCalls = debugData && debugData.mcp_calls && debugData.mcp_calls.length > 0;
+        const mcpTab = document.querySelector('.debug-tab[data-tab="mcp"]');
+        if (mcpTab) {
+            mcpTab.style.display = hasMcpCalls ? '' : 'none';
+        }
+        
         // Show status tab always if there's status data
         const statusTab = document.querySelector('.debug-tab[data-tab="status"]');
         if (statusTab) {
@@ -1722,6 +1729,8 @@
                     t.style.display = '';
                 } else if (t.dataset.tab === 'session') {
                     t.style.display = '';
+                } else if (t.dataset.tab === 'mcp' && hasMcpCalls) {
+                    t.style.display = '';
                 } else {
                     t.style.display = 'none';
                 }
@@ -1734,6 +1743,9 @@
             // Show all summary debug info
             document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
             document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
+            if (hasMcpCalls) {
+                document.querySelector('.debug-tab[data-tab="mcp"]').style.display = '';
+            }
         } else if (hasStatus && (hasRequest || hasResponse)) {
             // Show all debug info including status and request/response
             document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
@@ -1742,12 +1754,23 @@
             });
             document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
+            if (hasMcpCalls) {
+                document.querySelector('.debug-tab[data-tab="mcp"]').style.display = '';
+            }
         } else if (hasStatus) {
             // Show only status
             document.getElementById('debug-json').textContent = JSON.stringify(debugData.status, null, 2);
             document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
             document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
+            if (hasMcpCalls) {
+                document.querySelector('.debug-tab[data-tab="mcp"]').style.display = '';
+            }
+        } else if (hasMcpCalls) {
+            // Show MCP calls only
+            document.getElementById('debug-json').textContent = JSON.stringify(debugData.mcp_calls, null, 2);
+            document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
+            document.querySelector('.debug-tab[data-tab="mcp"]').style.display = '';
         } else {
             // Standard debug for LLM calls
             document.querySelectorAll('.debug-tab').forEach(t => {
@@ -1804,6 +1827,8 @@
                         document.getElementById('debug-json').textContent = JSON.stringify(sessionInfo, null, 2);
                     });
                 return;
+            } else if (tab === 'mcp') {
+                data = currentDebugData.mcp_calls || [];
             }
             document.getElementById('debug-json').textContent = JSON.stringify(data, null, 2);
         }
