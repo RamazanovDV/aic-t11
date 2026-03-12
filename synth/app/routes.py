@@ -164,7 +164,7 @@ def get_project_prompt(session) -> str:
             for s in enabled_schedules:
                 next_run_str = s.next_run.strftime("%Y-%m-%d %H:%M") if s.next_run else "неизвестно"
                 result += f"- {s.name}: cron={s.cron}, следующий запуск: {next_run_str}\n"
-        result += "Можно создать новое задание, указав его параметры в поле schedule.status.status блока.\n"
+        result += "Можно создать новое задание, указав его параметры в поле schedule блока статуса.\n"
     
     return result
 
@@ -961,13 +961,14 @@ def _handle_project_updates(session) -> None:
     schedule_data = status.get("schedule")
     if schedule_data and project_name:
         try:
+            model = schedule_data.get("model") or session.model
             scheduler.scheduler.create_schedule(
                 project_name=project_name,
                 name=schedule_data.get("name", "Scheduled task"),
                 prompt=schedule_data.get("prompt", ""),
                 cron=schedule_data.get("cron", "0 0 * * *"),
-                model=schedule_data.get("model"),
-                session_id=schedule_data.get("session_id"),
+                model=model,
+                session_id=session.session_id,
                 enabled=True,
             )
         except Exception as e:

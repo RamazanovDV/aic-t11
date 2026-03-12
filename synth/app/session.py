@@ -169,6 +169,7 @@ class Session:
             "user_info": status_data.get("user_info"),
             "subtasks": status_data.get("subtasks", []),
             "invariants": status_data.get("invariants"),
+            "schedule": status_data.get("schedule"),
         }
         
         new_project = self.status.get("project")

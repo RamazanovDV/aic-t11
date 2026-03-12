@@ -1296,3 +1296,24 @@ def run_project_schedule(project_name, schedule_id):
         return jsonify(response.json())
     except requests.RequestException as e:
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/events", methods=["GET"])
+def session_events(session_id: str):
+    """SSE endpoint for session updates - proxy to backend."""
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/events"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), stream=True, timeout=30)
+        response.raise_for_status()
+
+        def generate():
+            for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+                yield chunk
+
+        return Response(generate(), mimetype="text/event-stream")
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
