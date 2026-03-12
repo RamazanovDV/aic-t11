@@ -1252,7 +1252,7 @@
             html += `
                 <div class="context-file-item ${file.is_default ? 'default-file' : ''}">
                     <label class="context-file-label">
-                        <input type="checkbox" class="context-file-checkbox" data-filename="${file.filename}" ${isEnabled ? 'checked' : ''} ${file.is_default ? 'disabled' : ''}>
+                        <input type="checkbox" class="context-file-checkbox" data-filename="${file.filename}" ${isEnabled ? 'checked' : ''}>
                         <span class="context-file-name">${file.filename}</span>
                         ${file.is_default ? '<span class="badge badge-info">по умолчанию</span>' : ''}
                     </label>
