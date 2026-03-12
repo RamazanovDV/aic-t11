@@ -41,35 +41,72 @@
     <div class="tab-content" id="tab-context">
         <div class="settings-section">
             <h3>Контекстные файлы</h3>
-            <p class="help-text">Выберите файлы, которые будут использоваться как контекст для AI.</p>
+            <p class="help-text">Управление системными и пользовательскими контекстными файлами.</p>
             
-            <div class="context-actions" style="margin-bottom: 1rem;">
-                <button class="btn btn-primary" onclick="showCreateContextFile()">Создать файл</button>
+            <div class="context-tabs" style="margin-bottom: 1rem; border-bottom: 1px solid var(--border);">
+                <button class="tab-btn context-tab-btn active" data-tab="context-system" data-context="system" id="tab-btn-system">Системные</button>
+                <button class="tab-btn context-tab-btn" data-tab="context-user" data-context="user" id="tab-btn-user">Пользовательские</button>
             </div>
             
-            <div id="context-files-list" class="context-files-list">
-                <div class="loading">Загрузка файлов...</div>
+            <!-- System Files Tab -->
+            <div id="context-system-tab" class="context-tab active">
+                <p class="help-text">Системные файлы поставляются с бэкендом. Вы можете переопределить их, сохранив изменения в каталоге данных. Переопределённые файлы отмечены значком *.</p>
+                
+                <div id="system-files-list" class="context-files-list">
+                    <div class="loading">Загрузка файлов...</div>
+                </div>
+                
+                <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border);">
+                
+                <h4>Редактирование системного файла</h4>
+                <div class="form-group">
+                    <label for="system-file-select">Выберите файл</label>
+                    <select id="system-file-select" class="form-input" onchange="loadSystemContextFile()">
+                        <option value="">-- Выберите файл --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="system-file-editor">Содержимое</label>
+                    <textarea id="system-file-editor" class="form-input" rows="15" placeholder="Содержимое файла..."></textarea>
+                </div>
+                <div class="settings-actions">
+                    <button class="btn btn-primary" onclick="saveSystemContextFile()">Сохранить изменения</button>
+                    <button class="btn btn-secondary" id="reset-system-btn" onclick="resetSystemContextFile()" style="display: none;">Сбросить к оригиналу</button>
+                </div>
             </div>
             
-            <div class="settings-actions">
-                <button class="btn btn-primary" onclick="saveEnabledContextFiles()">Сохранить включённые файлы</button>
-            </div>
-            
-            <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border);">
-            
-            <h4>Редактирование файла</h4>
-            <div class="form-group">
-                <label for="context-file-select">Выберите файл</label>
-                <select id="context-file-select" class="form-input" onchange="loadContextFile()">
-                    <option value="">-- Выберите файл --</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="context-editor">Содержимое</label>
-                <textarea id="context-editor" class="form-input" rows="15" placeholder="Содержимое файла..."></textarea>
-            </div>
-            <div class="settings-actions">
-                <button class="btn btn-primary" onclick="saveContextFile()">Сохранить содержимое</button>
+            <!-- User Files Tab -->
+            <div id="context-user-tab" class="context-tab">
+                <p class="help-text">Пользовательские файлы добавляются в контекст при включении чекбокса.</p>
+                
+                <div class="context-actions" style="margin-bottom: 1rem;">
+                    <button class="btn btn-primary" onclick="showCreateContextFile()">Создать файл</button>
+                </div>
+                
+                <div id="user-files-list" class="context-files-list">
+                    <div class="loading">Загрузка файлов...</div>
+                </div>
+                
+                <div class="settings-actions">
+                    <button class="btn btn-primary" onclick="saveEnabledContextFiles()">Сохранить включённые файлы</button>
+                </div>
+                
+                <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border);">
+                
+                <h4>Редактирование файла</h4>
+                <div class="form-group">
+                    <label for="user-file-select">Выберите файл</label>
+                    <select id="user-file-select" class="form-input" onchange="loadUserContextFile()">
+                        <option value="">-- Выберите файл --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="user-context-editor">Содержимое</label>
+                    <textarea id="user-context-editor" class="form-input" rows="15" placeholder="Содержимое файла..."></textarea>
+                </div>
+                <div class="settings-actions">
+                    <button class="btn btn-primary" onclick="saveUserContextFile()">Сохранить содержимое</button>
+                </div>
             </div>
         </div>
     </div>
@@ -346,8 +383,17 @@
 <script>
     let config = {};
     let contextFiles = [];
+    let systemFiles = [];
+    let userFiles = [];
     let enabledContextFiles = [];
     let apiKey = '';
+
+    function showContextTab(tab) {
+        document.getElementById('context-system-tab').classList.toggle('active', tab === 'system');
+        document.getElementById('context-user-tab').classList.toggle('active', tab === 'user');
+        document.getElementById('tab-btn-system').classList.toggle('active', tab === 'system');
+        document.getElementById('tab-btn-user').classList.toggle('active', tab === 'user');
+    }
 
     document.addEventListener('DOMContentLoaded', function() {
         initTabs();
@@ -378,10 +424,14 @@
     }
 
     function initTabs() {
-        // Keep event listeners as before
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                switchTab(btn.dataset.tab);
+                if (btn.classList.contains('context-tab-btn')) {
+                    const contextTab = btn.dataset.context;
+                    showContextTab(contextTab);
+                } else {
+                    switchTab(btn.dataset.tab);
+                }
             });
         });
     }
@@ -402,6 +452,10 @@
         
         if (tabName === 'users') {
             loadUsers();
+        }
+        
+        if (tabName === 'context') {
+            showContextTab('system');
         }
     }
 
@@ -1115,45 +1169,46 @@
             const response = await fetch('/admin/context', { headers: getAuthHeaders() });
             const data = await response.json();
             
-            contextFiles = data.files || [];
+            systemFiles = data.system_files || [];
+            userFiles = data.user_files || [];
             enabledContextFiles = data.enabled_files || [];
             
-            const select = document.getElementById('context-file-select');
-            select.innerHTML = '<option value="">-- Выберите файл --</option>';
+            renderSystemFilesList();
+            renderUserFilesList();
             
-            contextFiles.forEach(file => {
-                const option = document.createElement('option');
-                option.value = file;
-                option.textContent = file;
-                select.appendChild(option);
-            });
-            
-            renderContextFilesList();
+            showContextTab('system');
         } catch (e) {
             console.error('Failed to load context files:', e);
         }
     }
 
-    function renderContextFilesList() {
-        const container = document.getElementById('context-files-list');
+    function renderSystemFilesList() {
+        const container = document.getElementById('system-files-list');
+        const select = document.getElementById('system-file-select');
         
-        if (contextFiles.length === 0) {
-            container.innerHTML = '<p class="help-text">Нет контекстных файлов. Создайте первый файл.</p>';
+        if (systemFiles.length === 0) {
+            container.innerHTML = '<p class="help-text">Нет системных файлов.</p>';
             return;
         }
         
+        select.innerHTML = '<option value="">-- Выберите файл --</option>';
+        
         let html = '';
-        contextFiles.forEach(file => {
-            const isEnabled = enabledContextFiles.includes(file);
+        systemFiles.forEach(file => {
+            const option = document.createElement('option');
+            option.value = file.filename;
+            option.textContent = file.is_overridden ? file.filename + ' *' : file.filename;
+            select.appendChild(option);
+            
             html += `
                 <div class="context-file-item">
                     <label class="context-file-label">
-                        <input type="checkbox" class="context-file-checkbox" data-filename="${file}" ${isEnabled ? 'checked' : ''}>
-                        <span class="context-file-name">${file}</span>
+                        <span class="context-file-name">${file.filename}</span>
+                        ${file.is_overridden ? '<span class="badge badge-warning">переопределён</span>' : ''}
                     </label>
                     <div class="context-file-actions">
-                        <button class="btn btn-small" onclick="renameContextFile('${file}')">Переименовать</button>
-                        <button class="btn btn-small btn-danger" onclick="deleteContextFile('${file}')">Удалить</button>
+                        <button class="btn btn-small" onclick="editSystemFile('${file.filename}')">Изменить</button>
+                        ${file.is_overridden ? `<button class="btn btn-small btn-warning" onclick="resetSystemFile('${file.filename}')">Сбросить</button>` : ''}
                     </div>
                 </div>
             `;
@@ -1162,8 +1217,194 @@
         container.innerHTML = html;
     }
 
+    function renderUserFilesList() {
+        const container = document.getElementById('user-files-list');
+        const select = document.getElementById('user-file-select');
+        
+        select.innerHTML = '<option value="">-- Выберите файл --</option>';
+        
+        if (userFiles.length === 0) {
+            container.innerHTML = '<p class="help-text">Нет пользовательских файлов. Создайте первый файл.</p>';
+            return;
+        }
+        
+        let html = '';
+        userFiles.forEach(file => {
+            const option = document.createElement('option');
+            option.value = file.filename;
+            option.textContent = file.filename;
+            select.appendChild(option);
+            
+            const isEnabled = enabledContextFiles.includes(file.filename);
+            html += `
+                <div class="context-file-item">
+                    <label class="context-file-label">
+                        <input type="checkbox" class="context-file-checkbox" data-filename="${file.filename}" ${isEnabled ? 'checked' : ''}>
+                        <span class="context-file-name">${file.filename}</span>
+                    </label>
+                    <div class="context-file-actions">
+                        <button class="btn btn-small" onclick="renameContextFile('${file.filename}')">Переименовать</button>
+                        <button class="btn btn-small btn-danger" onclick="deleteContextFile('${file.filename}')">Удалить</button>
+                    </div>
+                </div>
+            `;
+        });
+        
+        container.innerHTML = html;
+    }
+
+    function editSystemFile(filename) {
+        document.getElementById('system-file-select').value = filename;
+        loadSystemContextFile();
+    }
+
+    async function loadSystemContextFile() {
+        const filename = document.getElementById('system-file-select').value;
+        if (!filename) {
+            document.getElementById('system-file-editor').value = '';
+            document.getElementById('reset-system-btn').style.display = 'none';
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/admin/context/system/${encodeURIComponent(filename)}`, { headers: getAuthHeaders() });
+            const data = await response.json();
+            
+            if (response.ok) {
+                document.getElementById('system-file-editor').value = data.content || '';
+                document.getElementById('reset-system-btn').style.display = data.is_overridden ? 'inline-block' : 'none';
+            } else {
+                alert('Ошибка загрузки файла');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function saveSystemContextFile() {
+        const filename = document.getElementById('system-file-select').value;
+        const content = document.getElementById('system-file-editor').value;
+        
+        if (!filename) {
+            alert('Выберите файл');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/admin/context/system/${encodeURIComponent(filename)}`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ content: content })
+            });
+            
+            if (response.ok) {
+                alert('Файл сохранён в data/context/');
+                await loadContextFileList();
+                document.getElementById('reset-system-btn').style.display = 'inline-block';
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function resetSystemContextFile() {
+        const filename = document.getElementById('system-file-select').value;
+        if (!filename) return;
+        
+        if (!confirm(`Сбросить "${filename}" к оригинальной версии?`)) return;
+        
+        try {
+            const response = await fetch(`/admin/context/system/${encodeURIComponent(filename)}`, {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                alert('Файл сброшен к оригиналу');
+                await loadContextFileList();
+                loadSystemContextFile();
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function resetSystemFile(filename) {
+        if (!confirm(`Сбросить "${filename}" к оригинальной версии?`)) return;
+        
+        try {
+            const response = await fetch(`/admin/context/system/${encodeURIComponent(filename)}`, {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                alert('Файл сброшен к оригиналу');
+                await loadContextFileList();
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function loadUserContextFile() {
+        const filename = document.getElementById('user-file-select').value;
+        if (!filename) {
+            document.getElementById('user-context-editor').value = '';
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/admin/context/${encodeURIComponent(filename)}`, { headers: getAuthHeaders() });
+            const data = await response.json();
+            
+            if (response.ok) {
+                document.getElementById('user-context-editor').value = data.content || '';
+            } else {
+                alert('Ошибка загрузки файла');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function saveUserContextFile() {
+        const filename = document.getElementById('user-file-select').value;
+        const content = document.getElementById('user-context-editor').value;
+        
+        if (!filename) {
+            alert('Выберите файл');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/admin/context/${encodeURIComponent(filename)}`, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ content: content })
+            });
+            
+            if (response.ok) {
+                alert('Файл сохранён');
+            } else {
+                alert('Ошибка сохранения');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
     async function saveEnabledContextFiles() {
-        const checkboxes = document.querySelectorAll('.context-file-checkbox:checked');
+        const checkboxes = document.querySelectorAll('#user-files-list .context-file-checkbox:checked');
         const enabled = Array.from(checkboxes).map(cb => cb.dataset.filename);
         
         try {
@@ -1271,53 +1512,6 @@
             } else {
                 const data = await response.json();
                 alert('Ошибка: ' + (data.error || 'Unknown error'));
-            }
-        } catch (e) {
-            alert('Ошибка: ' + e.message);
-        }
-    }
-
-    async function loadContextFile() {
-        const filename = document.getElementById('context-file-select').value;
-        if (!filename) {
-            document.getElementById('context-editor').value = '';
-            return;
-        }
-        
-        try {
-            const response = await fetch(`/admin/context/${encodeURIComponent(filename)}`, { headers: getAuthHeaders() });
-            const data = await response.json();
-            
-            if (response.ok) {
-                document.getElementById('context-editor').value = data.content || '';
-            } else {
-                alert('Ошибка загрузки файла');
-            }
-        } catch (e) {
-            alert('Ошибка: ' + e.message);
-        }
-    }
-
-    async function saveContextFile() {
-        const filename = document.getElementById('context-file-select').value;
-        const content = document.getElementById('context-editor').value;
-        
-        if (!filename) {
-            alert('Выберите файл');
-            return;
-        }
-        
-        try {
-            const response = await fetch(`/admin/context/${encodeURIComponent(filename)}`, {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ content: content })
-            });
-            
-            if (response.ok) {
-                alert('Файл сохранён');
-            } else {
-                alert('Ошибка сохранения');
             }
         } catch (e) {
             alert('Ошибка: ' + e.message);
@@ -1791,6 +1985,14 @@
     }
 
     .tab-content.active {
+        display: block;
+    }
+
+    .context-tab {
+        display: none;
+    }
+
+    .context-tab.active {
         display: block;
     }
 

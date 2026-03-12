@@ -2640,9 +2640,15 @@ def fetch_models_for_provider():
 @admin_bp.route("/context", methods=["GET"])
 @require_user
 def list_context_files():
-    files = config.get_context_files()
+    ctx_mgr = config.context_manager
+    system_files = ctx_mgr.list_system_files()
+    user_files = ctx_mgr.list_user_files()
     enabled = config.get_enabled_context_files()
-    return jsonify({"files": files, "enabled_files": enabled})
+    return jsonify({
+        "system_files": system_files,
+        "user_files": user_files,
+        "enabled_files": enabled,
+    })
 
 
 @admin_bp.route("/context", methods=["POST"])
@@ -2656,9 +2662,11 @@ def create_context_file():
     content = data.get("content", "")
 
     try:
-        config.create_context_file(filename, content)
+        config.context_manager.create_user_file(filename, content)
         return jsonify({"status": "created", "filename": filename})
     except FileExistsError as e:
+        return jsonify({"error": str(e)}), 400
+    except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2688,7 +2696,7 @@ def set_enabled_context_files():
 @admin_bp.route("/context/<filename>", methods=["GET"])
 @require_user
 def get_context_file(filename: str):
-    content = config.get_context_file(filename)
+    content = config.context_manager.get_context_file(filename)
     if content is None:
         return jsonify({"error": "File not found"}), 404
     return jsonify({"filename": filename, "content": content})
@@ -2702,7 +2710,7 @@ def save_context_file(filename: str):
         return jsonify({"error": "Missing content"}), 400
 
     try:
-        config.save_context_file(filename, data["content"])
+        config.context_manager.save_context_file(filename, data["content"])
         return jsonify({"status": "saved"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2711,13 +2719,15 @@ def save_context_file(filename: str):
 @admin_bp.route("/context/<filename>", methods=["DELETE"])
 @require_user
 def delete_context_file(filename: str):
-    try:
-        config.delete_context_file(filename)
+    ctx_mgr = config.context_manager
+    if ctx_mgr.is_system_file(filename):
+        if ctx_mgr.is_overridden(filename):
+            ctx_mgr.delete_context_file(filename)
+            return jsonify({"status": "reset"})
+        return jsonify({"error": "System file not overridden"}), 400
+    else:
+        ctx_mgr.delete_context_file(filename)
         return jsonify({"status": "deleted"})
-    except FileNotFoundError as e:
-        return jsonify({"error": str(e)}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @admin_bp.route("/context/<filename>/rename", methods=["POST"])
@@ -2732,12 +2742,71 @@ def rename_context_file(filename: str):
         return jsonify({"error": "New name cannot be empty"}), 400
 
     try:
-        config.rename_context_file(filename, new_name)
+        config.context_manager.rename_user_file(filename, new_name)
         return jsonify({"status": "renamed", "old_name": filename, "new_name": new_name})
     except FileNotFoundError as e:
         return jsonify({"error": str(e)}), 404
     except FileExistsError as e:
         return jsonify({"error": str(e)}), 400
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route("/context/system", methods=["GET"])
+@require_user
+def list_system_context_files():
+    files = config.context_manager.list_system_files()
+    return jsonify({"system_files": files})
+
+
+@admin_bp.route("/context/system/<filename>", methods=["GET"])
+@require_user
+def get_system_context_file(filename: str):
+    ctx_mgr = config.context_manager
+    content = ctx_mgr.get_context_file(filename)
+    if content is None:
+        return jsonify({"error": "System file not found"}), 404
+    is_overridden = ctx_mgr.is_overridden(filename)
+    return jsonify({
+        "filename": filename,
+        "content": content,
+        "is_overridden": is_overridden,
+    })
+
+
+@admin_bp.route("/context/system/<filename>", methods=["POST"])
+@require_user
+def save_system_context_file(filename: str):
+    data = request.get_json()
+    if not data or "content" not in data:
+        return jsonify({"error": "Missing content"}), 400
+
+    ctx_mgr = config.context_manager
+    if not ctx_mgr.is_system_file(filename):
+        return jsonify({"error": "Not a system file"}), 400
+
+    try:
+        ctx_mgr.save_context_file(filename, data["content"])
+        return jsonify({"status": "saved"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route("/context/system/<filename>", methods=["DELETE"])
+@require_user
+def reset_system_context_file(filename: str):
+    ctx_mgr = config.context_manager
+    if not ctx_mgr.is_system_file(filename):
+        return jsonify({"error": "Not a system file"}), 400
+
+    if not ctx_mgr.is_overridden(filename):
+        return jsonify({"error": "File is not overridden"}), 400
+
+    try:
+        ctx_mgr.delete_context_file(filename)
+        return jsonify({"status": "reset"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

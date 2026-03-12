@@ -50,13 +50,21 @@ def get_tsm_prompt(session, debug: bool = False) -> str:
     mode = get_tsm_mode(session)
     
     if mode == "simple":
-        return _get_simple_prompt()
+        prompt = _get_simple_prompt()
     elif mode == "orchestrator":
-        return _get_orchestrator_prompt(debug=debug)
+        prompt = _get_orchestrator_prompt(debug=debug)
     elif mode == "deterministic":
-        return _get_deterministic_prompt(session)
+        prompt = _get_deterministic_prompt(session)
+    else:
+        prompt = _get_simple_prompt()
     
-    return _get_simple_prompt()
+    project = session.status.get("project") if session.status else None
+    if project:
+        scheduler_prompt = config.get_context_file("SCHEDULER.md") or ""
+        if scheduler_prompt:
+            prompt = prompt + "\n\n" + scheduler_prompt
+    
+    return prompt
 
 
 def _get_simple_prompt() -> str:

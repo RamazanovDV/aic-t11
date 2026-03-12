@@ -45,3 +45,6 @@ Thumbs.db
 
 # Session data
 data/
+
+# System context files (included in repo)
+!synth/context/

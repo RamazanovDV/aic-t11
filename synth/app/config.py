@@ -1,8 +1,11 @@
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    from app.context import ContextManager
 
 
 class Config:
@@ -106,19 +109,18 @@ class Config:
     def context_dir(self) -> Path:
         return self.data_dir / "context"
 
-    def get_context_files(self) -> list[str]:
-        self.context_dir.mkdir(parents=True, exist_ok=True)
-        return sorted([f.name for f in self.context_dir.glob("*.md")])
-
+    @property
+    def context_manager(self) -> "ContextManager":
+        from app.context import ContextManager
+        return ContextManager()
+    
     def get_context_file(self, filename: str) -> str | None:
-        filepath = self.context_dir / filename
-        if not filepath.exists():
-            return None
-        return filepath.read_text(encoding="utf-8")
+        from app.context import ContextManager
+        return ContextManager().get_context_file(filename)
 
     def save_context_file(self, filename: str, content: str) -> None:
-        filepath = self.context_dir / filename
-        filepath.write_text(content, encoding="utf-8")
+        from app.context import ContextManager
+        return ContextManager().save_context_file(filename, content)
 
     def get_default_model(self, provider: str) -> str:
         return self.providers.get(provider, {}).get("default_model", "")
