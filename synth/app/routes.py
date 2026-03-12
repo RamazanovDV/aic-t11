@@ -1,6 +1,7 @@
 import json
 import re
 import asyncio
+from datetime import datetime
 
 import requests
 from flask import Blueprint, jsonify, render_template, request, Response
@@ -962,11 +963,19 @@ def _handle_project_updates(session) -> None:
     if schedule_data and project_name:
         try:
             model = schedule_data.get("model") or session.model
+            schedule_type = schedule_data.get("type", "cron")
+            
+            run_at = None
+            if schedule_type == "once" and schedule_data.get("run_at"):
+                run_at = datetime.fromisoformat(schedule_data.get("run_at"))
+            
             scheduler.scheduler.create_schedule(
                 project_name=project_name,
                 name=schedule_data.get("name", "Scheduled task"),
                 prompt=schedule_data.get("prompt", ""),
                 cron=schedule_data.get("cron", "0 0 * * *"),
+                type=schedule_type,
+                run_at=run_at,
                 model=model,
                 session_id=session.session_id,
                 enabled=True,
@@ -988,6 +997,8 @@ def list_schedules(project_name):
             "model": s.model,
             "session_id": s.session_id,
             "cron": s.cron,
+            "type": s.type,
+            "run_at": s.run_at.isoformat() if s.run_at else None,
             "enabled": s.enabled,
             "last_run": s.last_run.isoformat() if s.last_run else None,
             "next_run": s.next_run.isoformat() if s.next_run else None,
@@ -1002,15 +1013,29 @@ def list_schedules(project_name):
 def create_schedule(project_name):
     """Создать новое расписание"""
     data = request.get_json()
-    if not data or "name" not in data or "prompt" not in data or "cron" not in data:
-        return jsonify({"error": "Missing required fields: name, prompt, cron"}), 400
+    if not data or "name" not in data or "prompt" not in data:
+        return jsonify({"error": "Missing required fields: name, prompt"}), 400
+
+    schedule_type = data.get("type", "cron")
+    
+    if schedule_type == "once" and not data.get("run_at"):
+        return jsonify({"error": "Missing required field for one-time schedule: run_at"}), 400
+    
+    if schedule_type == "cron" and not data.get("cron"):
+        return jsonify({"error": "Missing required field for cron schedule: cron"}), 400
 
     try:
+        run_at = None
+        if data.get("run_at"):
+            run_at = datetime.fromisoformat(data["run_at"])
+        
         schedule = scheduler.scheduler.create_schedule(
             project_name=project_name,
             name=data["name"],
             prompt=data["prompt"],
-            cron=data["cron"],
+            cron=data.get("cron"),
+            type=schedule_type,
+            run_at=run_at,
             model=data.get("model"),
             session_id=data.get("session_id"),
             enabled=data.get("enabled", True),
@@ -1022,6 +1047,8 @@ def create_schedule(project_name):
             "model": schedule.model,
             "session_id": schedule.session_id,
             "cron": schedule.cron,
+            "type": schedule.type,
+            "run_at": schedule.run_at.isoformat() if schedule.run_at else None,
             "enabled": schedule.enabled,
             "last_run": schedule.last_run.isoformat() if schedule.last_run else None,
             "next_run": schedule.next_run.isoformat() if schedule.next_run else None,
@@ -1038,12 +1065,18 @@ def update_schedule(project_name, schedule_id):
     data = request.get_json()
 
     try:
+        run_at = None
+        if data.get("run_at"):
+            run_at = datetime.fromisoformat(data["run_at"])
+        
         schedule = scheduler.scheduler.update_schedule(
             project_name=project_name,
             schedule_id=schedule_id,
             name=data.get("name"),
             prompt=data.get("prompt"),
             cron=data.get("cron"),
+            type=data.get("type"),
+            run_at=run_at,
             model=data.get("model"),
             session_id=data.get("session_id"),
             enabled=data.get("enabled"),
@@ -1058,6 +1091,8 @@ def update_schedule(project_name, schedule_id):
             "model": schedule.model,
             "session_id": schedule.session_id,
             "cron": schedule.cron,
+            "type": schedule.type,
+            "run_at": schedule.run_at.isoformat() if schedule.run_at else None,
             "enabled": schedule.enabled,
             "last_run": schedule.last_run.isoformat() if schedule.last_run else None,
             "next_run": schedule.next_run.isoformat() if schedule.next_run else None,

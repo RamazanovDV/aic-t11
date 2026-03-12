@@ -237,6 +237,14 @@
         <h3 id="schedule-form-title">Новое задание</h3>
         
         <div class="settings-section">
+            <label>Тип задания:</label>
+            <select id="schedule-type" class="form-input" onchange="toggleScheduleTypeFields()">
+                <option value="cron">Повторяющееся (cron)</option>
+                <option value="once">Одноразовое</option>
+            </select>
+        </div>
+
+        <div class="settings-section">
             <label>Название:</label>
             <input type="text" id="schedule-name" class="form-input" placeholder="Название задания">
         </div>
@@ -246,10 +254,16 @@
             <textarea id="schedule-prompt" class="form-input" rows="4" placeholder="Промпт для отправки модели"></textarea>
         </div>
 
-        <div class="settings-section">
+        <div class="settings-section" id="cron-field">
             <label>Cron (стандартный формат):</label>
             <input type="text" id="schedule-cron" class="form-input" placeholder="0 9 * * *" value="0 9 * * *">
             <p class="help-text">Например: 0 9 * * * - каждый день в 9:00</p>
+        </div>
+
+        <div class="settings-section" id="run-at-field" style="display: none;">
+            <label>Дата и время выполнения:</label>
+            <input type="datetime-local" id="schedule-run-at" class="form-input">
+            <p class="help-text">Задание будет выполнено один раз в указанное время</p>
         </div>
 
         <div class="settings-section">
@@ -2848,18 +2862,24 @@
                 return;
             }
             
-            listEl.innerHTML = schedules.map(s => `
-                <div class="schedule-item" style="display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 8px;">
-                    <input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSchedule('${escapeAttr(projectName)}', '${escapeAttr(s.id)}', this.checked)">
-                    <div style="flex: 1;">
-                        <div style="font-weight: 600;">${escapeHtml(s.name)}</div>
-                        <div style="font-size: 12px; color: #666;">cron: ${escapeHtml(s.cron)} | next: ${s.next_run ? new Date(s.next_run).toLocaleString() : 'N/A'}</div>
+            listEl.innerHTML = schedules.map(s => {
+                const typeLabel = s.type === 'once' ? 'Одноразовое' : 'Повторяющееся';
+                const scheduleInfo = s.type === 'once' 
+                    ? `run_at: ${s.run_at ? new Date(s.run_at).toLocaleString() : 'N/A'}`
+                    : `cron: ${escapeHtml(s.cron)} | next: ${s.next_run ? new Date(s.next_run).toLocaleString() : 'N/A'}`;
+                return `
+                    <div class="schedule-item" style="display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 8px;">
+                        <input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSchedule('${escapeAttr(projectName)}', '${escapeAttr(s.id)}', this.checked)">
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600;">${escapeHtml(s.name)}</div>
+                            <div style="font-size: 12px; color: #666;">${typeLabel} | ${scheduleInfo}</div>
+                        </div>
+                        <button class="btn btn-small" onclick="runScheduleNow('${escapeAttr(projectName)}', '${escapeAttr(s.id)}')" title="Запустить сейчас">▶</button>
+                        <button class="btn btn-small" onclick="editSchedule('${escapeAttr(projectName)}', '${escapeAttr(s.id)}', '${escapeAttr(s.name)}', '${escapeAttr(s.prompt)}', '${escapeAttr(s.cron || '')}', '${escapeAttr(s.type || 'cron')}', '${escapeAttr(s.run_at || '')}', '${escapeAttr(s.model || '')}', '${escapeAttr(s.session_id || '')}')" title="Редактировать">✎</button>
+                        <button class="btn btn-small" onclick="deleteSchedule('${escapeAttr(projectName)}', '${escapeAttr(s.id)}')" title="Удалить">🗑️</button>
                     </div>
-                    <button class="btn btn-small" onclick="runScheduleNow('${escapeAttr(projectName)}', '${escapeAttr(s.id)}')" title="Запустить сейчас">▶</button>
-                    <button class="btn btn-small" onclick="editSchedule('${escapeAttr(projectName)}', '${escapeAttr(s.id)}', '${escapeAttr(s.name)}', '${escapeAttr(s.prompt)}', '${escapeAttr(s.cron)}', '${escapeAttr(s.model || '')}', '${escapeAttr(s.session_id || '')}')" title="Редактировать">✎</button>
-                    <button class="btn btn-small" onclick="deleteSchedule('${escapeAttr(projectName)}', '${escapeAttr(s.id)}')" title="Удалить">🗑️</button>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         } catch (e) {
             listEl.innerHTML = '<p class="error">Ошибка загрузки: ' + e.message + '</p>';
         }
@@ -2896,12 +2916,18 @@
         }
     }
 
-    function editSchedule(projectName, scheduleId, name, prompt, cron, model, sessionId) {
+    function editSchedule(projectName, scheduleId, name, prompt, cron, type, runAt, model, sessionId) {
         editingScheduleId = scheduleId;
         document.getElementById('schedule-form-title').textContent = 'Редактировать задание';
         document.getElementById('schedule-name').value = name;
         document.getElementById('schedule-prompt').value = prompt;
-        document.getElementById('schedule-cron').value = cron;
+        
+        const typeSelect = document.getElementById('schedule-type');
+        typeSelect.value = type || 'cron';
+        toggleScheduleTypeFields();
+        
+        document.getElementById('schedule-cron').value = cron || '0 9 * * *';
+        document.getElementById('schedule-run-at').value = runAt ? runAt.slice(0, 16) : '';
         document.getElementById('schedule-model').value = model;
         
         const sessionSelect = document.getElementById('schedule-session');
@@ -2932,12 +2958,29 @@
         }
     }
 
+    function toggleScheduleTypeFields() {
+        const type = document.getElementById('schedule-type').value;
+        const cronField = document.getElementById('cron-field');
+        const runAtField = document.getElementById('run-at-field');
+        
+        if (type === 'once') {
+            cronField.style.display = 'none';
+            runAtField.style.display = 'block';
+        } else {
+            cronField.style.display = 'block';
+            runAtField.style.display = 'none';
+        }
+    }
+
     function openScheduleForm() {
         editingScheduleId = null;
         document.getElementById('schedule-form-title').textContent = 'Новое задание';
+        document.getElementById('schedule-type').value = 'cron';
+        toggleScheduleTypeFields();
         document.getElementById('schedule-name').value = '';
         document.getElementById('schedule-prompt').value = '';
         document.getElementById('schedule-cron').value = '0 9 * * *';
+        document.getElementById('schedule-run-at').value = '';
         document.getElementById('schedule-model').value = '';
         
         const sessionSelect = document.getElementById('schedule-session');
@@ -2960,19 +3003,33 @@
     async function saveSchedule() {
         const name = document.getElementById('schedule-name').value.trim();
         const prompt = document.getElementById('schedule-prompt').value.trim();
+        const type = document.getElementById('schedule-type').value;
         const cron = document.getElementById('schedule-cron').value.trim();
+        const runAt = document.getElementById('schedule-run-at').value;
         const model = document.getElementById('schedule-model').value.trim();
         const sessionId = document.getElementById('schedule-session').value;
         
-        if (!name || !prompt || !cron) {
-            alert('Заполните название, промпт и cron');
+        if (!name || !prompt) {
+            alert('Заполните название и промпт');
+            return;
+        }
+        
+        if (type === 'cron' && !cron) {
+            alert('Заполните cron выражение');
+            return;
+        }
+        
+        if (type === 'once' && !runAt) {
+            alert('Выберите дату и время выполнения');
             return;
         }
         
         const data = {
             name,
             prompt,
-            cron,
+            type,
+            cron: type === 'cron' ? cron : null,
+            run_at: type === 'once' ? runAt : null,
             model: model || null,
             session_id: sessionId || null
         };

@@ -22,6 +22,8 @@ class Schedule:
     model: str | None
     session_id: str | None
     cron: str
+    type: str = "cron"
+    run_at: datetime | None = None
     enabled: bool = True
     last_run: datetime | None = None
     next_run: datetime | None = None
@@ -38,6 +40,8 @@ class Schedule:
             return None
         try:
             base = base_time or datetime.now()
+            if self.type == "once" and self.run_at:
+                return self.run_at if self.run_at > base else None
             cron = croniter(self.cron, base)
             return cron.get_next(datetime)
         except Exception:
@@ -49,6 +53,7 @@ def _schedule_to_dict(s: Schedule) -> dict[str, Any]:
     d["last_run"] = s.last_run.isoformat() if s.last_run else None
     d["next_run"] = s.next_run.isoformat() if s.next_run else None
     d["created_at"] = s.created_at.isoformat() if s.created_at else None
+    d["run_at"] = s.run_at.isoformat() if s.run_at else None
     return d
 
 
@@ -60,6 +65,10 @@ def _dict_to_schedule(d: dict[str, Any]) -> Schedule:
         d["next_run"] = datetime.fromisoformat(d["next_run"])
     if d.get("created_at"):
         d["created_at"] = datetime.fromisoformat(d["created_at"])
+    if d.get("run_at"):
+        d["run_at"] = datetime.fromisoformat(d["run_at"])
+    if "type" not in d:
+        d["type"] = "cron"
     return Schedule(**d)
 
 
@@ -112,7 +121,9 @@ class Scheduler:
         project_name: str,
         name: str,
         prompt: str,
-        cron: str,
+        cron: str | None = None,
+        type: str = "cron",
+        run_at: datetime | None = None,
         model: str | None = None,
         session_id: str | None = None,
         enabled: bool = True,
@@ -127,12 +138,14 @@ class Scheduler:
                 prompt=prompt,
                 model=model,
                 session_id=session_id,
-                cron=cron,
+                cron=cron or "0 0 * * *",
+                type=type,
+                run_at=run_at,
                 enabled=enabled,
             )
             schedules.append(schedule)
             self._save_schedules(project_name, schedules)
-            logger.info(f"[SCHEDULER] Created schedule '{name}' for project {project_name}")
+            logger.info(f"[SCHEDULER] Created schedule '{name}' (type={type}) for project {project_name}")
             return schedule
 
     def update_schedule(
@@ -142,6 +155,8 @@ class Scheduler:
         name: str | None = None,
         prompt: str | None = None,
         cron: str | None = None,
+        type: str | None = None,
+        run_at: datetime | None = None,
         model: str | None = None,
         session_id: str | None = None,
         enabled: bool | None = None,
@@ -156,6 +171,12 @@ class Scheduler:
                         s.prompt = prompt
                     if cron is not None:
                         s.cron = cron
+                        s.next_run = s._calculate_next_run()
+                    if type is not None:
+                        s.type = type
+                        s.next_run = s._calculate_next_run()
+                    if run_at is not None:
+                        s.run_at = run_at
                         s.next_run = s._calculate_next_run()
                     if model is not None:
                         s.model = model
@@ -245,7 +266,14 @@ class Scheduler:
                 session_manager.save_session(session_id)
 
             schedule.last_run = datetime.now()
-            schedule.next_run = schedule._calculate_next_run()
+            
+            if schedule.type == "once":
+                schedule.enabled = False
+                schedule.next_run = None
+                print(f"[SCHEDULER] One-time job '{schedule.name}' completed, disabled (kept in history)")
+            else:
+                schedule.next_run = schedule._calculate_next_run()
+            
             self._save_schedules(project_name, [schedule])
 
             print(f"[SCHEDULER] Completed job '{schedule.name}'")
