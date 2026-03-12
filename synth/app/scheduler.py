@@ -220,13 +220,18 @@ class Scheduler:
             from app.llm.base import Message
             
             client = create_llm_client(session, provider_name=schedule.model)
+            provider_name = client.provider.get_provider_name()
+            
+            mcp_tools = self._get_mcp_tools(session, provider_name)
             
             llm_messages = session.get_messages_for_llm()
             llm_messages.append(Message(role="user", content=schedule.prompt, usage={}, debug=None, model=None, summary_of=None, created_at=datetime.now(), disabled=False, branch_id="main", source="scheduler", status=None, tool_call_id=None, tool_use=None))
             
-            response = client.send(
+            response = self._handle_tool_calls(
+                client=client,
                 messages=llm_messages,
                 system_prompt="",
+                mcp_tools=mcp_tools,
             )
 
             if response.content:
@@ -249,6 +254,140 @@ class Scheduler:
         except Exception as e:
             logger.error(f"[SCHEDULER] Error executing job '{schedule.name}': {e}")
             return False
+
+    def _get_mcp_tools(self, session, provider_name: str) -> list | None:
+        """Get MCP tools for the session's configured MCP servers."""
+        try:
+            from app.mcp import mcp_available
+            if not mcp_available():
+                return None
+            
+            mcp_servers = session.get_mcp_servers()
+            if not mcp_servers:
+                return None
+            
+            from app.routes import run_mcp_async
+            from app.mcp import MCPManager, tools_to_provider_format
+            
+            try:
+                import asyncio
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    raise RuntimeError("Event loop already running")
+            except RuntimeError:
+                pass
+            
+            async def get_tools():
+                all_tools = []
+                for server_name in mcp_servers:
+                    try:
+                        server_tools = await MCPManager.get_tools([server_name])
+                        if server_tools:
+                            all_tools.extend(tools_to_provider_format(server_tools, provider_name))
+                    except Exception as e:
+                        print(f"[SCHEDULER] Failed to get tools from {server_name}: {e}")
+                return all_tools if all_tools else None
+            
+            return run_mcp_async(get_tools())
+        except Exception as e:
+            logger.warning(f"[SCHEDULER] Failed to get MCP tools: {e}")
+            return None
+
+    def _handle_tool_calls(self, client, messages: list, system_prompt: str, mcp_tools: list | None, max_iterations: int = 10):
+        """Рекурсивно обрабатывает tool calls от LLM."""
+        from app.llm.base import Message
+        from app.routes import run_mcp_async
+        from app.mcp import MCPManager
+        
+        iteration = 0
+        current_mcp_tools = mcp_tools
+        response = None
+        
+        while iteration < max_iterations:
+            iteration += 1
+            print(f"[SCHEDULER] Tool call iteration {iteration}")
+            
+            response = client.send(
+                messages=messages,
+                system_prompt=system_prompt,
+                tools=current_mcp_tools,
+            )
+            
+            if not response.tool_calls:
+                print(f"[SCHEDULER] No more tool calls, final response received")
+                return response
+            
+            print(f"[SCHEDULER] Processing {len(response.tool_calls)} tool call(s)")
+            
+            tool_call_results = []
+            
+            for tc in response.tool_calls:
+                tool_name = tc.get("function", {}).get("name") or tc.get("name", "")
+                tool_args = tc.get("function", {}).get("arguments") or tc.get("arguments", {}) or {}
+                
+                if isinstance(tool_args, str):
+                    import json
+                    try:
+                        tool_args = json.loads(tool_args)
+                    except:
+                        tool_args = {}
+                
+                print(f"[SCHEDULER] Calling tool: {tool_name}")
+                
+                try:
+                    async def call_tool_async():
+                        return await MCPManager.call_tool(tool_name, tool_args)
+                    
+                    result = run_mcp_async(call_tool_async())
+                    tool_result_content = result.content
+                except Exception as e:
+                    tool_result_content = f"Error: {str(e)}"
+                    print(f"[SCHEDULER] Tool error: {e}")
+                
+                tool_call_results.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id"),
+                    "content": tool_result_content,
+                })
+            
+            messages.append(Message(
+                role="assistant",
+                content=response.content or "",
+                usage={},
+                tool_use=response.tool_calls,
+                model=response.model,
+                summary_of=None,
+                created_at=datetime.now(),
+                disabled=False,
+                branch_id="main",
+                source="scheduler",
+                status=None,
+                tool_call_id=None,
+            ))
+            
+            for tc_result in tool_call_results:
+                messages.append(Message(
+                    role="tool",
+                    content=tc_result["content"],
+                    tool_call_id=tc_result.get("tool_call_id"),
+                    usage={},
+                    model=None,
+                    summary_of=None,
+                    created_at=datetime.now(),
+                    disabled=False,
+                    branch_id="main",
+                    source="scheduler",
+                    status=None,
+                    tool_use=None,
+                ))
+            
+            current_mcp_tools = None
+        
+        if response is None:
+            raise RuntimeError("No response received from LLM")
+        
+        print(f"[SCHEDULER] Max tool call iterations ({max_iterations}) reached")
+        return response
 
     def _run_scheduler(self) -> None:
         while self._running:
