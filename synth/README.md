@@ -6,9 +6,13 @@ Flask API сервер для Synth AI Agent.
 
 - REST API для взаимодействия с LLM провайдерами
 - Поддержка OpenAI, Anthropic, Ollama и кастомных OpenAI-совместимых провайдеров
+- MCP (Model Context Protocol) - подключение внешних инструментов
 - Управление сессиями с историей диалогов
-- Контекстные файлы (Markdown)
+- Контекстные файлы (Markdown), включая встроенные COMPANY.md, ABOUT.md, SOUL.md
 - Оптимизация контекста: суммаризация, скользящее окно, sticky notes
+- Scheduled tasks - запланированные задачи (cron/one-time)
+- Real-time subagent progress через SSE
+- Token limit handling (warning/abort)
 - Ветки и чекпоинты
 - Админ-панель
 
@@ -73,6 +77,29 @@ python run.py
 | POST | `/api/sessions/<id>/context-settings` | Сохранить настройки |
 | POST | `/api/sessions/<id>/summarize` | Запустить суммаризацию |
 
+### MCP
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/mcp/servers` | Список MCP серверов |
+| GET | `/api/mcp/servers/<name>/tools` | Инструменты сервера |
+| GET | `/api/sessions/<id>/mcp` | MCP серверы сессии |
+| PUT | `/api/sessions/<id>/mcp` | Обновить MCP серверы |
+| POST | `/api/sessions/<id>/mcp` | Добавить MCP сервер |
+| DELETE | `/api/sessions/<id>/mcp/<name>` | Удалить MCP сервер |
+| DELETE | `/api/sessions/<id>/mcp` | Очистить MCP серверы |
+
+### Scheduled Tasks
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/schedules` | Список расписаний |
+| POST | `/api/schedules` | Создать расписание |
+| GET | `/api/schedules/<id>` | Получить расписание |
+| PUT | `/api/schedules/<id>` | Обновить расписание |
+| DELETE | `/api/schedules/<id>` | Удалить расписание |
+| POST | `/api/schedules/<id>/enable` | Включить расписание |
+| POST | `/api/schedules/<id>/disable` | Выключить расписание |
+| GET | `/api/schedules/events` | SSE уведомления |
+
 ### Checkpoints
 | Метод | Путь | Описание |
 |-------|------|----------|
@@ -117,6 +144,22 @@ python run.py
 ## Конфигурация
 
 См. `config.example.yaml` для доступных опций.
+
+### MCP Configuration
+
+```yaml
+mcp:
+  servers:
+    filesystem:
+      type: stdio
+      command: "python"
+      args: ["/path/to/mcp-filesystem/server.py"]
+      env:
+        ALLOWED_DIRS: "/home/user"
+    brave-search:
+      type: sse
+      url: "http://localhost:3000/sse"
+```
 
 ## Формат сессии
 

@@ -32,8 +32,11 @@ python main.py chat "Привет" -s my-session
 
 # Управление сессиями
 python main.py session list
-python main.py session reset
+python main.py session new my-session
+python main.py session reset -s my-session
 python main.py session delete my-session
+python main.py session rename my-session new-name
+python main.py session copy my-session
 
 # Импорт/экспорт
 python main.py session export
