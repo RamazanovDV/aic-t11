@@ -996,7 +996,8 @@
                 const models = data.models || [];
                 
                 // Store fetched models for later save
-                lastFetchedModels[type] = models;
+                const providerName = document.getElementById('provider-name').value.trim() || type;
+                lastFetchedModels[providerName] = models;
                 
                 if (models.length === 0) {
                     alert('Модели не найдены. Проверьте URL и API Key.');
@@ -1051,7 +1052,7 @@
         document.getElementById('btn-delete-provider').style.display = 'inline-block';
         document.getElementById('provider-name').disabled = true;
         document.getElementById('provider-modal').style.display = 'flex';
-        loadModelSelect(provider.type || name);
+        loadModelSelect(name);
     }
 
     function closeModal() {
@@ -1079,8 +1080,10 @@
         const oldName = document.getElementById('edit-provider-name').value;
         const name = document.getElementById('provider-name').value.trim();
         const type = document.getElementById('provider-type').value;
+        const url = document.getElementById('provider-url').value.trim();
         const apiKey = document.getElementById('provider-api-key').value;
         const timeout = document.getElementById('provider-timeout').value;
+        const defaultModel = document.getElementById('provider-default-model').value;
         
         if (!name) {
             alert('Введите название провайдера');

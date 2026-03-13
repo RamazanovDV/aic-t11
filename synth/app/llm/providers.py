@@ -108,6 +108,7 @@ class GenericOpenAIProvider(BaseProvider):
         data = response.json()
         message_data = data["choices"][0]["message"]
         content = message_data.get("content", "")
+        reasoning = message_data.get("reasoning_content", "")
         
         tool_calls = None
         if "tool_calls" in message_data:
@@ -125,6 +126,7 @@ class GenericOpenAIProvider(BaseProvider):
             debug_request=debug_request,
             debug_response=debug_response,
             tool_calls=tool_calls,
+            reasoning=reasoning if reasoning else None,
         )
 
     def list_models(self) -> list[str]:
@@ -196,6 +198,7 @@ class GenericOpenAIProvider(BaseProvider):
             raise
 
         full_content = ""
+        full_reasoning = ""
         total_usage = {}
 
         for line in response.iter_lines():
@@ -209,16 +212,29 @@ class GenericOpenAIProvider(BaseProvider):
                         data = json.loads(data_str)
                         delta = data.get("choices", [{}])[0].get("delta", {})
                         content = delta.get("content", "")
+                        reasoning = delta.get("reasoning_content", "")
                         if content:
                             full_content += content
-                            yield LLMChunk(content=full_content, is_final=False)
+                        if reasoning:
+                            full_reasoning += reasoning
+                        if content or reasoning:
+                            yield LLMChunk(
+                                content=full_content,
+                                is_final=False,
+                                reasoning=full_reasoning if full_reasoning else None
+                            )
 
                         if "usage" in data:
                             total_usage = extract_usage(data)
                     except json.JSONDecodeError:
                         continue
 
-        yield LLMChunk(content=full_content, is_final=True, usage=total_usage)
+        yield LLMChunk(
+            content=full_content,
+            is_final=True,
+            usage=total_usage,
+            reasoning=full_reasoning if full_reasoning else None
+        )
 
 
 class OpenAIProvider(GenericOpenAIProvider):
@@ -413,10 +429,13 @@ class AnthropicProvider(BaseProvider):
 
         data = response.json()
         content = ""
+        reasoning = ""
         tool_calls = []
         for block in data.get("content", []):
             if block.get("type") == "text":
                 content = block.get("text", "")
+            elif block.get("type") == "thinking":
+                reasoning = block.get("thinking", "")
             elif block.get("type") == "tool_use":
                 tool_call = {
                     "id": block.get("id"),
@@ -434,15 +453,16 @@ class AnthropicProvider(BaseProvider):
         usage = extract_usage(data)
 
         if debug:
-            debug_response = final_data
+            debug_response = data
 
         return LLMResponse(
-            content=full_content,
+            content=content,
             model=self.model,
-            usage=total_usage,
+            usage=usage,
             debug_request=debug_request,
             debug_response=debug_response,
             tool_calls=tool_calls,
+            reasoning=reasoning if reasoning else None,
         )
 
     def list_models(self) -> list[str]:
@@ -562,6 +582,7 @@ class AnthropicProvider(BaseProvider):
             raise
 
         full_content = ""
+        full_reasoning = ""
         total_usage = {}
         tool_calls = []
         current_tool = None
@@ -592,11 +613,23 @@ class AnthropicProvider(BaseProvider):
                             delta = data.get("delta", {})
                             
                             if delta.get("type") == "text_delta":
-                                # Skip text deltas inside tool_use blocks - they contain tool call markers, not user-visible content
                                 if current_tool is None:
                                     content = delta.get("text", "")
                                     full_content += content
-                                    yield LLMChunk(content=full_content, is_final=False)
+                                    yield LLMChunk(
+                                        content=full_content,
+                                        is_final=False,
+                                        reasoning=full_reasoning if full_reasoning else None
+                                    )
+                            
+                            elif delta.get("type") == "thinking_delta":
+                                thinking = delta.get("thinking", "")
+                                full_reasoning += thinking
+                                yield LLMChunk(
+                                    content=full_content,
+                                    is_final=False,
+                                    reasoning=full_reasoning if full_reasoning else None
+                                )
                             
                             elif delta.get("type") == "input_json_delta":
                                 partial_json = delta.get("partial_json", "")
@@ -618,7 +651,13 @@ class AnthropicProvider(BaseProvider):
                     except json.JSONDecodeError:
                         continue
 
-        yield LLMChunk(content=full_content, is_final=True, usage=total_usage, tool_calls=tool_calls if tool_calls else None)
+        yield LLMChunk(
+            content=full_content,
+            is_final=True,
+            usage=total_usage,
+            tool_calls=tool_calls if tool_calls else None,
+            reasoning=full_reasoning if full_reasoning else None
+        )
 
 
 class OllamaProvider(BaseProvider):
@@ -842,6 +881,7 @@ class OllamaProvider(BaseProvider):
             raise
 
         full_content = ""
+        full_thinking = ""
         total_usage = {}
         tool_calls = None
 
@@ -856,11 +896,20 @@ class OllamaProvider(BaseProvider):
                     if data.get("done"):
                         break
                     
-                    if "message" in data and "content" in data["message"]:
-                        delta = data["message"].get("content", "")
-                        if delta:
-                            full_content += delta
-                            yield LLMChunk(content=full_content, is_final=False)
+                    if "message" in data:
+                        message_data = data["message"]
+                        content_delta = message_data.get("content", "")
+                        thinking_delta = message_data.get("thinking", "")
+                        if content_delta:
+                            full_content += content_delta
+                        if thinking_delta:
+                            full_thinking += thinking_delta
+                        if content_delta or thinking_delta:
+                            yield LLMChunk(
+                                content=full_content,
+                                is_final=False,
+                                reasoning=full_thinking if full_thinking else None
+                            )
                     
                     if "message" in data and data["message"].get("tool_calls"):
                         tool_calls = data["message"]["tool_calls"]
@@ -877,7 +926,13 @@ class OllamaProvider(BaseProvider):
         if not total_usage and full_content:
             total_usage = estimate_tokens(full_content)
 
-        yield LLMChunk(content=full_content, is_final=True, usage=total_usage, tool_calls=tool_calls)
+        yield LLMChunk(
+            content=full_content,
+            is_final=True,
+            usage=total_usage,
+            tool_calls=tool_calls,
+            reasoning=full_thinking if full_thinking else None
+        )
 
     def list_models(self) -> list[str]:
         try:

@@ -13,6 +13,7 @@ from app.llm.base import Message
 from app.llm.providers import ContextLengthExceededError
 from app.llm.client import PromptBuilder, LLMClient, create_llm_client, create_prompt_builder
 from app.session import session_manager
+from app.request_tracker import RequestTracker
 from app import summarizer
 from app import status_validator
 from app import project_manager
@@ -1176,10 +1177,13 @@ def chat():
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
 
+    request_id = RequestTracker.create_request()
+
     if data.get("tsm_mode"):
         try:
             tsm.set_tsm_mode(session, data["tsm_mode"])
         except ValueError as e:
+            RequestTracker.error(request_id, str(e))
             return jsonify({"error": f"Invalid tsm_mode: {str(e)}"}), 400
     
     is_first_message = session.get_active_message_count() == 0
@@ -1245,6 +1249,7 @@ def chat():
                 session.add_assistant_message(message_for_user, response.usage if response else {}, debug=orchestrator_debug if debug_mode else None, model=response.model if response else provider.model)
             session.add_error_message(f"[Ошибка статуса] {status_error}", debug=orchestrator_debug if debug_mode else None, model=provider.model)
             session_manager.save_session(session_id)
+            RequestTracker.error(request_id, status_error)
             result = {
                 "error": status_error,
                 "model_error": status_error,
@@ -1256,6 +1261,7 @@ def chat():
     except ContextLengthExceededError as e:
         session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
         session_manager.save_session(session_id)
+        RequestTracker.error(request_id, str(e))
         result = {"error": str(e), "error_type": "context_length_exceeded", "model": provider.model}
         if debug_mode and e.debug_response:
             result["debug"] = {"response": e.debug_response}
@@ -1263,6 +1269,7 @@ def chat():
     except Exception as e:
         session.add_error_message(f"[Ошибка] {str(e)}", None, model=provider.model)
         session_manager.save_session(session_id)
+        RequestTracker.error(request_id, str(e))
         result = {"error": f"LLM error: {str(e)}", "model": provider.model}
         return jsonify(result), 500
 
@@ -1280,13 +1287,19 @@ def chat():
             debug_info['subtasks'] = session.status.get('subtasks', [])
         if mcp_calls:
             debug_info['mcp_calls'] = mcp_calls
+        if response.reasoning:
+            debug_info['reasoning'] = response.reasoning
 
-    session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls)
+    message_index = len(session.messages)
+    session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls, reasoning=response.reasoning)
     
     print(f"[STORAGE] Saving session after assistant message, messages count: {len(session.messages)}")
     session_manager.save_session(session_id)
 
     disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
+
+    message_id = session.messages[message_index].id if message_index < len(session.messages) else None
+    RequestTracker.complete(request_id, message_id)
 
     result = {
         "message": message_for_user,
@@ -1295,12 +1308,50 @@ def chat():
         "usage": response.usage,
         "total_tokens": session.total_tokens,
         "disabled_indices": disabled_indices,
+        "request_id": request_id,
+        "message_id": message_id,
+        "reasoning": response.reasoning,
     }
     
     if debug_info:
         result["debug"] = debug_info
     
     return jsonify(result)
+
+
+@api_bp.route("/chat/status/<request_id>", methods=["GET"])
+@require_user
+def chat_status(request_id: str):
+    status = RequestTracker.get_status(request_id)
+    if not status:
+        return jsonify({"error": "Request not found"}), 404
+    
+    return jsonify({
+        "status": status.status,
+        "message_id": status.message_id,
+        "error": status.error,
+    })
+
+
+@api_bp.route("/chat/message/<message_id>", methods=["GET"])
+@require_user
+def get_message(message_id: str):
+    session_id = get_session_id()
+    session = session_manager.get_session(session_id)
+    
+    for msg in session.messages:
+        if msg.id == message_id:
+            return jsonify({
+                "role": msg.role,
+                "content": msg.content,
+                "reasoning": msg.reasoning,
+                "usage": msg.usage,
+                "model": msg.model,
+                "status": msg.status,
+                "id": msg.id,
+            })
+    
+    return jsonify({"error": "Message not found"}), 404
 
 
 @api_bp.route("/chat/stream", methods=["POST"])
@@ -1625,6 +1676,7 @@ def chat_stream():
             return
 
         full_content = ""
+        full_reasoning = ""
         total_usage = {}
         debug_request = None
         debug_response = None
@@ -1717,15 +1769,15 @@ def chat_stream():
                         
                         for new_chunk in provider.stream_chat(tool_messages, None, debug=debug_mode, tools=None):
                             full_content = new_chunk.content
+                            full_reasoning = new_chunk.reasoning if new_chunk.reasoning else full_reasoning
                             print(f"[MCP] Stream after tool: content='{full_content[:100] if full_content else 'EMPTY'}', is_final={new_chunk.is_final}, tool_calls={new_chunk.tool_calls}")
                             if new_chunk.is_final:
                                 total_usage = new_chunk.usage
                                 debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
-                                # Save to session immediately to avoid race condition with UI
-                                session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message)
+                                session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning)
                                 session_manager.save_session(session_id)
                                 preliminary_saved = True
-                            yield f"data: {json.dumps({'content': full_content, 'done': new_chunk.is_final})}\n\n"
+                            yield f"data: {json.dumps({'content': full_content, 'reasoning': full_reasoning, 'done': new_chunk.is_final})}\n\n"
                             if new_chunk.is_final:
                                 break
                         
@@ -1736,22 +1788,26 @@ def chat_stream():
                 
                 if chunk.is_final:
                     total_usage = chunk.usage
+                    full_reasoning = chunk.reasoning if chunk.reasoning else full_reasoning
                     print(f"[STREAM] Usage: {total_usage}")
                     print(f"[STREAM] Model: {provider.model}")
                     debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
                     # Save to session immediately to avoid race condition with UI
-                    session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message)
+                    session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning)
                     session_manager.save_session(session_id)
                     preliminary_saved = True
                     break
 
                 full_content = chunk.content
-                yield f"data: {json.dumps({'content': full_content, 'done': False})}\n\n"
+                full_reasoning = chunk.reasoning if chunk.reasoning else full_reasoning
+                yield f"data: {json.dumps({'content': full_content, 'reasoning': full_reasoning, 'done': False})}\n\n"
 
             if not full_content:
                 raise Exception("Empty response from provider")
 
             debug_info = {"request": debug_request, "response": debug_response, "raw_model_response": full_content} if debug_mode else None
+            if debug_info and full_reasoning:
+                debug_info['reasoning'] = full_reasoning
             
             content_for_user = full_content
             status_error = None
@@ -1964,6 +2020,8 @@ def get_session(session_id: str):
             "disabled": m.disabled,
             "source": m.source,
             "status": m.status,
+            "reasoning": m.reasoning,
+            "id": m.id,
         }
         for m in current_branch_messages
     ]
@@ -2701,6 +2759,9 @@ def fetch_models_from_providers():
                 results[provider_name] = {"status": "not_supported", "count": 0}
         except Exception as e:
             results[provider_name] = {"status": "error", "error": str(e)}
+    
+    config.save()
+    config.reload()
     
     return jsonify({
         "status": "completed",
