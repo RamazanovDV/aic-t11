@@ -1649,11 +1649,15 @@ def chat_stream():
             llm_msgs = [Message(role=m["role"], content=m["content"], usage={}) for m in formatted_messages]
             
             tool_calls_handled = False
+            tool_use_for_message = None  # Track tool_use for saving to session
+            preliminary_saved = False  # Track if we've already saved to avoid duplicate messages
+            
             if mcp_tools:
                 print(f"[MCP] Stream: Sending {len(mcp_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in mcp_tools]}")
             for chunk in provider.stream_chat(llm_msgs, None, debug=debug_mode, tools=mcp_tools):
                 if chunk.tool_calls and not tool_calls_handled:
                     tool_calls_handled = True
+                    tool_use_for_message = chunk.tool_calls  # Save for later
                     print(f"[MCP] Stream: Detected {len(chunk.tool_calls)} tool call(s)")
                     print(f"[MCP] Stream: Tool calls: {json.dumps(chunk.tool_calls, ensure_ascii=False)[:500]}")
                     try:
@@ -1714,10 +1718,15 @@ def chat_stream():
                         for new_chunk in provider.stream_chat(tool_messages, None, debug=debug_mode, tools=None):
                             full_content = new_chunk.content
                             print(f"[MCP] Stream after tool: content='{full_content[:100] if full_content else 'EMPTY'}', is_final={new_chunk.is_final}, tool_calls={new_chunk.tool_calls}")
-                            yield f"data: {json.dumps({'content': full_content, 'done': new_chunk.is_final})}\n\n"
                             if new_chunk.is_final:
                                 total_usage = new_chunk.usage
                                 debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
+                                # Save to session immediately to avoid race condition with UI
+                                session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message)
+                                session_manager.save_session(session_id)
+                                preliminary_saved = True
+                            yield f"data: {json.dumps({'content': full_content, 'done': new_chunk.is_final})}\n\n"
+                            if new_chunk.is_final:
                                 break
                         
                         break
@@ -1730,6 +1739,10 @@ def chat_stream():
                     print(f"[STREAM] Usage: {total_usage}")
                     print(f"[STREAM] Model: {provider.model}")
                     debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
+                    # Save to session immediately to avoid race condition with UI
+                    session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message)
+                    session_manager.save_session(session_id)
+                    preliminary_saved = True
                     break
 
                 full_content = chunk.content
@@ -1872,8 +1885,17 @@ def chat_stream():
                 if debug_info is None:
                     debug_info = {}
                 debug_info['mcp_calls'] = mcp_calls
-                
-            session.add_assistant_message(content_for_user, total_usage, debug=debug_info, model=provider.model)
+            
+            # Update or add assistant message
+            if preliminary_saved:
+                # Update the last message with full debug info
+                last_msg = session.messages[-1]
+                last_msg.content = content_for_user
+                last_msg.usage = total_usage
+                last_msg.debug = debug_info
+                last_msg.tool_use = tool_use_for_message
+            else:
+                session.add_assistant_message(content_for_user, total_usage, debug=debug_info, model=provider.model, tool_use=tool_use_for_message)
 
             session_manager.save_session(session_id)
 
