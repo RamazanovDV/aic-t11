@@ -110,6 +110,11 @@ class GenericOpenAIProvider(BaseProvider):
         content = message_data.get("content", "")
         reasoning = message_data.get("reasoning_content", "")
         
+        # Also check for thinking field (Ollama format)
+        thinking = message_data.get("thinking", "")
+        if not reasoning and thinking:
+            reasoning = thinking
+        
         tool_calls = None
         if "tool_calls" in message_data:
             tool_calls = message_data["tool_calls"]
@@ -288,7 +293,9 @@ class OpenAIProvider(GenericOpenAIProvider):
             raise
 
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
+        message_data = data["choices"][0]["message"]
+        content = message_data.get("content", "")
+        reasoning = message_data.get("reasoning_content", "")
         
         usage = {}
         if "usage" in data:
@@ -307,6 +314,7 @@ class OpenAIProvider(GenericOpenAIProvider):
             usage=usage,
             debug_request=debug_request,
             debug_response=debug_response,
+            reasoning=reasoning if reasoning else None,
         )
 
     def get_provider_name(self) -> str:
@@ -764,6 +772,7 @@ class OllamaProvider(BaseProvider):
         
         lines = response_text.split('\n')
         full_content = ""
+        full_thinking = ""
         final_data = None
         tool_calls = None
         total_usage = {}
@@ -775,8 +784,11 @@ class OllamaProvider(BaseProvider):
                 data = json.loads(line)
                 final_data = data
                 
-                if "message" in data and "content" in data["message"]:
-                    full_content += data["message"]["content"] or ""
+                if "message" in data:
+                    full_content += data["message"].get("content", "") or ""
+                    thinking = data["message"].get("thinking", "")
+                    if thinking:
+                        full_thinking = thinking
                 
                 if "message" in data and "tool_calls" in data["message"]:
                     tool_calls = data["message"]["tool_calls"]
@@ -809,6 +821,7 @@ class OllamaProvider(BaseProvider):
             debug_request=debug_request,
             debug_response=debug_response,
             tool_calls=tool_calls,
+            reasoning=full_thinking if full_thinking else None,
         )
 
     def stream_chat(self, messages, system_prompt=None, debug=False, tools=None):

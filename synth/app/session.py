@@ -131,8 +131,8 @@ class Session:
             "total_tokens": self.total_tokens,
         }
 
-    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None, tool_use: list[dict] | None = None) -> None:
-        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch, status=self.status.copy() if self.status else None, tool_use=tool_use)
+    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None, tool_use: list[dict] | None = None, reasoning: str | None = None) -> None:
+        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch, status=self.status.copy() if self.status else None, tool_use=tool_use, reasoning=reasoning)
         self.messages.append(msg)
         if usage:
             self.total_tokens += usage.get("total_tokens", 0)
@@ -829,6 +829,7 @@ class SessionManager:
                     if m.get("role") == "assistant":
                         content = _clean_message_content(content)
                     messages.append(Message(
+                        id=m.get("id"),
                         role=m["role"],
                         content=content,
                         usage=m.get("usage", {}),
@@ -840,6 +841,9 @@ class SessionManager:
                         branch_id=m.get("branch_id", "main"),
                         source=m.get("source"),
                         status=m.get("status"),
+                        reasoning=m.get("reasoning"),
+                        tool_call_id=m.get("tool_call_id"),
+                        tool_use=m.get("tool_use"),
                     ))
 
                 branches = [
@@ -911,6 +915,7 @@ class SessionManager:
                     if m.get("role") == "assistant":
                         content = _clean_message_content(content)
                     messages.append(Message(
+                        id=m.get("id"),
                         role=m["role"],
                         content=content,
                         usage=m.get("usage", {}),
@@ -922,6 +927,7 @@ class SessionManager:
                         branch_id=m.get("branch_id", "main"),
                         source=m.get("source"),
                         status=m.get("status"),
+                        reasoning=m.get("reasoning"),
                         tool_call_id=m.get("tool_call_id"),
                         tool_use=m.get("tool_use"),
                     ))
@@ -996,6 +1002,7 @@ class SessionManager:
                     if m.get("role") == "assistant":
                         content = _clean_message_content(content)
                     messages.append(Message(
+                        id=m.get("id"),
                         role=m["role"],
                         content=content,
                         usage=m.get("usage", {}),
@@ -1007,6 +1014,7 @@ class SessionManager:
                         branch_id=m.get("branch_id", "main"),
                         source=m.get("source"),
                         status=m.get("status"),
+                        reasoning=m.get("reasoning"),
                         tool_call_id=m.get("tool_call_id"),
                         tool_use=m.get("tool_use"),
                     ))

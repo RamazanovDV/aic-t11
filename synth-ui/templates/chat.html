@@ -22,6 +22,7 @@
             <button class="debug-tab" data-tab="response" onclick="switchDebugTab('response')">Response</button>
             <button class="debug-tab" data-tab="subagents" onclick="switchDebugTab('subagents')">Subagents</button>
             <button class="debug-tab" data-tab="status" onclick="switchDebugTab('status')">Status</button>
+            <button class="debug-tab" data-tab="reasoning" onclick="switchDebugTab('reasoning')">Reasoning</button>
             <button class="debug-tab" data-tab="raw" onclick="switchDebugTab('raw')">Raw</button>
             <button class="debug-tab" data-tab="session" onclick="switchDebugTab('session')">Session</button>
             <button class="debug-tab" data-tab="mcp" onclick="switchDebugTab('mcp')">MCP</button>
@@ -888,7 +889,7 @@
                     else if (s.task_name && s.task_name !== 'conversation') statusClass = 'state-active';
                 }
                 
-                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass);
+                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass, msg.reasoning || null);
                 panel.messages[idx]._renderIndex = idx;
             });
             
@@ -909,7 +910,7 @@
         }
     }
 
-    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null) {
+    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null) {
         const panel = panels[panelIndex];
         const container = panel.messagesContainer;
         if (!container) return;
@@ -931,6 +932,20 @@
             contentHtml = `<div class="message-content">${escapeHtml(content)}</div>`;
         } else {
             contentHtml = `<div class="message-content">${escapeHtml(content)}</div>`;
+        }
+
+        let thinkingBlockHtml = '';
+        if (role === 'assistant' && reasoning) {
+            const escapedReasoning = escapeHtml(reasoning);
+            thinkingBlockHtml = `
+                <div class="thinking-block">
+                    <div class="thinking-header" onclick="toggleThinking(this)">
+                        <span class="thinking-toggle"></span>
+                        <span>🤔 Размышления</span>
+                    </div>
+                    <div class="thinking-content" style="display:none">${escapedReasoning}</div>
+                </div>
+            `;
         }
         
         let tokensHtml = '';
@@ -962,7 +977,7 @@
             sourceHtml = `<div class="message-tokens" style="cursor: pointer;" onclick="openProfileModal('${username}')">${source}</div>`;
         }
         
-        let html = contentHtml;
+        let html = thinkingBlockHtml + contentHtml;
         if (tokensHtml) {
             html += tokensHtml;
         }
@@ -1193,8 +1208,83 @@
         }
     }
 
+    const POLLING_INTERVAL = 5000;
+    const WARNING_TIME = 120000;
+    const FINAL_WARNING_TIME = 300000;
+
     async function sendRegularToPanel(panel, message, provider, model, sessionId, panelIndex) {
         const user = getUser();
+        let thinkingIndicator = null;
+
+        async function showThinkingIndicator() {
+            const panelEl = document.querySelector(`.panel[data-panel="${panelIndex}"]`);
+            if (!panelEl) return;
+            thinkingIndicator = document.createElement('div');
+            thinkingIndicator.className = 'thinking-indicator';
+            thinkingIndicator.textContent = 'Модель думает';
+            panelEl.appendChild(thinkingIndicator);
+        }
+
+        function hideThinkingIndicator() {
+            if (thinkingIndicator && thinkingIndicator.parentNode) {
+                thinkingIndicator.parentNode.removeChild(thinkingIndicator);
+                thinkingIndicator = null;
+            }
+        }
+
+        async function pollForCompletion(requestId) {
+            const startTime = Date.now();
+            let warningShown = false;
+            let finalWarningShown = false;
+
+            await showThinkingIndicator();
+
+            while (true) {
+                await new Promise(resolve => setTimeout(resolve, POLLING_INTERVAL));
+
+                const statusResponse = await fetch(`/api/chat/status/${requestId}`, {
+                    headers: {
+                        'X-Session-Id': sessionId,
+                        'X-User-Id': user ? user.id : '',
+                    }
+                });
+
+                if (!statusResponse.ok) {
+                    continue;
+                }
+
+                const status = await statusResponse.json();
+                const elapsed = Date.now() - startTime;
+
+                if (elapsed > WARNING_TIME && !warningShown) {
+                    addMessageToPanel(panelIndex, 'Запрос все еще выполняется...', 'note', null, null, null, false, -1, null, null, null);
+                    warningShown = true;
+                }
+                if (elapsed > FINAL_WARNING_TIME && !finalWarningShown) {
+                    addMessageToPanel(panelIndex, 'Модель все еще думает. Подождите или нажмите Stop для прерывания.', 'note', null, null, null, false, -1, null, null, null);
+                    finalWarningShown = true;
+                }
+
+                if (status.status === 'completed' && status.message_id) {
+                    hideThinkingIndicator();
+                    const msgResponse = await fetch(`/api/chat/message/${status.message_id}`, {
+                        headers: {
+                            'X-Session-Id': sessionId,
+                            'X-User-Id': user ? user.id : '',
+                        }
+                    });
+                    if (msgResponse.ok) {
+                        return await msgResponse.json();
+                    }
+                }
+
+                if (status.status === 'error') {
+                    hideThinkingIndicator();
+                    return { error: status.error };
+                }
+            }
+        }
+
         try {
             const response = await fetch('/api/chat', {
                 method: 'POST',
@@ -1215,6 +1305,15 @@
 
             const data = await response.json();
 
+            if (data.request_id && data.message_id === null) {
+                const pollResult = await pollForCompletion(data.request_id);
+                if (pollResult.error) {
+                    addMessageToPanel(panelIndex, 'Ошибка: ' + pollResult.error, 'error', null, null, data.model || null);
+                    return;
+                }
+                Object.assign(data, pollResult);
+            }
+
             if (data.error) {
                 const errorDebug = (data.error_type === 'context_length_exceeded' && data.debug) ? data.debug : null;
                 addMessageToPanel(panelIndex, 'Ошибка: ' + data.error, 'error', errorDebug, null, data.model || null);
@@ -1222,7 +1321,7 @@
                 const usage = data.usage || null;
                 const msgIndex = panel.messages.length;
                 const statusClass = panel.currentStatusClass || 'state-free';
-                addMessageToPanel(panelIndex, data.message, 'assistant', data.debug || null, usage, data.model || null, false, msgIndex, null, statusClass);
+                addMessageToPanel(panelIndex, data.message, 'assistant', data.debug || null, usage, data.model || null, false, msgIndex, null, statusClass, data.reasoning || null);
                 if (data.usage) {
                     panel.totalInput += data.usage.input_tokens || 0;
                     panel.totalOutput += data.usage.output_tokens || 0;
@@ -1238,6 +1337,7 @@
                 await loadPanelMessages(panelIndex);
             }
         } catch (err) {
+            hideThinkingIndicator();
             if (err.name === 'AbortError') {
                 addMessageToPanel(panelIndex, 'Запрос прерван', 'error');
                 return;
@@ -1272,6 +1372,7 @@
             const decoder = new TextDecoder();
             let buffer = '';
             let fullContent = '';
+            let fullReasoning = '';
 
             const rowDiv = document.createElement('div');
             rowDiv.className = 'message-row message-assistant';
@@ -1282,6 +1383,9 @@
             const messageContent = document.createElement('div');
             messageContent.className = 'message-content';
             messageContent.innerHTML = '';
+            
+            let thinkingBlock = null;
+            
             div.appendChild(messageContent);
             rowDiv.appendChild(div);
             
@@ -1416,11 +1520,32 @@
                             }
 
                             if (data.content !== undefined) {
-                                // Каждый чанк содержит полный контент до этого момента
                                 fullContent = data.content;
-                                // Показываем raw text при стриминге (экранируем HTML)
                                 messageContent.textContent = fullContent;
                                 panel.messagesContainer.scrollTop = panel.messagesContainer.scrollHeight;
+                            }
+
+                            if (data.reasoning !== undefined) {
+                                fullReasoning = data.reasoning;
+                                if (fullReasoning) {
+                                    if (!thinkingBlock) {
+                                        thinkingBlock = document.createElement('div');
+                                        thinkingBlock.className = 'thinking-block';
+                                        thinkingBlock.innerHTML = `
+                                            <div class="thinking-header" onclick="toggleThinking(this)">
+                                                <span class="thinking-toggle"></span>
+                                                <span>🤔 Размышления</span>
+                                            </div>
+                                            <div class="thinking-content" style="display:none">${escapeHtml(fullReasoning)}</div>
+                                        `;
+                                        div.insertBefore(thinkingBlock, messageContent);
+                                    } else {
+                                        const thinkingContent = thinkingBlock.querySelector('.thinking-content');
+                                        if (thinkingContent) {
+                                            thinkingContent.textContent = fullReasoning;
+                                        }
+                                    }
+                                }
                             }
 
                             if (data.done) {
@@ -1441,7 +1566,7 @@
                                 }
                                 // Если уже есть контент от промежуточных событий, не перезаписываем
                                 if (fullContent && fullContent.trim() && !messageContent.textContent) {
-                                    // Сохраняем существующие элементы подзадач
+                                    // Сохраняем существующие элементы подзадач и thinking block
                                     const existingSubtaskProgress = messageContent.querySelector('.subtask-progress');
                                     const existingSubtaskList = messageContent.querySelector('.subtask-list');
                                     messageContent.innerHTML = marked.parse(fullContent.trim());
@@ -1452,6 +1577,12 @@
                                     if (existingSubtaskList) {
                                         messageContent.appendChild(existingSubtaskList);
                                     }
+                                    // Восстанавливаем thinking block
+                                    if (thinkingBlock && fullReasoning) {
+                                        div.insertBefore(thinkingBlock, messageContent);
+                                    }
+                                } else if (thinkingBlock && fullReasoning && !div.querySelector('.thinking-block')) {
+                                    div.insertBefore(thinkingBlock, messageContent);
                                 }
                                 let modelName = null;
                                 if (data.debug && data.debug.response && data.debug.response.model) {
@@ -1572,6 +1703,19 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML.replace(/\n/g, '<br>').replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+    }
+
+    function toggleThinking(header) {
+        header.classList.toggle('expanded');
+        const toggle = header.querySelector('.thinking-toggle');
+        const content = header.nextElementSibling;
+        if (header.classList.contains('expanded')) {
+            toggle.classList.add('expanded');
+            content.style.display = 'block';
+        } else {
+            toggle.classList.remove('expanded');
+            content.style.display = 'none';
+        }
     }
 
     function escapeAttr(text) {
@@ -1712,6 +1856,12 @@
             rawTab.style.display = hasRaw ? '' : 'none';
         }
         
+        const hasReasoning = debugData && debugData.reasoning;
+        const reasoningTab = document.querySelector('.debug-tab[data-tab="reasoning"]');
+        if (reasoningTab) {
+            reasoningTab.style.display = hasReasoning ? '' : 'none';
+        }
+        
         // For orchestrator mode - show all debug data
         if (hasOrchestratorRequest || hasOrchestratorResponse || hasSubagents) {
             document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
@@ -1724,6 +1874,8 @@
                 } else if (t.dataset.tab === 'subagents') {
                     t.style.display = '';
                 } else if (t.dataset.tab === 'status' && hasStatus) {
+                    t.style.display = '';
+                } else if (t.dataset.tab === 'reasoning' && hasReasoning) {
                     t.style.display = '';
                 } else if (t.dataset.tab === 'raw' && hasRaw) {
                     t.style.display = '';
@@ -1754,6 +1906,9 @@
             });
             document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
+            if (hasReasoning) {
+                document.querySelector('.debug-tab[data-tab="reasoning"]').style.display = '';
+            }
             if (hasMcpCalls) {
                 document.querySelector('.debug-tab[data-tab="mcp"]').style.display = '';
             }
@@ -1763,6 +1918,9 @@
             document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
             document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
+            if (hasReasoning) {
+                document.querySelector('.debug-tab[data-tab="reasoning"]').style.display = '';
+            }
             if (hasMcpCalls) {
                 document.querySelector('.debug-tab[data-tab="mcp"]').style.display = '';
             }
@@ -1771,6 +1929,11 @@
             document.getElementById('debug-json').textContent = JSON.stringify(debugData.mcp_calls, null, 2);
             document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
             document.querySelector('.debug-tab[data-tab="mcp"]').style.display = '';
+        } else if (hasReasoning) {
+            // Show only reasoning
+            document.getElementById('debug-json').textContent = JSON.stringify({reasoning: debugData.reasoning}, null, 2);
+            document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
+            document.querySelector('.debug-tab[data-tab="reasoning"]').style.display = '';
         } else {
             // Standard debug for LLM calls
             document.querySelectorAll('.debug-tab').forEach(t => {
@@ -1778,6 +1941,9 @@
             });
             document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
+            if (hasReasoning) {
+                document.querySelector('.debug-tab[data-tab="reasoning"]').style.display = '';
+            }
             
             if (hasResponse && !hasRequest) {
                 document.getElementById('debug-json').textContent = JSON.stringify(debugData.response, null, 2);
@@ -1829,6 +1995,8 @@
                 return;
             } else if (tab === 'mcp') {
                 data = currentDebugData.mcp_calls || [];
+            } else if (tab === 'reasoning') {
+                data = currentDebugData.reasoning ? {reasoning: currentDebugData.reasoning} : null;
             }
             document.getElementById('debug-json').textContent = JSON.stringify(data, null, 2);
         }

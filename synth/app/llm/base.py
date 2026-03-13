@@ -2,12 +2,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Generator
+import uuid
 
 
 @dataclass
 class Message:
-    role: str
-    content: str
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    role: str = ""
+    content: str = ""
     usage: dict[str, int] = field(default_factory=dict)
     debug: dict | None = None
     model: str | None = None
@@ -19,6 +21,7 @@ class Message:
     status: dict | None = None
     tool_call_id: str | None = None
     tool_use: list[dict] | None = None
+    reasoning: str | None = None
 
 
 @dataclass
@@ -29,6 +32,7 @@ class LLMResponse:
     debug_request: dict | None = None
     debug_response: dict | None = None
     tool_calls: list[dict] | None = None
+    reasoning: str | None = None
 
 
 @dataclass
@@ -37,6 +41,7 @@ class LLMChunk:
     is_final: bool
     usage: dict[str, int] = field(default_factory=dict)
     tool_calls: list[dict] | None = None
+    reasoning: str | None = None
 
 
 class BaseProvider(ABC):

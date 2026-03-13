@@ -904,6 +904,65 @@ body {
     word-wrap: break-word;
 }
 
+.thinking-block {
+    background: #d0d0d0;
+    border-left: 3px solid #666;
+    padding: 8px 12px;
+    margin: 8px 0;
+    border-radius: 8px;
+}
+
+.thinking-header {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: #444;
+    user-select: none;
+    font-size: 0.85em;
+}
+
+.thinking-toggle {
+    display: inline-block;
+    width: 0;
+    height: 0;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 6px solid #444;
+    transition: transform 0.2s;
+}
+
+.thinking-toggle.expanded {
+    transform: rotate(90deg);
+}
+
+.thinking-content {
+    margin-top: 8px;
+    font-size: 0.8em;
+    color: #444;
+    white-space: pre-wrap;
+    font-family: monospace;
+}
+
+.thinking-indicator {
+    display: inline-block;
+    margin-left: 8px;
+    color: #666;
+    font-size: 0.9em;
+}
+
+.thinking-indicator::after {
+    content: '...';
+    animation: thinking-dots 1.5s infinite;
+}
+
+@keyframes thinking-dots {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+}
+
 .message-content > *:first-child {
     margin-top: 0 !important;
     padding-top: 0 !important;

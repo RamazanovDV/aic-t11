@@ -691,6 +691,7 @@ async def _process_status_block(
                 prompt_with_reminder = system_prompt + status_reminder if attempt > 0 else system_prompt
                 if use_tools:
                     print(f"[MCP] Sending {len(use_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in use_tools]}")
+                
                 response = provider.chat(llm_messages, prompt_with_reminder, debug=debug_mode, tools=use_tools)
             except Exception as e:
                 import traceback
@@ -1287,8 +1288,6 @@ def chat():
             debug_info['subtasks'] = session.status.get('subtasks', [])
         if mcp_calls:
             debug_info['mcp_calls'] = mcp_calls
-        if response.reasoning:
-            debug_info['reasoning'] = response.reasoning
 
     message_index = len(session.messages)
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls, reasoning=response.reasoning)

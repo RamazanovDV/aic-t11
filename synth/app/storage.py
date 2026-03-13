@@ -31,6 +31,7 @@ class FileStorage:
             "session_id": session.session_id,
             "messages": [
                 {
+                    "id": m.id,
                     "role": m.role,
                     "content": m.content,
                     "usage": m.usage,
@@ -41,6 +42,7 @@ class FileStorage:
                     "branch_id": m.branch_id,
                     "source": m.source,
                     "status": m.status,
+                    "reasoning": m.reasoning,
                     "tool_call_id": m.tool_call_id,
                     "tool_use": m.tool_use,
                 }
