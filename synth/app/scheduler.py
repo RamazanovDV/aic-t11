@@ -10,6 +10,7 @@ import yaml
 from croniter import croniter
 
 from app.config import config
+from app.logger import debug, info, warning, error
 
 logger = logging.getLogger(__name__)
 
@@ -235,7 +236,7 @@ class Scheduler:
                 session.status["project"] = project_name
                 session_manager.save_session(session_id)
 
-            print(f"[SCHEDULER] Running scheduled job '{schedule.name}' for project {project_name}")
+            info("SCHEDULER", f"Running scheduled job '{schedule.name}' for project {project_name}")
 
             from app.llm.client import create_llm_client
             from app.llm.base import Message
@@ -270,13 +271,13 @@ class Scheduler:
             if schedule.type == "once":
                 schedule.enabled = False
                 schedule.next_run = None
-                print(f"[SCHEDULER] One-time job '{schedule.name}' completed, disabled (kept in history)")
+                debug("SCHEDULER", f"One-time job '{schedule.name}' completed, disabled (kept in history)")
             else:
                 schedule.next_run = schedule._calculate_next_run()
             
             self._save_schedules(project_name, [schedule])
 
-            print(f"[SCHEDULER] Completed job '{schedule.name}'")
+            info("SCHEDULER", f"Completed job '{schedule.name}'")
             return True
 
         except Exception as e:
@@ -313,7 +314,7 @@ class Scheduler:
                         if server_tools:
                             all_tools.extend(tools_to_provider_format(server_tools, provider_name))
                     except Exception as e:
-                        print(f"[SCHEDULER] Failed to get tools from {server_name}: {e}")
+                        error("SCHEDULER", f"Failed to get tools from {server_name}: {e}")
                 return all_tools if all_tools else None
             
             return run_mcp_async(get_tools())
@@ -333,7 +334,7 @@ class Scheduler:
         
         while iteration < max_iterations:
             iteration += 1
-            print(f"[SCHEDULER] Tool call iteration {iteration}")
+            debug("SCHEDULER", f"Tool call iteration {iteration}")
             
             response = client.send(
                 messages=messages,
@@ -342,10 +343,10 @@ class Scheduler:
             )
             
             if not response.tool_calls:
-                print(f"[SCHEDULER] No more tool calls, final response received")
+                debug("SCHEDULER", "No more tool calls, final response received")
                 return response
             
-            print(f"[SCHEDULER] Processing {len(response.tool_calls)} tool call(s)")
+            debug("SCHEDULER", f"Processing {len(response.tool_calls)} tool call(s)")
             
             tool_call_results = []
             
@@ -360,7 +361,7 @@ class Scheduler:
                     except:
                         tool_args = {}
                 
-                print(f"[SCHEDULER] Calling tool: {tool_name}")
+                debug("SCHEDULER", f"Calling tool: {tool_name}")
                 
                 try:
                     async def call_tool_async():
@@ -370,7 +371,7 @@ class Scheduler:
                     tool_result_content = result.content
                 except Exception as e:
                     tool_result_content = f"Error: {str(e)}"
-                    print(f"[SCHEDULER] Tool error: {e}")
+                    error("SCHEDULER", f"Tool error: {e}")
                 
                 tool_call_results.append({
                     "role": "tool",
@@ -414,7 +415,7 @@ class Scheduler:
         if response is None:
             raise RuntimeError("No response received from LLM")
         
-        print(f"[SCHEDULER] Max tool call iterations ({max_iterations}) reached")
+        debug("SCHEDULER", f"Max tool call iterations ({max_iterations}) reached")
         return response
 
     def _run_scheduler(self) -> None:
@@ -434,7 +435,7 @@ class Scheduler:
                                     if schedule.id in self._running_jobs:
                                         logger.info(f"[SCHEDULER] Job '{schedule.name}' already running, skipping")
                                         continue
-                                    print(f"[SCHEDULER] Triggering job '{schedule.name}' for project {project_name}")
+                                    info("SCHEDULER", f"Triggering job '{schedule.name}' for project {project_name}")
                                     self._running_jobs.add(schedule.id)
                                     try:
                                         self._execute_job(schedule)
@@ -453,7 +454,7 @@ class Scheduler:
         self._running = True
         self._thread = threading.Thread(target=self._run_scheduler, daemon=True)
         self._thread.start()
-        print("[SCHEDULER] Started")
+        info("SCHEDULER", "Started")
 
         self._catch_up()
 
@@ -493,14 +494,14 @@ class Scheduler:
             schedules = self._load_schedules(project_name)
             for schedule in schedules:
                 if schedule.enabled and schedule.next_run and schedule.next_run < now:
-                    print(f"[SCHEDULER] Catching up missed job '{schedule.name}' for project {project_name}")
+                    info("SCHEDULER", f"Catching up missed job '{schedule.name}' for project {project_name}")
                     self._execute_job(schedule)
 
     def stop(self) -> None:
         self._running = False
         if self._thread:
             self._thread.join(timeout=5)
-        print("[SCHEDULER] Stopped")
+        info("SCHEDULER", "Stopped")
 
 
 scheduler = Scheduler()

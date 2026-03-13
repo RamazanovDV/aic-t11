@@ -7,6 +7,7 @@ from app.routes import api_bp, admin_bp, auth_bp, mcp_bp
 from app.config import config
 from app.scheduler import scheduler
 from app.context import DEFAULT_CONTEXT_FILES, ContextManager
+from app.logger import info
 
 BASE_DIR = Path(__file__).parent
 
@@ -23,7 +24,7 @@ def init_default_context_files() -> None:
             default_path = ctx_mgr.system_dir / default_filename
             if default_path.exists():
                 user_path.write_text(default_path.read_text(encoding="utf-8"), encoding="utf-8")
-                print(f"[INIT] Created default context file: {filename}")
+                info("INIT", f"Created default context file: {filename}")
     
     enabled = config.get_enabled_context_files()
     new_enabled = list(enabled)
@@ -32,7 +33,7 @@ def init_default_context_files() -> None:
             new_enabled.append(filename)
     if new_enabled != enabled:
         config.set_enabled_context_files(new_enabled)
-        print(f"[INIT] Enabled default context files: {DEFAULT_CONTEXT_FILES}")
+        info("INIT", f"Enabled default context files: {DEFAULT_CONTEXT_FILES}")
 
 
 def create_app() -> Flask:

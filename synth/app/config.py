@@ -199,6 +199,33 @@ class Config:
     def default_messages_interval(self) -> int:
         return self.summarization_config.get("default_messages_interval", 10)
 
+    @property
+    def debug_config(self) -> dict[str, Any]:
+        return self._config.get("debug", {})
+
+    @property
+    def debug_groups(self) -> dict[str, str]:
+        return self.debug_config.get("groups", {
+            "ANTHROPIC": "INFO",
+            "MCP": "INFO",
+            "ROUTES": "WARNING",
+            "ORCHESTRATOR": "INFO",
+            "CHAT_STREAM": "WARNING",
+            "TSM": "INFO",
+            "STORAGE": "WARNING",
+            "SCHEDULER": "INFO",
+            "INIT": "INFO",
+            "DEBUG": "DEBUG",
+        })
+
+    def set_debug_group(self, group: str, level: str) -> None:
+        if "debug" not in self._config:
+            self._config["debug"] = {}
+        if "groups" not in self._config["debug"]:
+            self._config["debug"]["groups"] = {}
+        self._config["debug"]["groups"][group] = level
+        self.save()
+
     DEFAULT_MODELS = {
         "gpt-4o": {
             "provider": "openai",

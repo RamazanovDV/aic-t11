@@ -22,6 +22,7 @@ from app import tsm
 from app import scheduler
 from app.auth import get_auth_provider, require_user, require_admin, get_current_user
 from app.mcp import mcp_available, mcp_config
+from app.logger import debug, info, warning, error
 
 _mcp_event_loop: asyncio.AbstractEventLoop | None = None
 
@@ -633,10 +634,10 @@ async def _get_mcp_tools(session, provider_name: str) -> list[dict]:
             if server_tools:
                 all_tools.extend(tools_to_provider_format(server_tools, provider_name))
             else:
-                print(f"[MCP] No tools returned from {server_name}")
+                debug("MCP", f"No tools returned from {server_name}")
         except Exception as e:
             error_msg = str(e)
-            print(f"[MCP] Failed to get tools from {server_name}: {error_msg}")
+            debug("MCP", f"Failed to get tools from {server_name}: {error_msg}")
     
     return all_tools
 
@@ -666,10 +667,10 @@ async def _process_status_block(
         mcp_calls = []
     
     tsm_mode = tsm.get_tsm_mode(session)
-    print(f"[ROUTES] TSM mode: {tsm_mode}, session_id: {session_id}")
+    debug("ROUTES", f"TSM mode: {tsm_mode}, session_id: {session_id}")
     
     if tsm_mode == "orchestrator":
-        print(f"[ROUTES] Using orchestrator mode for session {session_id}")
+        debug("ROUTES", f"Using orchestrator mode for session {session_id}")
         return _process_orchestrator_mode(
             provider, llm_messages, system_prompt, session, session_id, debug_mode, user_id
         )
@@ -690,19 +691,19 @@ async def _process_status_block(
             try:
                 prompt_with_reminder = system_prompt + status_reminder if attempt > 0 else system_prompt
                 if use_tools:
-                    print(f"[MCP] Sending {len(use_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in use_tools]}")
+                    debug("MCP", f"Sending {len(use_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in use_tools]}")
                 
                 response = provider.chat(llm_messages, prompt_with_reminder, debug=debug_mode, tools=use_tools)
             except Exception as e:
                 import traceback
-                print(f"[ERROR] provider.chat() failed: {e}")
-                print(traceback.format_exc())
+                error("ROUTES", f"provider.chat() failed: {e}")
+                error("ROUTES", traceback.format_exc())
                 if attempt == max_retries - 1:
-                    raise
+                    break
                 break
             
-            print(f"[MCP] After response: mcp_tools={bool(mcp_tools)}, response.tool_calls={response.tool_calls}")
-            print(f"[MCP] Response content: {response.content[:200] if response.content else 'EMPTY'}")
+            debug("MCP", f"After response: mcp_tools={bool(mcp_tools)}, response.tool_calls={response.tool_calls}")
+            debug("MCP", f"Response content: {response.content[:200] if response.content else 'EMPTY'}")
             
             if not response.tool_calls:
                 # No more tool calls, exit the loop
@@ -712,8 +713,8 @@ async def _process_status_block(
             tools_called_in_current_attempt = True
             
             # Execute tool calls
-            print(f"[MCP] Detected {len(response.tool_calls)} tool call(s)")
-            print(f"[MCP] Tool calls: {json.dumps(response.tool_calls, ensure_ascii=False)[:500]}")
+            debug("MCP", f"Detected {len(response.tool_calls)} tool call(s)")
+            debug("MCP", f"Tool calls: {json.dumps(response.tool_calls, ensure_ascii=False)[:500]}")
             try:
                 from app.mcp import MCPManager
                 tool_call_results = []
@@ -728,19 +729,19 @@ async def _process_status_block(
                         except:
                             tool_args = {}
                     
-                    print(f"[MCP] Calling tool: {tool_name}")
-                    print(f"[MCP] Arguments: {json.dumps(tool_args, ensure_ascii=False)[:500]}")
+                    debug("MCP", f"Calling tool: {tool_name}")
+                    debug("MCP", f"Arguments: {json.dumps(tool_args, ensure_ascii=False)[:500]}")
                     
                     try:
                         result = await MCPManager.call_tool(tool_name, tool_args)
                         tool_result_content = result.content
                         is_error = getattr(result, 'is_error', False)
-                        print(f"[MCP] Result: {tool_result_content[:500] if tool_result_content else 'empty'}")
-                        print(f"[MCP] Is error: {is_error}")
+                        debug("MCP", f"Result: {tool_result_content[:500] if tool_result_content else 'empty'}")
+                        debug("MCP", f"Is error: {is_error}")
                     except Exception as e:
                         tool_result_content = f"Error: {str(e)}"
                         is_error = True
-                        print(f"[MCP] Tool error: {e}")
+                        error("MCP", f"Tool error: {e}")
                     
                     mcp_calls.append({
                         "tool": tool_name,
@@ -768,17 +769,17 @@ async def _process_status_block(
                 
                 # Continue in the while loop - will call provider.chat with tools=None
                 llm_messages = tool_messages
-                print(f"[MCP] Continuing with tool results, will call model again")
+                debug("MCP", "Continuing with tool results, will call model again")
                 
             except Exception as e:
-                print(f"[MCP] Tool handling error: {e}")
+                error("MCP", f"Tool handling error: {e}")
                 break
         
         # After while loop, check for status block
         # If tools were called and we're here, it means model didn't provide status - that's an error
         parsed_status = None
         if tools_called_in_current_attempt and response:
-            print(f"[MCP] Tools were called but no status block - returning error")
+            debug("MCP", "Tools were called but no status block - returning error")
             # Return the content anyway, don't retry
             cleaned_content = response.content if response.content else ""
             return response, cleaned_content, "Модель вызвала инструменты, но не предоставила статусный блок", None
@@ -790,13 +791,13 @@ async def _process_status_block(
 
         # If tools were called but no status - return content without error, keep old status
         if tools_called_in_current_attempt and response:
-            print(f"[MCP] Tools were called but no status block - returning content without error")
+            debug("MCP", "Tools were called but no status block - returning content without error")
             cleaned_content = response.content if response.content else ""
             return response, cleaned_content, None, None
         
         # If no status block - just return content without error, keep old status
         if parsed_status is None:
-            print(f"[ROUTES] No status block in response - returning content without updating status")
+            debug("ROUTES", "No status block in response - returning content without updating status")
             cleaned_content = response.content if response.content else ""
             return response, cleaned_content, None, None
         
@@ -834,7 +835,7 @@ def _process_orchestrator_mode(
     user_id: str | None = None,
 ):
     """Обработать ответ в режиме оркестратора с поддержкой сабагентов."""
-    print(f"[ORCHESTRATOR] Starting orchestrator mode, debug_mode: {debug_mode}")
+    debug("ORCHESTRATOR", f"Starting orchestrator mode, debug_mode: {debug_mode}")
     try:
         result = tsm.process_orchestrator_response(
             session=session,
@@ -844,7 +845,7 @@ def _process_orchestrator_mode(
             debug_prompt=system_prompt,
             debug_mode=debug_mode
         )
-        print(f"[ORCHESTRATOR] Result keys: {result.keys() if result else 'None'}")
+        debug("ORCHESTRATOR", f"Result keys: {result.keys() if result else 'None'}")
     except Exception as e:
         return None, f"Ошибка при обработке оркестратора: {str(e)}", str(e), None
     
@@ -986,7 +987,7 @@ def _handle_project_updates(session) -> None:
                 enabled=True,
             )
         except Exception as e:
-            print(f"[ROUTES] Failed to create schedule from status block: {e}")
+            error("ROUTES", f"Failed to create schedule from status block: {e}")
 
 
 @api_bp.route("/projects/<project_name>/schedules", methods=["GET"])
@@ -1292,7 +1293,7 @@ def chat():
     message_index = len(session.messages)
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls, reasoning=response.reasoning)
     
-    print(f"[STORAGE] Saving session after assistant message, messages count: {len(session.messages)}")
+    debug("STORAGE", f"Saving session after assistant message, messages count: {len(session.messages)}")
     session_manager.save_session(session_id)
 
     disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
@@ -1500,10 +1501,10 @@ def chat_stream():
 
         # Проверяем режим TSM для orchestrator
         tsm_mode = tsm.get_tsm_mode(session)
-        print(f"[CHAT_STREAM] TSM mode: {tsm_mode}")
+        debug("CHAT_STREAM", f"TSM mode: {tsm_mode}")
         
         if tsm_mode == "orchestrator":
-            print(f"[CHAT_STREAM] Using orchestrator mode, will process with subagents")
+            debug("CHAT_STREAM", "Using orchestrator mode, will process with subagents")
             # Для orchestrator используем non-streaming режим
             from app.llm.base import Message
             llm_msgs = [Message(role=m["role"], content=m["content"], usage={}) for m in formatted_messages]
@@ -1518,7 +1519,7 @@ def chat_stream():
             
             orchestrator_system = None if has_system else system_prompt
             
-            print(f"[ROUTES] Calling orchestrator with {len(llm_msgs)} messages")
+            debug("ROUTES", f"Calling orchestrator with {len(llm_msgs)} messages")
             
             ORCHESTRATOR_TIMEOUT = config.orchestrator_timeout
             TOKEN_WARNING_PERCENT = config.token_warning_percent
@@ -1568,7 +1569,7 @@ def chat_stream():
                     
                     if event.get('type') == 'orchestrator_content':
                         content = event.get('content', '')
-                        print(f"[ROUTES] orchestrator_content event: content_len={len(content)}, subtasks={len(event.get('subtasks', []))}")
+                        debug("ROUTES", f"orchestrator_content event: content_len={len(content)}, subtasks={len(event.get('subtasks', []))}")
                         event_data = {
                             'type': 'orchestrator_content',
                             'content': content,
@@ -1594,7 +1595,7 @@ def chat_stream():
                 except queue.Empty:
                     continue
                 except Exception as e:
-                    print(f"[ROUTES] Error processing progress event: {e}")
+                    error("ROUTES", f"Error processing progress event: {e}")
                     continue
             
             orchestrator_thread.join(timeout=10)
@@ -1621,8 +1622,8 @@ def chat_stream():
             raw_original_content = result.get("raw_response", final_content)
             usage = result.get("usage", {})
             
-            print(f"[ORCHESTRATOR] Usage: {usage}")
-            print(f"[ORCHESTRATOR] Model: orchestrator")
+            info("ORCHESTRATOR", f"Usage: {usage}")
+            info("ORCHESTRATOR", "Model: orchestrator")
             
             if was_aborted:
                 yield f"data: {json.dumps({'type': 'aborted', 'reason': 'user_stop'})}\n\n"
@@ -1704,13 +1705,13 @@ def chat_stream():
             preliminary_saved = False  # Track if we've already saved to avoid duplicate messages
             
             if mcp_tools:
-                print(f"[MCP] Stream: Sending {len(mcp_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in mcp_tools]}")
+                debug("MCP", f"Stream: Sending {len(mcp_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in mcp_tools]}")
             for chunk in provider.stream_chat(llm_msgs, None, debug=debug_mode, tools=mcp_tools):
                 if chunk.tool_calls and not tool_calls_handled:
                     tool_calls_handled = True
                     tool_use_for_message = chunk.tool_calls  # Save for later
-                    print(f"[MCP] Stream: Detected {len(chunk.tool_calls)} tool call(s)")
-                    print(f"[MCP] Stream: Tool calls: {json.dumps(chunk.tool_calls, ensure_ascii=False)[:500]}")
+                    debug("MCP", f"Stream: Detected {len(chunk.tool_calls)} tool call(s)")
+                    debug("MCP", f"Stream: Tool calls: {json.dumps(chunk.tool_calls, ensure_ascii=False)[:500]}")
                     try:
                         from app.mcp import MCPManager
                         import asyncio
@@ -1726,19 +1727,19 @@ def chat_stream():
                                 except:
                                     tool_args = {}
                             
-                            print(f"[MCP] Calling tool: {tool_name}")
-                            print(f"[MCP] Arguments: {json.dumps(tool_args, ensure_ascii=False)[:500]}")
+                            debug("MCP", f"Calling tool: {tool_name}")
+                            debug("MCP", f"Arguments: {json.dumps(tool_args, ensure_ascii=False)[:500]}")
                             
                             try:
                                 result = run_mcp_async(MCPManager.call_tool(tool_name, tool_args))
                                 tool_result_content = result.content
                                 is_error = getattr(result, 'is_error', False)
-                                print(f"[MCP] Result: {tool_result_content[:500] if tool_result_content else 'empty'}")
-                                print(f"[MCP] Is error: {is_error}")
+                                debug("MCP", f"Result: {tool_result_content[:500] if tool_result_content else 'empty'}")
+                                debug("MCP", f"Is error: {is_error}")
                             except Exception as e:
                                 tool_result_content = f"Error: {str(e)}"
                                 is_error = True
-                                print(f"[MCP] Tool error: {e}")
+                                error("MCP", f"Tool error: {e}")
                             
                             mcp_calls.append({
                                 "tool": tool_name,
@@ -1764,12 +1765,12 @@ def chat_stream():
                                 usage={}
                             ))
                         
-                        print(f"[MCP] Executing {len(tool_call_results)} tool(s), continuing stream...")
+                        debug("MCP", f"Executing {len(tool_call_results)} tool(s), continuing stream...")
                         
                         for new_chunk in provider.stream_chat(tool_messages, None, debug=debug_mode, tools=None):
                             full_content = new_chunk.content
                             full_reasoning = new_chunk.reasoning if new_chunk.reasoning else full_reasoning
-                            print(f"[MCP] Stream after tool: content='{full_content[:100] if full_content else 'EMPTY'}', is_final={new_chunk.is_final}, tool_calls={new_chunk.tool_calls}")
+                            debug("MCP", f"Stream after tool: content='{full_content[:100] if full_content else 'EMPTY'}', is_final={new_chunk.is_final}, tool_calls={new_chunk.tool_calls}")
                             if new_chunk.is_final:
                                 total_usage = new_chunk.usage
                                 debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
@@ -1783,13 +1784,13 @@ def chat_stream():
                         break
                         
                     except Exception as e:
-                        print(f"[MCP] Tool handling error: {e}")
+                        error("MCP", f"Tool handling error: {e}")
                 
                 if chunk.is_final:
                     total_usage = chunk.usage
                     full_reasoning = chunk.reasoning if chunk.reasoning else full_reasoning
-                    print(f"[STREAM] Usage: {total_usage}")
-                    print(f"[STREAM] Model: {provider.model}")
+                    info("STREAM", f"Usage: {total_usage}")
+                    info("STREAM", f"Model: {provider.model}")
                     debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
                     # Save to session immediately to avoid race condition with UI
                     session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning)
@@ -1823,7 +1824,7 @@ def chat_stream():
                 proposed_state = parsed_status.get("state")
                 proposed_state_raw = parsed_status.get("_proposed_state")
                 
-                print(f"[CHAT_STREAM] state={proposed_state}, _proposed_state={proposed_state_raw}, _transition_error={transition_error}")
+                debug("CHAT_STREAM", f"state={proposed_state}, _proposed_state={proposed_state_raw}, _transition_error={transition_error}")
                 
                 if transition_error or (proposed_state is None and proposed_state_raw is not None):
                     if transition_error:
@@ -1836,7 +1837,7 @@ def chat_stream():
                     current_state = previous_state or transition_info.get("from") or session.status.get("state")
                     allowed = tsm.get_allowed_transitions(current_state)
                     
-                    print(f"[CHAT_STREAM] Invalid state (retry): {error_msg}")
+                    debug("CHAT_STREAM", f"Invalid state (retry): {error_msg}")
                     
                     try:
                         prompt_builder = create_prompt_builder(session, user_id)
@@ -1846,7 +1847,7 @@ def chat_stream():
                         # Добавляем строгое предупреждение в system prompt
                         retry_system = system_prompt + "\n\n⚠️ ВНИМАНИЕ! Ты должен ОБЪЯСНИТЬ пользователю если он просит невозможное. Не делай вид что всё в порядке. Если переход невозможен - скажи об этом явно и предложи допустимый следующий шаг."
                         
-                        print(f"[CHAT_STREAM] Retry: {len(retry_messages)} messages, provider={session.provider}")
+                        debug("CHAT_STREAM", f"Retry: {len(retry_messages)} messages, provider={session.provider}")
                         llm_client = create_llm_client(session)
                         retry_response = llm_client.send(retry_messages, retry_system, debug=debug_mode)
                         retry_status, retry_cleaned = status_validator.validate_status_block(retry_response.content)
@@ -1854,7 +1855,7 @@ def chat_stream():
                         if retry_status:
                             retry_status = tsm.process_state_transition(session, retry_status)
                             if retry_status.get("_transition_error"):
-                                print(f"[CHAT_STREAM] Retry failed - model still reports invalid state")
+                                debug("CHAT_STREAM", "Retry failed - model still reports invalid state")
                                 # Восстанавливаем предыдущее состояние
                                 if previous_state and session.status:
                                     session.status["state"] = previous_state
@@ -1873,7 +1874,7 @@ def chat_stream():
                                 session.status["state"] = previous_state
                             content_for_user = cleaned_content
                     except Exception as e:
-                        print(f"[CHAT_STREAM] Error during retry: {e}")
+                        error("CHAT_STREAM", f"Error during retry: {e}")
                         import traceback
                         traceback.print_exc()
                         # При ошибке retry - восстанавливаем предыдущее состояние
@@ -2668,6 +2669,34 @@ def save_config():
                     }
         
         config.save()
+        config.reload()
+        return jsonify({"status": "saved"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route("/debug", methods=["GET"])
+@require_user
+def get_debug_config():
+    from app.logger import get_all_groups, LEVEL_NAMES
+    groups = get_all_groups()
+    return jsonify({
+        "groups": groups,
+        "available_levels": list(LEVEL_NAMES.values()),
+    })
+
+
+@admin_bp.route("/debug", methods=["POST"])
+@require_user
+def save_debug_config():
+    data = request.get_json()
+    if not data or "groups" not in data:
+        return jsonify({"error": "No groups provided"}), 400
+
+    try:
+        from app.logger import set_level_for_group
+        for group, level in data["groups"].items():
+            set_level_for_group(group, level)
         config.reload()
         return jsonify({"status": "saved"})
     except Exception as e:

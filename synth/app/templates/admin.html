@@ -10,6 +10,7 @@
         <button class="tab-btn" data-tab="models" onclick="switchTab('models')">Модели</button>
         <button class="tab-btn" data-tab="mcp" onclick="switchTab('mcp')">MCP Серверы</button>
         <button class="tab-btn" data-tab="users" onclick="switchTab('users')">Пользователи</button>
+        <button class="tab-btn" data-tab="debug" onclick="switchTab('debug')">Отладка</button>
     </div>
 
     <div class="tab-content active" id="tab-auth">
@@ -388,6 +389,29 @@
     </div>
 </div>
 
+<div class="tab-content" id="tab-debug">
+    <div class="settings-section">
+        <h3>Настройки отладки</h3>
+        <p class="help-text">Управление уровнем логирования для различных компонентов системы.</p>
+        
+        <table id="debug-groups-table" class="form-table" style="width: 100%; margin-bottom: 1rem;">
+            <thead>
+                <tr>
+                    <th style="text-align: left; padding: 8px;">Группа</th>
+                    <th style="text-align: left; padding: 8px;">Уровень</th>
+                </tr>
+            </thead>
+            <tbody id="debug-groups-tbody">
+                <tr><td colspan="2" class="loading">Загрузка...</td></tr>
+            </tbody>
+        </table>
+        
+        <div class="settings-actions">
+            <button class="btn btn-primary" onclick="saveDebugConfig()">Сохранить</button>
+        </div>
+    </div>
+</div>
+
 <script>
     let config = {};
     let contextFiles = [];
@@ -496,6 +520,7 @@
         loadModelList();
         loadMCPServers();
         loadUsers();
+        loadDebugConfig();
     }
 
     async function loadUsers() {
@@ -514,6 +539,82 @@
         } catch (e) {
             console.error('Failed to load users:', e);
             container.innerHTML = '<div class="error">Ошибка загрузки пользователей</div>';
+        }
+    }
+
+    let debugGroups = {};
+    const DEBUG_LEVELS = ['NONE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
+
+    async function loadDebugConfig() {
+        const tbody = document.getElementById('debug-groups-tbody');
+        if (!tbody) {
+            return;
+        }
+        try {
+            const response = await fetch('/admin/debug', { headers: getAuthHeaders() });
+            if (response.status === 401 || response.status === 403) {
+                tbody.innerHTML = '<tr><td colspan="2" class="error">Нет доступа</td></tr>';
+                return;
+            }
+            const data = await response.json();
+            debugGroups = data.groups;
+            renderDebugGroups();
+        } catch (e) {
+            console.error('Failed to load debug config:', e);
+            tbody.innerHTML = '<tr><td colspan="2" class="error">Ошибка загрузки</td></tr>';
+        }
+    }
+
+    function renderDebugGroups() {
+        const tbody = document.getElementById('debug-groups-tbody');
+        if (!tbody) return;
+        
+        let html = '';
+        for (const [group, level] of Object.entries(debugGroups)) {
+            html += '<tr>';
+            html += '<td style="padding: 8px;"><strong>' + escapeHtml(group) + '</strong></td>';
+            html += '<td style="padding: 8px;">';
+            html += '<select id="debug-level-' + escapeHtml(group) + '" class="form-input">';
+            for (const lvl of DEBUG_LEVELS) {
+                const selected = lvl === level ? ' selected' : '';
+                html += '<option value="' + lvl + '"' + selected + '>' + lvl + '</option>';
+            }
+            html += '</select>';
+            html += '</td>';
+            html += '</tr>';
+        }
+        tbody.innerHTML = html;
+    }
+
+    async function saveDebugConfig() {
+        const groups = {};
+        for (const group of Object.keys(debugGroups)) {
+            const select = document.getElementById('debug-level-' + group);
+            if (select) {
+                groups[group] = select.value;
+            }
+        }
+        
+        try {
+            const response = await fetch('/admin/debug', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ groups: groups })
+            });
+            if (response.status === 401 || response.status === 403) {
+                alert('Нет доступа');
+                return;
+            }
+            const data = await response.json();
+            if (data.error) {
+                alert('Ошибка: ' + data.error);
+            } else {
+                alert('Сохранено');
+                debugGroups = groups;
+            }
+        } catch (e) {
+            console.error('Failed to save debug config:', e);
+            alert('Ошибка сохранения');
         }
     }
 

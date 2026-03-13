@@ -13,6 +13,7 @@ except ImportError:
     MCP_AVAILABLE = False
 
 from app.mcp.config import mcp_config
+from app.logger import debug, info, warning, error
 
 
 @dataclass
@@ -93,19 +94,19 @@ class MCPClient:
             raise ValueError(f"MCP server '{self.server_name}': 'url' required for sse type")
         
         try:
-            print(f"[MCP] Creating SSE connection to {self.url}")
+            debug("MCP", f"Creating SSE connection to {self.url}")
             self._exit_stack = AsyncExitStack()
             sse_transport = await self._exit_stack.enter_async_context(sse_client(self.url))
             read, write = sse_transport
-            print(f"[MCP] SSE connected, creating session")
+            debug("MCP", "SSE connected, creating session")
             self._session = await self._exit_stack.enter_async_context(
                 ClientSession(read, write)
             )
-            print(f"[MCP] Initializing session")
+            debug("MCP", "Initializing session")
             await self._session.initialize()
-            print(f"[MCP] Session initialized")
+            debug("MCP", "Session initialized")
         except Exception as e:
-            print(f"[MCP] Connection error: {e}")
+            error("MCP", f"Connection error: {e}")
             raise MCPConnectionError(f"Failed to connect to MCP server '{self.server_name}': {e}")
 
     async def _load_tools(self) -> None:
@@ -169,9 +170,9 @@ class MCPClient:
             except (RuntimeError, GeneratorExit, ExceptionGroup, StopIteration, StopAsyncIteration) as e:
                 error_str = str(e).lower()
                 if "generator" not in error_str and "cancel scope" not in error_str and "asyncgen" not in error_str:
-                    print(f"[MCP] Cleanup error: {e}")
+                    error("MCP", f"Cleanup error: {e}")
             except Exception as e:
-                print(f"[MCP] Cleanup warning: {e}")
+                warning("MCP", f"Cleanup warning: {e}")
         
         self._exit_stack = None
         self._session = None
@@ -208,18 +209,18 @@ class MCPManager:
         all_tools = []
         for server_name in server_names:
             try:
-                print(f"[MCP] Connecting to {server_name}...")
+                info("MCP", f"Connecting to {server_name}...")
                 client = await asyncio.wait_for(cls.get_client(server_name), timeout=15.0)
-                print(f"[MCP] Loading tools from {server_name}...")
+                debug("MCP", f"Loading tools from {server_name}...")
                 tools = await asyncio.wait_for(client.list_tools(), timeout=15.0)
-                print(f"[MCP] Got {len(tools)} tools from {server_name}")
+                debug("MCP", f"Got {len(tools)} tools from {server_name}")
                 for tool in tools:
                     tool.name = f"{server_name}_{tool.name}"
                 all_tools.extend(tools)
             except asyncio.TimeoutError:
-                print(f"[MCP] Timeout connecting to '{server_name}'")
+                error("MCP", f"Timeout connecting to '{server_name}'")
             except Exception as e:
-                print(f"[MCP] Failed to get tools from '{server_name}': {e}")
+                error("MCP", f"Failed to get tools from '{server_name}': {e}")
         return all_tools
 
     @classmethod

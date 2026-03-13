@@ -4,6 +4,7 @@ from typing import Any
 
 from app.llm.base import Message
 from app.mcp import MCPManager, tools_to_provider_format
+from app.logger import debug, error
 
 
 async def get_mcp_tools(server_names: list[str], provider_name: str) -> list[dict[str, Any]]:
@@ -14,7 +15,7 @@ async def get_mcp_tools(server_names: list[str], provider_name: str) -> list[dic
         tools = await MCPManager.get_tools(server_names)
         return tools_to_provider_format(tools, provider_name)
     except Exception as e:
-        print(f"[MCP] Failed to get tools: {e}")
+        error("MCP", f"Failed to get tools: {e}")
         return []
 
 
@@ -91,14 +92,14 @@ async def process_tool_calls(
             except json.JSONDecodeError:
                 tool_args = {}
         
-        print(f"[MCP] Calling tool: {tool_name} with args: {tool_args}")
+        debug("MCP", f"Calling tool: {tool_name} with args: {tool_args}")
         
         try:
             result = await MCPManager.call_tool(tool_name, tool_args)
             tool_result_content = result.content
         except Exception as e:
             tool_result_content = f"Error: {str(e)}"
-            print(f"[MCP] Tool call error: {e}")
+            error("MCP", f"Tool call error: {e}")
         
         formatted_result = format_tool_result_for_provider(
             tool_result_content, tool_call_id, provider_name

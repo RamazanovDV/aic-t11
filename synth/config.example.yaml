@@ -48,3 +48,16 @@ mcp:
 
 storage:
   data_dir: "/home/eof/dev/aic/synth/data"
+
+debug:
+  groups:
+    ANTHROPIC: INFO
+    MCP: INFO
+    ROUTES: WARNING
+    ORCHESTRATOR: INFO
+    CHAT_STREAM: WARNING
+    TSM: INFO
+    STORAGE: WARNING
+    SCHEDULER: INFO
+    INIT: INFO
+    DEBUG: DEBUG

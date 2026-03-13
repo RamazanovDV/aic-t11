@@ -1,5 +1,6 @@
 from typing import Optional, Any
 from app.config import config
+from app.logger import debug, info, warning, error
 
 
 VALID_STATES = {"planning", "execution", "validation", "done"}
@@ -136,7 +137,7 @@ def validate_state_transition(current_state: Optional[str], new_state: Optional[
 def process_state_transition(session, parsed_status: dict[str, Any]) -> dict[str, Any]:
     """Обработать переход состояния из статуса."""
     mode = get_tsm_mode(session)
-    print(f"[TSM] process_state_transition: mode={mode}, current_state={session.status.get('state')}, task_name={session.status.get('task_name')}")
+    debug("TSM", f"process_state_transition: mode={mode}, current_state={session.status.get('state')}, task_name={session.status.get('task_name')}")
     
     if mode != "deterministic":
         return parsed_status
@@ -151,11 +152,11 @@ def process_state_transition(session, parsed_status: dict[str, Any]) -> dict[str
     proposed_next = parsed_status.get("next_state")
     
     target_state = proposed_next or proposed_state
-    print(f"[TSM] proposed_state={proposed_state}, proposed_next={proposed_next}, target_state={target_state}")
+    debug("TSM", f"proposed_state={proposed_state}, proposed_next={proposed_next}, target_state={target_state}")
     
     if target_state and target_state != current_state:
         is_valid, error = validate_state_transition(current_state, target_state, task_name)
-        print(f"[TSM] Transition check: {current_state} -> {target_state}, is_valid={is_valid}, error={error}")
+        debug("TSM", f"Transition check: {current_state} -> {target_state}, is_valid={is_valid}, error={error}")
         
         if is_valid:
             _log_transition(session, current_state, target_state)
@@ -210,7 +211,7 @@ def log_transition_error(session, error: str | None, from_state: str, to_state: 
     }
     
     session.status["transition_errors"].append(log_entry)
-    print(f"[TSM] Transition error logged: {from_state} -> {to_state}, attempt: {attempt}, error: {error}")
+    debug("TSM", f"Transition error logged: {from_state} -> {to_state}, attempt: {attempt}, error: {error}")
 
 
 def get_allowed_transitions(current_state: Optional[str]) -> list[str]:
@@ -343,7 +344,7 @@ def process_orchestrator_response(
         iteration += 1
         
         if check_stop():
-            print("[TSM] Stop event set, aborting orchestration")
+            debug("TSM", "Stop event set, aborting orchestration")
             break
         
         current_system_prompt = build_system_prompt(system_prompt, active_subtasks_internal)
@@ -351,13 +352,13 @@ def process_orchestrator_response(
         try:
             response = provider.chat(llm_messages, current_system_prompt, debug=debug_mode)
         except Exception as e:
-            print(f"[TSM] ERROR in provider.chat iteration {iteration}: {e}")
-            print("[TSM] Stopping orchestration due to error, returning current results")
+            error("TSM", f"ERROR in provider.chat iteration {iteration}: {e}")
+            debug("TSM", "Stopping orchestration due to error, returning current results")
             if debug_mode:
                 debug_info["error"] = str(e)
             break
         
-        print(f"[TSM] Iteration {iteration}: Got response, length {len(response.content)}, usage: {response.usage}")
+        info("TSM", f"Iteration {iteration}: Got response, length {len(response.content)}, usage: {response.usage}")
         
         # Save raw response immediately before any processing
         raw_response = response.content
@@ -391,7 +392,7 @@ def process_orchestrator_response(
                     "task_name": parsed_status.get("task_name"),
                 }
             try:
-                print(f"[TSM] Sending orchestrator_content: content_len={len(current_content)}, subtasks={len(subtasks_for_event)}, status={status_for_event}")
+                debug("TSM", f"Sending orchestrator_content: content_len={len(current_content)}, subtasks={len(subtasks_for_event)}, status={status_for_event}")
                 progress_queue.put({
                     'type': 'orchestrator_content',
                     'content': current_content,
@@ -400,10 +401,10 @@ def process_orchestrator_response(
                     'status': status_for_event
                 })
             except Exception as e:
-                print(f"[TSM] Error sending orchestrator_content: {e}")
+                error("TSM", f"Error sending orchestrator_content: {e}")
         
         if not parsed_status:
-            print("[TSM] No parsed status found, breaking")
+            debug("TSM", "No parsed status found, breaking")
             # Всё равно возвращаем контент пользователю
             break
         
@@ -419,14 +420,14 @@ def process_orchestrator_response(
                 new_subtasks.append(st)
                 active_subtasks_internal.append(st)
         
-            print(f"[TSM] Model subtasks: {len(model_subtasks)}, New: {len(new_subtasks)}")
+        debug("TSM", f"Model subtasks: {len(model_subtasks)}, New: {len(new_subtasks)}")
         
         if not new_subtasks and not active_subtasks_internal:
-            print("[TSM] No and no active ones subtasks to launch, breaking")
+            debug("TSM", "No and no active ones subtasks to launch, breaking")
             break
         
         if not new_subtasks:
-            print("[TSM] All subtasks already running, waiting for completion")
+            debug("TSM", "All subtasks already running, waiting for completion")
             break
         
         subtask_results = []

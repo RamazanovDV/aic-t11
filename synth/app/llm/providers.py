@@ -4,6 +4,7 @@ from typing import Generator
 import requests
 
 from app.llm.base import BaseProvider, LLMChunk, LLMResponse, Message
+from app.logger import debug as dbg, info, warning, error
 
 
 API_KEY_MASK = "[API_KEY_MASKED]"
@@ -155,7 +156,7 @@ class GenericOpenAIProvider(BaseProvider):
                 return [m["id"] for m in data.get("data", [])]
             return []
         except Exception as e:
-            print(f"Error listing models: {e}")
+            error("PROVIDERS", f"Error listing models: {e}")
             return []
 
     def get_provider_name(self) -> str:
@@ -323,7 +324,7 @@ class OpenAIProvider(GenericOpenAIProvider):
 
 class AnthropicProvider(BaseProvider):
     def chat(self, messages, system_prompt=None, debug=False, tools=None) -> LLMResponse:
-        print(f"[ANTHROPIC] STEP1: Entered chat(), messages={len(messages)}, tools={bool(tools)}")
+        dbg("ANTHROPIC", f"STEP1: Entered chat(), messages={len(messages)}, tools={bool(tools)}")
         
         headers = {
             "x-api-key": self.api_key,
@@ -331,13 +332,13 @@ class AnthropicProvider(BaseProvider):
             "Content-Type": "application/json",
         }
         
-        print(f"[ANTHROPIC] STEP2: Starting to format messages")
+        dbg("ANTHROPIC", "STEP2: Starting to format messages")
 
         formatted_messages = []
         if system_prompt:
             formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
         
-        print(f"[ANTHROPIC] STEP3: Formatting {len(messages)} messages")
+        dbg("ANTHROPIC", f"STEP3: Formatting {len(messages)} messages")
         for msg in messages:
             # Skip info, model and error roles - they are for UI only, not for LLM
             if msg.role in ("info", "model", "error"):
@@ -370,7 +371,7 @@ class AnthropicProvider(BaseProvider):
                         })
                 formatted_messages.append({"role": msg.role, "content": content_blocks})
 
-        print(f"[ANTHROPIC] STEP4: Creating payload")
+        dbg("ANTHROPIC", "STEP4: Creating payload")
         payload = {
             "model": self.model,
             "messages": formatted_messages,
@@ -379,31 +380,30 @@ class AnthropicProvider(BaseProvider):
 
         if tools:
             payload["tools"] = tools
-            print(f"[ANTHROPIC] STEP5: Added {len(tools)} tools to payload")
+            dbg("ANTHROPIC", f"STEP5: Added {len(tools)} tools to payload")
 
-        print(f"[ANTHROPIC] STEP6: Sending request to {self.url}")
+        dbg("ANTHROPIC", f"STEP6: Sending request to {self.url}")
         
         # Print the full payload for debugging
         import json
-        print(f"[ANTHROPIC] FULL REQUEST: ", end="")
+        dbg("ANTHROPIC", f"FULL REQUEST: {json.dumps(payload, ensure_ascii=False)[:500]}...")
         try:
             payload_str = json.dumps(payload, ensure_ascii=False)
-            print(f"{payload_str}")
         except Exception as e:
-            print(f"JSON ENCODE ERROR: {e}")
-            print(f"[ANTHROPIC] Trying to find problematic message...")
+            error("ANTHROPIC", f"JSON ENCODE ERROR: {e}")
+            dbg("ANTHROPIC", "Trying to find problematic message...")
             for i, msg in enumerate(formatted_messages):
                 try:
                     json.dumps(msg)
-                    print(f"  Message {i}: OK")
+                    dbg("ANTHROPIC", f"  Message {i}: OK")
                 except Exception as me:
-                    print(f"  Message {i}: PROBLEM - {me}")
-                    print(f"    Content: {str(msg.get('content', ''))[:500]}")
+                    dbg("ANTHROPIC", f"  Message {i}: PROBLEM - {me}")
+                    dbg("ANTHROPIC", f"    Content: {str(msg.get('content', ''))[:500]}")
 
         debug_request = None
         debug_response = None
         
-        print(f"[ANTHROPIC] chat() STEP7: Calling requests.post()...")
+        dbg("ANTHROPIC", "chat() STEP7: Calling requests.post()...")
         
         if debug:
             debug_request = {
@@ -415,19 +415,19 @@ class AnthropicProvider(BaseProvider):
 
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
         
-        print(f"[ANTHROPIC] chat() STEP8: Got response, status={response.status_code}")
+        dbg("ANTHROPIC", f"chat() STEP8: Got response, status={response.status_code}")
         
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
-            print(f"[ANTHROPIC] ERROR: Status={response.status_code}")
-            print(f"[ANTHROPIC] ERROR Response body: {response.text[:1000]}")
+            error("ANTHROPIC", f"ERROR: Status={response.status_code}")
+            error("ANTHROPIC", f"ERROR Response body: {response.text[:1000]}")
             if response.status_code in (400, 422):
                 error_data = response.json() if response.content else {}
                 error_message = ""
                 if isinstance(error_data, dict):
                     error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
-                print(f"[ANTHROPIC] ERROR parsed: {error_message}")
+                error("ANTHROPIC", f"ERROR parsed: {error_message}")
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
@@ -501,7 +501,7 @@ class AnthropicProvider(BaseProvider):
                 return [m["id"] for m in data.get("data", [])]
             return []
         except Exception as e:
-            print(f"Error listing models: {e}")
+            error("ANTHROPIC", f"Error listing models: {e}")
             return []
 
     def get_provider_name(self) -> str:
@@ -574,14 +574,14 @@ class AnthropicProvider(BaseProvider):
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
-            print(f"[ERROR] API Error: {response.status_code}")
-            print(f"[ERROR] Response body: {response.text[:500]}")
+            error("ANTHROPIC", f"API Error: {response.status_code}")
+            error("ANTHROPIC", f"Response body: {response.text[:500]}")
             if response.status_code in (400, 422):
                 error_data = response.json() if response.content else {}
                 error_message = ""
                 if isinstance(error_data, dict):
                     error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
-                print(f"[ERROR] Parsed error: {error_message}")
+                error("ANTHROPIC", f"Parsed error: {error_message}")
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
@@ -716,17 +716,17 @@ class OllamaProvider(BaseProvider):
 
         if tools:
             payload["tools"] = tools
-            print(f"[DEBUG] Sending {len(tools)} tools to API")
+            dbg("DEBUG", f"Sending {len(tools)} tools to API")
 
-        print(f"[DEBUG] Messages count: {len(formatted_messages)}")
+        dbg("DEBUG", f"Messages count: {len(formatted_messages)}")
         for i, msg in enumerate(formatted_messages[:5]):
             content = msg.get('content', '')
             content_type = 'text' if isinstance(content, str) else 'array'
-            print(f"[DEBUG] Message {i}: role={msg.get('role')}, content_type={content_type}")
+            dbg("DEBUG", f"Message {i}: role={msg.get('role')}, content_type={content_type}")
         
         # Log the actual payload for debugging
         if debug:
-            print(f"[DEBUG] Full payload: {json.dumps(payload, indent=2)[:1000]}")
+            dbg("DEBUG", f"Full payload: {json.dumps(payload, indent=2)[:1000]}")
 
         debug_request = None
         debug_response = None
@@ -957,7 +957,7 @@ class OllamaProvider(BaseProvider):
                 return sorted([m["name"] for m in data.get("models", [])])
             return []
         except Exception as e:
-            print(f"Error listing models: {e}")
+            error("PROVIDERS", f"Error listing models: {e}")
             return []
 
     def get_provider_name(self) -> str:
