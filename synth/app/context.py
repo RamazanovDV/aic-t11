@@ -5,6 +5,7 @@ from app.config import config
 
 
 SYSTEM_CONTEXT_FILES = [
+    "STATUS_REMINDER.md",
     "STATUS_SIMPLE.md",
     "STATUS_ORCHESTRATOR.md",
     "TSM_PLANNING.md",

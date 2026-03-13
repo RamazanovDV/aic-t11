@@ -650,6 +650,7 @@ async def _process_status_block(
     user_id: str | None = None,
     max_retries: int = 3,
     mcp_tools: list | None = None,
+    mcp_calls: list | None = None,
 ):
     """Обработать ответ LLM с валидацией статуса.
     
@@ -660,6 +661,9 @@ async def _process_status_block(
             - status_error: строка с ошибкой если все попытки неудачны
             - debug_info: отладочная информация
     """
+    if mcp_calls is None:
+        mcp_calls = []
+    
     tsm_mode = tsm.get_tsm_mode(session)
     print(f"[ROUTES] TSM mode: {tsm_mode}, session_id: {session_id}")
     
@@ -669,29 +673,43 @@ async def _process_status_block(
             provider, llm_messages, system_prompt, session, session_id, debug_mode, user_id
         )
     
-    status_reminder = (
-        "\n\nВАЖНО: Ты ОБЯЗАН добавить JSON-блок со статусом задачи в конце ответа! "
-        "Формат: {\"status\": {\"task_name\": \"...\", \"state\": \"...\", \"progress\": \"...\", "
-        "\"project\": \"название_проекта\", \"updated_project_info\": \"...\", \"current_task_info\": \"...\", "
-        "\"approved_plan\": \"...\", \"already_done\": \"...\", \"currently_doing\": \"...\", "
-        "\"invariants\": {\"ключ\": \"значение\"} или null}}"
-    )
-
+    status_reminder = config.get_context_file("STATUS_REMINDER.md") or ""
+    if status_reminder:
+        system_prompt += "\n\n" + status_reminder
+    
+    tools_called_in_current_attempt = False
+    response = None
+    
     for attempt in range(max_retries):
-        try:
-            prompt_with_reminder = system_prompt + status_reminder if attempt > 0 else system_prompt
-            if mcp_tools:
-                print(f"[MCP] Sending {len(mcp_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in mcp_tools]}")
-            response = provider.chat(llm_messages, prompt_with_reminder, debug=debug_mode, tools=mcp_tools)
-        except Exception as e:
-            import traceback
-            print(f"[ERROR] provider.chat() failed: {e}")
-            print(traceback.format_exc())
-            if attempt == max_retries - 1:
-                raise
-            continue
-
-        if mcp_tools and response.tool_calls:
+        
+        while True:
+            # If we've already called tools in this attempt and got no more tool calls - don't retry with tools
+            use_tools = mcp_tools if not tools_called_in_current_attempt else None
+            
+            try:
+                prompt_with_reminder = system_prompt + status_reminder if attempt > 0 else system_prompt
+                if use_tools:
+                    print(f"[MCP] Sending {len(use_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in use_tools]}")
+                response = provider.chat(llm_messages, prompt_with_reminder, debug=debug_mode, tools=use_tools)
+            except Exception as e:
+                import traceback
+                print(f"[ERROR] provider.chat() failed: {e}")
+                print(traceback.format_exc())
+                if attempt == max_retries - 1:
+                    raise
+                break
+            
+            print(f"[MCP] After response: mcp_tools={bool(mcp_tools)}, response.tool_calls={response.tool_calls}")
+            print(f"[MCP] Response content: {response.content[:200] if response.content else 'EMPTY'}")
+            
+            if not response.tool_calls:
+                # No more tool calls, exit the loop
+                tools_called_in_current_attempt = False  # Reset after tools completed
+                break
+            
+            tools_called_in_current_attempt = True
+            
+            # Execute tool calls
             print(f"[MCP] Detected {len(response.tool_calls)} tool call(s)")
             print(f"[MCP] Tool calls: {json.dumps(response.tool_calls, ensure_ascii=False)[:500]}")
             try:
@@ -735,6 +753,7 @@ async def _process_status_block(
                         "content": tool_result_content,
                     })
                 
+                # Build tool messages and call model again
                 tool_messages = list(llm_messages)
                 tool_messages.append(Message(role="assistant", content=response.content or "", usage={}, tool_use=response.tool_calls))
                 for tc_result in tool_call_results:
@@ -745,82 +764,50 @@ async def _process_status_block(
                         usage={}
                     ))
                 
-                response = provider.chat(tool_messages, prompt_with_reminder, debug=debug_mode, tools=None)
+                # Continue in the while loop - will call provider.chat with tools=None
+                llm_messages = tool_messages
+                print(f"[MCP] Continuing with tool results, will call model again")
                 
-                print(f"[MCP] After tool execution, response: content='{response.content[:100] if response.content else 'EMPTY'}', tool_calls={response.tool_calls}")
             except Exception as e:
                 print(f"[MCP] Tool handling error: {e}")
+                break
+        
+        # After while loop, check for status block
+        # If tools were called and we're here, it means model didn't provide status - that's an error
+        parsed_status = None
+        if tools_called_in_current_attempt and response:
+            print(f"[MCP] Tools were called but no status block - returning error")
+            # Return the content anyway, don't retry
+            cleaned_content = response.content if response.content else ""
+            return response, cleaned_content, "Модель вызвала инструменты, но не предоставила статусный блок", None
+        
+        if response:
+            parsed_status, cleaned_content = status_validator.validate_status_block(response.content)
+        else:
+            parsed_status, cleaned_content = None, ""
 
-        parsed_status, cleaned_content = status_validator.validate_status_block(response.content)
-
-        if parsed_status:
-            parsed_status = tsm.process_state_transition(session, parsed_status)
-            
-            transition_error = parsed_status.get("_transition_error")
-            proposed_state = parsed_status.get("state")
-            proposed_state_raw = parsed_status.get("_proposed_state")
-            
-            print(f"[ROUTES] state={proposed_state}, _proposed_state={proposed_state_raw}, _transition_error={transition_error}")
-            
-            if transition_error or (proposed_state is None and proposed_state_raw is not None):
-                if transition_error:
-                    error_msg = transition_error
-                else:
-                    invalid_state = parsed_status.get("_proposed_state")
-                    error_msg = f"Недопустимое состояние: '{invalid_state}'. Допустимые: {tsm.VALID_STATES}"
-                
-                transition_info = parsed_status.get("_transition_info", {})
-                current_state = transition_info.get("from", session.status.get("state"))
-                allowed = tsm.get_allowed_transitions(current_state)
-                attempt += 1
-                
-                if attempt < max_retries:
-                    print(f"[ROUTES] Invalid state (attempt {attempt}/{max_retries}): {error_msg}")
-                    
-                    prompt_builder = create_prompt_builder(session, user_id)
-                    error_reminder = prompt_builder.build_error_reminder(error_msg, current_state, allowed)
-                    
-                    retry_messages = prompt_builder.build_messages(error_reminder)
-                    
-                    try:
-                        llm_client = create_llm_client(session)
-                        response = llm_client.send(retry_messages, system_prompt, debug=debug_mode)
-                    except Exception as e:
-                        if attempt == max_retries - 1:
-                            raise
-                        continue
-                    
-                    parsed_status, cleaned_content = status_validator.validate_status_block(response.content)
-                    
-                    if parsed_status:
-                        parsed_status = tsm.process_state_transition(session, parsed_status)
-                        
-                        if parsed_status.get("_transition_error"):
-                            print(f"[ROUTES] Retry failed - model still reports invalid state")
-                            # Всё равно возвращаем ответ пользователю
-                            session.update_status(parsed_status)
-                            _handle_project_updates(session)
-                            _handle_user_info_update(parsed_status, user_id)
-                            return response, cleaned_content, None, None
-                        else:
-                            session.update_status(parsed_status)
-                            _handle_project_updates(session)
-                            _handle_user_info_update(parsed_status, user_id)
-                            return response, cleaned_content, None, None
-                    else:
-                        # Модель не вернула статус - возвращаем контент пользователю
-                        print(f"[ROUTES] Retry: model did not return status block")
-                        return response, response.content, None, None
-                else:
-                    print(f"[ROUTES] Max retries reached for state transition, using current state")
-            
-            session.update_status(parsed_status)
-            
-            _handle_project_updates(session)
-            
-            _handle_user_info_update(parsed_status, user_id)
-            
+        # If tools were called but no status - return content without error, keep old status
+        if tools_called_in_current_attempt and response:
+            print(f"[MCP] Tools were called but no status block - returning content without error")
+            cleaned_content = response.content if response.content else ""
             return response, cleaned_content, None, None
+        
+        # If no status block - just return content without error, keep old status
+        if parsed_status is None:
+            print(f"[ROUTES] No status block in response - returning content without updating status")
+            cleaned_content = response.content if response.content else ""
+            return response, cleaned_content, None, None
+        
+        # Process status transition if status block exists
+        parsed_status = tsm.process_state_transition(session, parsed_status)
+        
+        session.update_status(parsed_status)
+        
+        _handle_project_updates(session)
+        
+        _handle_user_info_update(parsed_status, user_id)
+        
+        return response, cleaned_content, None, None
 
         if attempt < max_retries - 1:
             llm_messages = session.get_messages_for_llm()
@@ -1249,9 +1236,15 @@ def chat():
 
     try:
         response, message_for_user, status_error, orchestrator_debug = run_mcp_async(_process_status_block(
-            provider, llm_messages, system_prompt, session, session_id, debug_mode, request.headers.get("X-User-Id"), mcp_tools=mcp_tools
+            provider, llm_messages, system_prompt, session, session_id, debug_mode, 
+            request.headers.get("X-User-Id"), mcp_tools=mcp_tools, mcp_calls=mcp_calls
         ))
         if status_error:
+            # Save assistant message first
+            if message_for_user:
+                session.add_assistant_message(message_for_user, response.usage if response else {}, debug=orchestrator_debug if debug_mode else None, model=response.model if response else provider.model)
+            session.add_error_message(f"[Ошибка статуса] {status_error}", debug=orchestrator_debug if debug_mode else None, model=provider.model)
+            session_manager.save_session(session_id)
             result = {
                 "error": status_error,
                 "model_error": status_error,
@@ -1290,6 +1283,7 @@ def chat():
 
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls)
     
+    print(f"[STORAGE] Saving session after assistant message, messages count: {len(session.messages)}")
     session_manager.save_session(session_id)
 
     disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]

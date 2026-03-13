@@ -315,8 +315,8 @@ class AnthropicProvider(BaseProvider):
         
         print(f"[ANTHROPIC] STEP3: Formatting {len(messages)} messages")
         for msg in messages:
-            # Skip info and model roles - they are for UI only, not for LLM
-            if msg.role in ("info", "model"):
+            # Skip info, model and error roles - they are for UI only, not for LLM
+            if msg.role in ("info", "model", "error"):
                 continue
             
             # Handle tool role: convert to anthropic format
