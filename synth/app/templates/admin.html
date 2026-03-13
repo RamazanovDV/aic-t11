@@ -395,6 +395,7 @@
     let userFiles = [];
     let enabledContextFiles = [];
     let apiKey = '';
+    let lastFetchedModels = {};  // Models loaded from provider API
 
     function showContextTab(tab) {
         document.getElementById('context-system-tab').classList.toggle('active', tab === 'system');
@@ -961,8 +962,14 @@
         const url = document.getElementById('provider-url').value.trim();
         const apiKey = document.getElementById('provider-api-key').value;
         
-        if (!url || !apiKey) {
-            alert('Введите URL и API Key');
+        if (!url) {
+            alert('Введите URL');
+            return;
+        }
+        
+        // For ollama, API key is not required
+        if (type !== 'ollama' && !apiKey) {
+            alert('Введите API Key');
             return;
         }
         
@@ -987,6 +994,9 @@
             if (response.ok) {
                 const data = await response.json();
                 const models = data.models || [];
+                
+                // Store fetched models for later save
+                lastFetchedModels[type] = models;
                 
                 if (models.length === 0) {
                     alert('Модели не найдены. Проверьте URL и API Key.');
@@ -1069,47 +1079,61 @@
         const oldName = document.getElementById('edit-provider-name').value;
         const name = document.getElementById('provider-name').value.trim();
         const type = document.getElementById('provider-type').value;
-        const url = document.getElementById('provider-url').value.trim();
         const apiKey = document.getElementById('provider-api-key').value;
-        const defaultModel = document.getElementById('provider-default-model').value.trim();
         const timeout = document.getElementById('provider-timeout').value;
         
-        if (!name || !url || !defaultModel) {
-            alert('Заполните обязательные поля');
+        if (!name) {
+            alert('Введите название провайдера');
+            return;
+        }
+        
+        if (!url) {
+            alert('Введите URL');
+            return;
+        }
+        
+        if (!defaultModel) {
+            alert('Выберите модель');
             return;
         }
 
-        const providers = { ...config.providers };
+        const providers = { ...(config.providers || {}) };
         
         if (oldName && oldName !== name) {
             delete providers[oldName];
         }
         
-        providers[name] = {
-            type: type,
-            url: url,
-            api_key: apiKey,
-            default_model: defaultModel,
-        };
-
+            providers[name] = {
+                type: type,
+                url: url,
+                api_key: apiKey,
+                default_model: defaultModel,
+            };
+        
         if (timeout) {
             providers[name].timeout = parseInt(timeout, 10);
         }
 
+        console.log('Last fetched models:', lastFetchedModels);
+        
         try {
             const response = await fetch('/admin/config', {
                 method: 'POST',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({
                     providers: providers,
+                    new_models: lastFetchedModels,
                 })
             });
             
             if (response.ok) {
+                const data = await response.json();
+                lastFetchedModels = {};
                 closeModal();
                 loadConfig();
             } else {
-                alert('Ошибка сохранения');
+                const err = await response.text();
+                alert('Ошибка сохранения: ' + err);
             }
         } catch (e) {
             alert('Ошибка: ' + e.message);
@@ -1120,7 +1144,7 @@
         const name = document.getElementById('edit-provider-name').value;
         if (!confirm(`Удалить провайдера "${name}"?`)) return;
         
-        const providers = { ...config.providers };
+        const providers = { ...(config.providers || {}) };
         delete providers[name];
 
         try {

@@ -297,7 +297,10 @@ class Config:
         return self._config.get("models", self.DEFAULT_MODELS)
 
     def get_model_info(self, model_name: str) -> dict | None:
-        return self.models.get(model_name) or self.DEFAULT_MODELS.get(model_name)
+        # First check in _config["models"], then in DEFAULT_MODELS
+        in_config = self._config.get("models", {}).get(model_name)
+        in_defaults = self.DEFAULT_MODELS.get(model_name)
+        return in_config or in_defaults
 
     def get_context_window(self, model_name: str) -> int:
         info = self.get_model_info(model_name)

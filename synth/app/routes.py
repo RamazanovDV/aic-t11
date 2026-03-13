@@ -2580,16 +2580,39 @@ def save_config():
             if "mcp" not in config._config:
                 config._config["mcp"] = {}
             config._config["mcp"] = data["mcp"]
-            print(f"[DEBUG] Saving MCP config: {data['mcp']}")
+        
+        # Add new models from provider API to model catalog
+        if "new_models" in data:
+            new_models = data["new_models"]
+            
+            if "models" not in config._config:
+                config._config["models"] = {}
+            
+            for provider_type, model_list in new_models.items():
+                for model_name in model_list:
+                    existing = config._config["models"].get(model_name)
+                    
+                    if existing:
+                        if existing.get("provider") == provider_type:
+                            continue
+                        else:
+                            existing["provider"] = provider_type
+                            config._config["models"][model_name] = existing
+                            continue
+                    
+                    config._config["models"][model_name] = {
+                        "provider": provider_type,
+                        "context_window": 128000,
+                        "input_price": 0,
+                        "output_price": 0,
+                        "cache_read_price": 0,
+                        "cache_write_price": 0,
+                    }
         
         config.save()
         config.reload()
-        print(f"[DEBUG] Config saved. MCP in config: {config._config.get('mcp')}")
         return jsonify({"status": "saved"})
     except Exception as e:
-        import traceback
-        print(f"[DEBUG] Error saving config: {e}")
-        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
@@ -2655,16 +2678,24 @@ def fetch_models_from_providers():
                 
                 for model_name in models:
                     existing = config.get_model_info(model_name)
-                    if not existing:
-                        config.set_model_info(model_name, {
-                            "provider": provider_name,
-                            "context_window": 128000,
-                            "input_price": 0,
-                            "output_price": 0,
-                            "cache_read_price": 0,
-                            "cache_write_price": 0,
-                            "enabled": True,
-                        })
+                    
+                    if existing:
+                        if existing.get("provider") == provider_name:
+                            continue
+                        else:
+                            existing["provider"] = provider_name
+                            config._config["models"][model_name] = existing
+                            continue
+                    
+                    config.set_model_info(model_name, {
+                        "provider": provider_name,
+                        "context_window": 128000,
+                        "input_price": 0,
+                        "output_price": 0,
+                        "cache_read_price": 0,
+                        "cache_write_price": 0,
+                        "enabled": True,
+                    })
             else:
                 results[provider_name] = {"status": "not_supported", "count": 0}
         except Exception as e:

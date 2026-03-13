@@ -434,15 +434,15 @@ class AnthropicProvider(BaseProvider):
         usage = extract_usage(data)
 
         if debug:
-            debug_response = data
+            debug_response = final_data
 
         return LLMResponse(
-            content=content,
+            content=full_content,
             model=self.model,
-            usage=usage,
+            usage=total_usage,
             debug_request=debug_request,
             debug_response=debug_response,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls,
         )
 
     def list_models(self) -> list[str]:
@@ -632,38 +632,34 @@ class OllamaProvider(BaseProvider):
 
         formatted_messages = []
         if system_prompt:
-            formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
+            formatted_messages.append({"role": "system", "content": system_prompt})
 
         for msg in messages:
-            # Skip info and model roles - they are for UI only
             if msg.role in ("info", "model"):
                 continue
             
-            # Keep tool role as is for Ollama (OpenAI-compatible)
             if msg.role == "tool":
                 formatted_messages.append({
                     "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": msg.tool_call_id or "",
-                        "content": msg.content
-                    }]
+                    "content": f"[Tool result from {msg.tool_call_id or 'unknown'}]: {msg.content}"
                 })
-            # Handle summary role: convert to user
             elif msg.role == "summary":
-                formatted_messages.append({"role": "user", "content": [{"type": "text", "text": f"[Summary of previous conversation]\n{msg.content}"}]})
-            else:
-                content_blocks = [{"type": "text", "text": msg.content}]
-                if msg.role == "assistant" and msg.tool_use:
-                    for tool_use_block in msg.tool_use:
-                        func = tool_use_block.get("function", {})
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "id": tool_use_block.get("id", ""),
+                formatted_messages.append({"role": "user", "content": f"[Summary of previous conversation]\n{msg.content}"})
+            elif msg.role == "assistant" and msg.tool_use:
+                tool_calls = []
+                for tool_use_block in msg.tool_use:
+                    func = tool_use_block.get("function", {})
+                    tool_calls.append({
+                        "id": tool_use_block.get("id", ""),
+                        "type": "function",
+                        "function": {
                             "name": func.get("name", ""),
-                            "input": func.get("arguments", {}),
-                        })
-                formatted_messages.append({"role": msg.role, "content": content_blocks})
+                            "arguments": json.dumps(func.get("arguments", {}))
+                        }
+                    })
+                formatted_messages.append({"role": msg.role, "content": msg.content, "tool_calls": tool_calls})
+            else:
+                formatted_messages.append({"role": msg.role, "content": msg.content})
 
         payload = {
             "model": self.model,
@@ -677,13 +673,12 @@ class OllamaProvider(BaseProvider):
 
         print(f"[DEBUG] Messages count: {len(formatted_messages)}")
         for i, msg in enumerate(formatted_messages[:5]):
-            content = msg.get('content', [])
-            content_type = content[0].get('type') if content else 'none'
+            content = msg.get('content', '')
+            content_type = 'text' if isinstance(content, str) else 'array'
             print(f"[DEBUG] Message {i}: role={msg.get('role')}, content_type={content_type}")
         
         # Log the actual payload for debugging
         if debug:
-            import json
             print(f"[DEBUG] Full payload: {json.dumps(payload, indent=2)[:1000]}")
 
         debug_request = None
@@ -716,40 +711,62 @@ class OllamaProvider(BaseProvider):
                     )
             raise
 
-        data = response.json()
+        response_text = response.text.strip()
         
-        if "message" in data and "content" in data["message"]:
-            content = data["message"]["content"]
-        else:
-            content = data.get("content", "") or data.get("message", {}).get("content", "")
+        if not response_text:
+            return LLMResponse(
+                content="",
+                model=self.model,
+                usage={},
+                debug_request=debug_request,
+                debug_response=None,
+                tool_calls=None,
+            )
         
+        lines = response_text.split('\n')
+        full_content = ""
+        final_data = None
         tool_calls = None
-        if "message" in data and "tool_calls" in data["message"]:
-            tool_calls = data["message"]["tool_calls"]
+        total_usage = {}
         
-        usage = {}
-        if "usage" in data:
-            usage = {
-                "input_tokens": data["usage"].get("prompt_tokens", 0),
-                "output_tokens": data["usage"].get("completion_tokens", 0),
-                "total_tokens": data["usage"].get("total_tokens", 0),
-            }
-        elif "prompt_eval_count" in data:
-            usage = {
-                "input_tokens": data.get("prompt_eval_count", 0),
-                "output_tokens": data.get("eval_count", 0),
-                "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
-            }
-        elif content:
-            usage = estimate_tokens(content)
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                data = json.loads(line)
+                final_data = data
+                
+                if "message" in data and "content" in data["message"]:
+                    full_content += data["message"]["content"] or ""
+                
+                if "message" in data and "tool_calls" in data["message"]:
+                    tool_calls = data["message"]["tool_calls"]
+                
+                if "prompt_eval_count" in data:
+                    total_usage = {
+                        "input_tokens": data.get("prompt_eval_count", 0),
+                        "output_tokens": data.get("eval_count", 0),
+                        "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
+                    }
+            except json.JSONDecodeError:
+                continue
+        
+        if not full_content and final_data:
+            if "message" in final_data and "content" in final_data["message"]:
+                full_content = final_data["message"]["content"]
+            else:
+                full_content = final_data.get("content", "") or final_data.get("message", {}).get("content", "")
+        
+        if not total_usage and full_content:
+            total_usage = estimate_tokens(full_content)
 
         if debug:
-            debug_response = data
+            debug_response = final_data
 
         return LLMResponse(
-            content=content,
+            content=full_content,
             model=self.model,
-            usage=usage,
+            usage=total_usage,
             debug_request=debug_request,
             debug_response=debug_response,
             tool_calls=tool_calls,
