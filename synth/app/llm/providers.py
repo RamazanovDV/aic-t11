@@ -776,19 +776,32 @@ class OllamaProvider(BaseProvider):
         from app.llm.base import LLMChunk
 
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+
+        if self.api_key and self.api_key != "ollama":
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
         formatted_messages = []
         if system_prompt:
             formatted_messages.append({"role": "system", "content": system_prompt})
 
         for msg in messages:
-            msg_dict = {"role": msg.role, "content": msg.content}
-            if msg.role == "assistant" and msg.tool_use:
-                msg_dict["tool_calls"] = msg.tool_use
-            formatted_messages.append(msg_dict)
+            if msg.role in ("info", "model"):
+                continue
+            
+            if msg.role == "tool":
+                formatted_messages.append({
+                    "role": "user",
+                    "content": f"[Tool result from {msg.tool_call_id or 'unknown'}]: {msg.content}"
+                })
+            elif msg.role == "summary":
+                formatted_messages.append({"role": "user", "content": f"[Summary of previous conversation]\n{msg.content}"})
+            else:
+                msg_dict = {"role": msg.role, "content": msg.content}
+                if msg.role == "assistant" and msg.tool_use:
+                    msg_dict["tool_calls"] = msg.tool_use
+                formatted_messages.append(msg_dict)
 
         payload = {
             "model": self.model,
@@ -802,30 +815,28 @@ class OllamaProvider(BaseProvider):
 
         debug_request = None
         if debug:
+            debug_headers = {**headers}
+            if "Authorization" in debug_headers:
+                debug_headers["Authorization"] = f"Bearer {API_KEY_MASK}"
             debug_request = {
                 "url": self.url,
                 "method": "POST",
-                "headers": {**headers, "Authorization": f"Bearer {API_KEY_MASK}"},
+                "headers": debug_headers,
                 "body": payload,
             }
 
-        print(f"[ANTHROPIC] STEP7: Sending POST request...")
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
-        print(f"[ANTHROPIC] STEP8: Got response, status={response.status_code}")
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
-            print(f"[ANTHROPIC] ERROR: Status={response.status_code}")
-            print(f"[ANTHROPIC] ERROR Response body: {response.text[:1000]}")
             if response.status_code in (400, 422):
                 error_data = response.json() if response.content else {}
                 error_message = ""
                 if isinstance(error_data, dict):
                     error_message = error_data.get("error", {}).get("message", "") or error_data.get("message", "")
-                print(f"[ANTHROPIC] ERROR parsed: {error_message}")
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
-                        error_message or "Context window exceeded",
+                        error_message or "Context length exceeded",
                         debug_response=error_data if debug else None
                     )
             raise
@@ -837,40 +848,31 @@ class OllamaProvider(BaseProvider):
         for line in response.iter_lines():
             if line:
                 line = line.decode('utf-8')
-                if line.startswith('data: '):
-                    data_str = line[6:]
-                    if data_str.strip() == '[DONE]':
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    
+                    if data.get("done"):
                         break
-                    try:
-                        data = json.loads(data_str)
-                        
-                        if "message" in data:
-                            msg = data["message"]
-                            
-                            if "content" in msg:
-                                delta = msg.get("content", "")
-                                if delta:
-                                    full_content += delta
-                                    yield LLMChunk(content=full_content, is_final=False)
-                            
-                            if "tool_calls" in msg and msg["tool_calls"]:
-                                tool_calls = msg["tool_calls"]
-                        
-                        elif "choices" in data:
-                            delta = data.get("choices", [{}])[0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                full_content += content
-                                yield LLMChunk(content=full_content, is_final=False)
-
-                        if "eval_count" in data:
-                            total_usage = {
-                                "input_tokens": data.get("prompt_eval_count", 0),
-                                "output_tokens": data.get("eval_count", 0),
-                                "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
-                            }
-                    except json.JSONDecodeError:
-                        continue
+                    
+                    if "message" in data and "content" in data["message"]:
+                        delta = data["message"].get("content", "")
+                        if delta:
+                            full_content += delta
+                            yield LLMChunk(content=full_content, is_final=False)
+                    
+                    if "message" in data and data["message"].get("tool_calls"):
+                        tool_calls = data["message"]["tool_calls"]
+                    
+                    if "prompt_eval_count" in data:
+                        total_usage = {
+                            "input_tokens": data.get("prompt_eval_count", 0),
+                            "output_tokens": data.get("eval_count", 0),
+                            "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
+                        }
+                except json.JSONDecodeError:
+                    continue
 
         if not total_usage and full_content:
             total_usage = estimate_tokens(full_content)

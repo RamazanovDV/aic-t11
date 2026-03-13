@@ -1920,7 +1920,8 @@ def chat_stream():
 
         yield "data: [DONE]\n\n"
 
-    return Response(generate(), mimetype="text/event-stream")
+    from flask import stream_with_context
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
 @api_bp.route("/chat/reset", methods=["POST"])
