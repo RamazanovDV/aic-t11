@@ -30,6 +30,7 @@ class FileStorage:
         data = {
             "schema_version": "1.0.0",
             "session_id": session.session_id,
+            "debug_enabled": session.session_settings.get("debug_enabled", True),
             "messages": [
                 {
                     "id": m.id,

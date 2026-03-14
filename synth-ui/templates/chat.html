@@ -1185,9 +1185,27 @@
         await loadPanelModels(panelIndex);
     }
 
-    function togglePanelDebug(panelIndex) {
-        debugMode = document.querySelector(`.panel-debug-toggle[data-panel="${panelIndex}"]`).checked;
+    async function togglePanelDebug(panelIndex) {
+        const checkbox = document.querySelector(`.panel-debug-toggle[data-panel="${panelIndex}"]`);
+        debugMode = checkbox.checked;
+        console.log('togglePanelDebug called, panelIndex:', panelIndex, 'debugMode:', debugMode);
         localStorage.setItem('t6_debug', debugMode ? 'true' : 'false');
+        
+        const panel = panels[panelIndex];
+        console.log('Panel sessionId:', panel?.sessionId);
+        if (panel && panel.sessionId) {
+            try {
+                const response = await fetch(`/api/sessions/${panel.sessionId}/context-settings`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({debug_enabled: debugMode})
+                });
+                console.log('Context settings response:', response.status);
+            } catch (e) {
+                console.error('Failed to save debug setting:', e);
+            }
+        }
+        
         document.querySelectorAll('.panel-debug-toggle').forEach(cb => {
             cb.checked = debugMode;
         });
@@ -1830,8 +1848,8 @@
         
         // Check for status block
         const hasStatus = debugData && debugData.status;
-        const hasRequest = debugData && debugData.request;
-        const hasResponse = debugData && debugData.response;
+        const hasRequest = debugData && (debugData.request || debugData.api_request);
+        const hasResponse = debugData && (debugData.response || debugData.api_response);
         // Check for orchestrator format
         const hasOrchestratorRequest = debugData && debugData.orchestrator_request;
         const hasOrchestratorResponse = debugData && debugData.orchestrator_responses && debugData.orchestrator_responses.length > 0;
@@ -1863,13 +1881,16 @@
         }
         
         // For orchestrator mode - show all debug data
-        if (hasOrchestratorRequest || hasOrchestratorResponse || hasSubagents) {
+        const hasApiRequest = debugData && debugData.api_request;
+        const hasApiResponse = debugData && debugData.api_response;
+        
+        if (hasOrchestratorRequest || hasOrchestratorResponse || hasSubagents || hasApiRequest || hasApiResponse) {
             document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
             // Show appropriate tabs
             document.querySelectorAll('.debug-tab').forEach(t => {
-                if (t.dataset.tab === 'request' && hasOrchestratorRequest) {
+                if (t.dataset.tab === 'request' && (hasOrchestratorRequest || hasApiRequest)) {
                     t.style.display = '';
-                } else if (t.dataset.tab === 'response' && hasOrchestratorResponse) {
+                } else if (t.dataset.tab === 'response' && (hasOrchestratorResponse || hasApiResponse)) {
                     t.style.display = '';
                 } else if (t.dataset.tab === 'subagents') {
                     t.style.display = '';
@@ -1945,12 +1966,14 @@
                 document.querySelector('.debug-tab[data-tab="reasoning"]').style.display = '';
             }
             
-            if (hasResponse && !hasRequest) {
-                document.getElementById('debug-json').textContent = JSON.stringify(debugData.response, null, 2);
+            const requestData = debugData.request || debugData.api_request || {};
+            const responseData = debugData.response || debugData.api_response || {};
+            if (responseData && !Object.keys(requestData).length) {
+                document.getElementById('debug-json').textContent = JSON.stringify(responseData, null, 2);
                 document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
                 document.querySelector('.debug-tab[data-tab="response"]').classList.add('active');
             } else {
-                document.getElementById('debug-json').textContent = JSON.stringify(debugData ? debugData.request : {}, null, 2);
+                document.getElementById('debug-json').textContent = JSON.stringify(requestData, null, 2);
                 document.querySelectorAll('.debug-tab').forEach(t => t.classList.remove('active'));
                 document.querySelector('.debug-tab[data-tab="request"]').classList.add('active');
             }
@@ -1965,9 +1988,9 @@
             if (currentDebugData) {
             let data;
             if (tab === 'request') {
-                data = currentDebugData.request || currentDebugData.orchestrator_request || currentDebugData;
+                data = currentDebugData.request || currentDebugData.api_request || currentDebugData.orchestrator_request || currentDebugData;
             } else if (tab === 'response') {
-                data = currentDebugData.response || currentDebugData.orchestrator_responses || currentDebugData;
+                data = currentDebugData.response || currentDebugData.api_response || currentDebugData.orchestrator_responses || currentDebugData;
             } else if (tab === 'subagents') {
                 data = currentDebugData.subagent_calls || currentDebugData.subagents || [];
             } else if (tab === 'status') {

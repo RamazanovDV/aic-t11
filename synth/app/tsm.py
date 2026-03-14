@@ -1,6 +1,7 @@
 from typing import Optional, Any
 from app.config import config
 from app.logger import debug, info, warning, error
+from app.debug import DebugCollector
 
 
 VALID_STATES = {"planning", "execution", "validation", "done"}
@@ -241,7 +242,7 @@ def process_orchestrator_response(
     llm_messages: list,
     provider,
     system_prompt: str,
-    debug_mode: bool = False,
+    debug_collector: DebugCollector | None = None,
     debug_prompt: str | None = None,
     progress_queue=None,
     token_limit: int | None = None,
@@ -260,7 +261,7 @@ def process_orchestrator_response(
         llm_messages: список сообщений для LLM
         provider: провайдер LLM
         system_prompt: системный промт для LLM
-        debug_mode: включить отладочный вывод
+        debug_collector: DebugCollector для сбора отладочной информации
         debug_prompt: системный промт для отладки (если отличается от system_prompt)
         progress_queue: queue для отправки прогресса в реальном времени
         token_limit: лимит токенов для предупреждений
@@ -282,7 +283,19 @@ def process_orchestrator_response(
     prompt_for_debug = debug_prompt if debug_prompt is not None else system_prompt
     
     debug_info = {}
-    if debug_mode:
+    if debug_collector:
+        debug_collector.capture_session_info(
+            session_id=session.session_id,
+            model=provider.model,
+            provider=provider.get_provider_name()
+        )
+        if prompt_for_debug:
+            debug_collector.capture_api_request(
+                url=provider.url,
+                method="POST",
+                headers={},
+                body={"system_prompt": prompt_for_debug, "messages_count": len(llm_messages)}
+            )
         debug_info = {
             "orchestrator_request": {
                 "system_prompt": prompt_for_debug,
@@ -350,11 +363,11 @@ def process_orchestrator_response(
         current_system_prompt = build_system_prompt(system_prompt, active_subtasks_internal)
         
         try:
-            response = provider.chat(llm_messages, current_system_prompt, debug=debug_mode)
+            response = provider.chat(llm_messages, current_system_prompt, debug_collector=debug_collector)
         except Exception as e:
             error("TSM", f"ERROR in provider.chat iteration {iteration}: {e}")
             debug("TSM", "Stopping orchestration due to error, returning current results")
-            if debug_mode:
+            if debug_collector:
                 debug_info["error"] = str(e)
             break
         
@@ -370,7 +383,7 @@ def process_orchestrator_response(
         
         parsed_status, cleaned_content = validate_status_block(response.content)
         
-        if debug_mode and response.content:
+        if debug_collector and response.content:
             debug_info['orchestrator_responses'].append({
                 "content": response.content,
                 "parsed_status": parsed_status,
@@ -378,6 +391,9 @@ def process_orchestrator_response(
             })
             debug_info['raw_model_response'] = response.content
             debug_info['raw_status'] = parsed_status
+            debug_collector.capture_raw_model_response(response.content)
+            if parsed_status:
+                debug_collector.capture_status(parsed_status)
         
         # Сохраняем контент даже если нет parsed_status
         current_content = cleaned_content if cleaned_content else response.content
@@ -468,10 +484,10 @@ def process_orchestrator_response(
             print(f"[TSM] Calling subagent '{subtask_name}' with prompt len={len(subtask_prompt)}")
             
             try:
-                subagent_response = provider.chat(subagent_messages, None, debug=False)
+                subagent_response = provider.chat(subagent_messages, None, debug_collector=None)
                 print(f"[TSM] Subagent '{subtask_name}' response, usage: {subagent_response.usage}")
             except Exception as e:
-                if debug_mode:
+                if debug_collector:
                     subagent_call_info["error"] = str(e)
                     debug_info["subagent_calls"].append(subagent_call_info)
                 print(f"[TSM] Error calling subagent {subtask_name}: {e}")
@@ -493,7 +509,7 @@ def process_orchestrator_response(
             
             subagent_content = subagent_response.content
             
-            if debug_mode:
+            if debug_collector:
                 subagent_call_info["subagent_response"] = {
                     "content": subagent_content[:500] if subagent_content else ""
                 }
@@ -582,7 +598,7 @@ def process_orchestrator_response(
     # Send final token update
     send_token_update()
     
-    if debug_mode:
+    if debug_collector:
         try:
             debug_usage = response.usage
         except UnboundLocalError:
@@ -600,7 +616,7 @@ def process_orchestrator_response(
         "final_content": current_content,
         "final_status": current_status,
         "raw_response": raw_response,
-        "debug": debug_info if debug_mode else None,
+        "debug": debug_info if debug_collector else None,
         "usage": total_usage,
         "subtask_results": subtask_results,
         "aborted": was_aborted

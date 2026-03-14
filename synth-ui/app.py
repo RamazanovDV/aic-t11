@@ -113,7 +113,6 @@ def chat():
     user_message = data["message"]
     provider_name = data.get("provider")
     model = data.get("model")
-    debug_mode = data.get("debug", False)
     session_id = get_session_id()
 
     url = f"{ui_config.backend_url}/api/chat"
@@ -124,7 +123,7 @@ def chat():
         "Content-Type": "application/json",
     }
 
-    payload = {"message": user_message, "debug": debug_mode}
+    payload = {"message": user_message}
     if provider_name:
         payload["provider"] = provider_name
     if model:
@@ -149,7 +148,6 @@ def chat_stream():
     user_message = data["message"]
     provider_name = data.get("provider")
     model = data.get("model")
-    debug_mode = data.get("debug", False)
     session_id = get_session_id()
 
     url = f"{ui_config.backend_url}/api/chat/stream"
@@ -160,7 +158,7 @@ def chat_stream():
         "Content-Type": "application/json",
     }
 
-    payload = {"message": user_message, "debug": debug_mode}
+    payload = {"message": user_message}
     if provider_name:
         payload["provider"] = provider_name
     if model:

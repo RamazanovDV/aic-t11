@@ -58,7 +58,7 @@ class Session:
     total_tokens: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    session_settings: dict[str, Any] = field(default_factory=dict)
+    session_settings: dict[str, Any] = field(default_factory=lambda: {"debug_enabled": True})
     branches: list[Branch] = field(default_factory=list)
     checkpoints: list[Checkpoint] = field(default_factory=list)
     current_branch: str = "main"
@@ -813,6 +813,12 @@ class SessionManager:
             if "user_settings" in data and "session_settings" not in data:
                 data["session_settings"] = data.pop("user_settings")
         
+        if "debug_enabled" not in data:
+            if data.get("session_settings", {}).get("debug_enabled"):
+                data["debug_enabled"] = data["session_settings"]["debug_enabled"]
+            else:
+                data["debug_enabled"] = True
+        
         data["schema_version"] = self.CURRENT_SCHEMA_VERSION
         return data
 
@@ -978,6 +984,7 @@ class SessionManager:
                     access=data.get("access", "owner"),
                     mcp_servers=mcp_servers,
                 )
+                session.session_settings["debug_enabled"] = data.get("debug_enabled", True)
                 session._ensure_main_branch()
                 self._sessions[session_id] = session
                 return session
@@ -1060,6 +1067,7 @@ class SessionManager:
                     access=data.get("access", "owner"),
                     mcp_servers=mcp_servers,
                 )
+                session.session_settings["debug_enabled"] = data.get("debug_enabled", True)
                 session._ensure_main_branch()
                 self._sessions[session_id] = session
             else:

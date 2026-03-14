@@ -15,6 +15,7 @@ Flask API сервер для Synth AI Agent.
 - Token limit handling (warning/abort)
 - Ветки и чекпоинты
 - Админ-панель
+- Debug режим - сбор отладочной информации для каждого сообщения
 
 ## Установка
 
@@ -69,6 +70,7 @@ python run.py
 |-------|------|----------|
 | DELETE | `/api/sessions/<id>/messages/<index>` | Удалить сообщение |
 | POST | `/api/sessions/<id>/messages/<index>/toggle` | Включить/выключить сообщение |
+| GET | `/api/sessions/<id>/messages/<msg_id>/debug` | Получить debug информацию сообщения |
 
 ### Context
 | Метод | Путь | Описание |
@@ -171,6 +173,7 @@ mcp:
 {
   "schema_version": "1.0.0",
   "session_id": "string",
+  "debug_enabled": true,
   "messages": [...],
   "created_at": "ISO8601",
   "updated_at": "ISO8601",
@@ -179,7 +182,7 @@ mcp:
   "total_tokens": 0,
   "input_tokens": 0,
   "output_tokens": 0,
-  "settings": {...},
+  "session_settings": {...},
   "branches": [...],
   "checkpoints": [...],
   "current_branch": "main",
@@ -201,6 +204,7 @@ mcp:
 | `disabled` | boolean | Исключено из LLM-контекста |
 | `branch_id` | string | ID ветки (по умолчанию `main`) |
 | `source` | string? | Источник: `web`, `cli` |
+| `debug` | object? | Debug информация (null если выключено) |
 
 ### Settings (сессионные настройки)
 
@@ -250,6 +254,79 @@ pip install jsonschema
 
 # Валидировать файл
 jsonschema -i data/sessions/mysession.json schemas/session.json
+```
+
+### Debug режим
+
+Система сбора отладочной информации для диагностики работы LLM.
+
+#### Включение/выключение
+
+- **По умолчанию**: включён для новых сессий
+- **Переключение**: через UI (галочка Debug) или API:
+  ```bash
+  # Включить
+  curl -X POST http://localhost:5000/api/sessions/<id>/context-settings \
+    -H "Content-Type: application/json" \
+    -d '{"debug_enabled": true}'
+  
+  # Выключить
+  curl -X POST http://localhost:5000/api/sessions/<id>/context-settings \
+    -H "Content-Type: application/json" \
+    -d '{"debug_enabled": false}'
+  ```
+
+#### Получение debug информации
+
+```bash
+# Через API
+curl http://localhost:5000/api/sessions/<id>/messages/<msg_id>/debug
+```
+
+#### Структура debug данных
+
+```json
+{
+  "api_request": {
+    "url": "https://api.openai.com/v1/chat/completions",
+    "method": "POST",
+    "headers": {...},
+    "body": {...}
+  },
+  "api_response": {...},
+  "raw_model_response": "...",
+  "reasoning": "...",
+  "status": {...},
+  "session": {
+    "session_id": "...",
+    "model": "gpt-4",
+    "provider": "openai"
+  },
+  "subagents": [...],
+  "mcp_calls": [...]
+}
+```
+
+#### DebugCollector
+
+Класс `DebugCollector` в `app/debug.py` отвечает за сбор отладочной информации:
+
+```python
+from app.debug import DebugCollector
+
+# Создать из настроек сессии
+dc = DebugCollector.from_session(session)
+
+# Сбор данных
+dc.capture_api_request(url, method, headers, body)
+dc.capture_api_response(response)
+dc.capture_reasoning(reasoning)
+dc.capture_status(status)
+dc.capture_session_info(session_id, model, provider)
+dc.capture_mcp_call(tool, arguments, result, is_error)
+
+# Получить результат
+debug_info = dc.get_debug_info()  # None если debug выключен
 ```
 
 ### Legacy Fields

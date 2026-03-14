@@ -29,8 +29,6 @@ class LLMResponse:
     content: str
     model: str
     usage: dict[str, int] = field(default_factory=dict)
-    debug_request: dict | None = None
-    debug_response: dict | None = None
     tool_calls: list[dict] | None = None
     reasoning: str | None = None
 
@@ -53,11 +51,11 @@ class BaseProvider(ABC):
         self.temperature = temperature
 
     @abstractmethod
-    def chat(self, messages, system_prompt=None, debug=False, tools=None):
+    def chat(self, messages, system_prompt=None, debug_collector=None, tools=None):
         pass
 
     @abstractmethod
-    def stream_chat(self, messages, system_prompt=None, debug=False, tools=None):
+    def stream_chat(self, messages, system_prompt=None, debug_collector=None, tools=None):
         pass
 
     @abstractmethod

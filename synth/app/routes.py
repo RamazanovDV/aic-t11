@@ -23,6 +23,7 @@ from app import scheduler
 from app.auth import get_auth_provider, require_user, require_admin, get_current_user
 from app.mcp import mcp_available, mcp_config
 from app.logger import debug, info, warning, error
+from app.debug import DebugCollector
 
 _mcp_event_loop: asyncio.AbstractEventLoop | None = None
 
@@ -648,7 +649,7 @@ async def _process_status_block(
     system_prompt: str,
     session,
     session_id: str,
-    debug_mode: bool,
+    debug_collector,
     user_id: str | None = None,
     max_retries: int = 3,
     mcp_tools: list | None = None,
@@ -663,6 +664,8 @@ async def _process_status_block(
             - status_error: строка с ошибкой если все попытки неудачны
             - debug_info: отладочная информация
     """
+    debug_mode = debug_collector.enabled if debug_collector else False
+    
     if mcp_calls is None:
         mcp_calls = []
     
@@ -693,7 +696,7 @@ async def _process_status_block(
                 if use_tools:
                     debug("MCP", f"Sending {len(use_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in use_tools]}")
                 
-                response = provider.chat(llm_messages, prompt_with_reminder, debug=debug_mode, tools=use_tools)
+                response = provider.chat(llm_messages, prompt_with_reminder, debug_collector=debug_collector, tools=use_tools)
             except Exception as e:
                 import traceback
                 error("ROUTES", f"provider.chat() failed: {e}")
@@ -831,10 +834,11 @@ def _process_orchestrator_mode(
     system_prompt: str,
     session,
     session_id: str,
-    debug_mode: bool,
+    debug_collector,
     user_id: str | None = None,
 ):
     """Обработать ответ в режиме оркестратора с поддержкой сабагентов."""
+    debug_mode = debug_collector.enabled if debug_collector else False
     debug("ORCHESTRATOR", f"Starting orchestrator mode, debug_mode: {debug_mode}")
     try:
         result = tsm.process_orchestrator_response(
@@ -843,7 +847,7 @@ def _process_orchestrator_mode(
             provider=provider,
             system_prompt=system_prompt,
             debug_prompt=system_prompt,
-            debug_mode=debug_mode
+            debug_collector=debug_collector
         )
         debug("ORCHESTRATOR", f"Result keys: {result.keys() if result else 'None'}")
     except Exception as e:
@@ -1138,7 +1142,7 @@ def chat():
     user_message = data["message"]
     provider_name = data.get("provider")
     model = data.get("model")
-    debug_mode = data.get("debug", False)
+    debug_mode = data.get("debug", False)  # Deprecated - for backward compat
     source_type = data.get("source", "web")
     mcp_servers = data.get("mcp_servers", [])
     mcp_calls = []
@@ -1178,6 +1182,8 @@ def chat():
 
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
+
+    debug_collector = DebugCollector.from_session(session)
 
     request_id = RequestTracker.create_request()
 
@@ -1242,7 +1248,7 @@ def chat():
 
     try:
         response, message_for_user, status_error, orchestrator_debug = run_mcp_async(_process_status_block(
-            provider, llm_messages, system_prompt, session, session_id, debug_mode, 
+            provider, llm_messages, system_prompt, session, session_id, debug_collector, 
             request.headers.get("X-User-Id"), mcp_tools=mcp_tools, mcp_calls=mcp_calls
         ))
         if status_error:
@@ -1275,22 +1281,20 @@ def chat():
         result = {"error": f"LLM error: {str(e)}", "model": provider.model}
         return jsonify(result), 500
 
-    debug_info = None
-    if debug_mode:
-        if orchestrator_debug:
-            debug_info = orchestrator_debug
-        else:
-            debug_info = {
-                "request": response.debug_request,
-                "response": response.debug_response,
-            }
+    if debug_collector.enabled:
+        debug_collector.capture_reasoning(response.reasoning)
+        debug_collector.capture_session_info(session.session_id, provider.model, provider.get_provider_name())
         if session.status:
-            debug_info['status'] = session.status
-            debug_info['subtasks'] = session.status.get('subtasks', [])
-        if mcp_calls:
-            debug_info['mcp_calls'] = mcp_calls
-        if response.reasoning:
-            debug_info['reasoning'] = response.reasoning
+            debug_collector.capture_status(session.status)
+        for mcp in mcp_calls:
+            debug_collector.capture_mcp_call(
+                tool=mcp.get("tool", ""),
+                arguments=mcp.get("arguments", {}),
+                result=mcp.get("result", ""),
+                is_error=mcp.get("is_error", False)
+            )
+
+    debug_info = debug_collector.get_debug_info()
 
     message_index = len(session.messages)
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls, reasoning=response.reasoning)
@@ -1366,7 +1370,7 @@ def chat_stream():
     user_message = data["message"]
     provider_name = data.get("provider")
     model = data.get("model")
-    debug_mode = data.get("debug", False)
+    debug_mode = data.get("debug", False)  # Deprecated - for backward compat
     source_type = data.get("source", "web")
     mcp_servers = data.get("mcp_servers", [])
     mcp_calls = []
@@ -1406,6 +1410,8 @@ def chat_stream():
 
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
+
+    debug_collector = DebugCollector.from_session(session)
 
     if data.get("tsm_mode"):
         try:
@@ -1680,22 +1686,19 @@ def chat_stream():
         full_content = ""
         full_reasoning = ""
         total_usage = {}
-        debug_request = None
-        debug_response = None
 
-        if debug_mode:
-            debug_request = {
-                "url": provider.url,
-                "method": "POST",
-                "model": provider.model,
-                "headers": {"Content-Type": "application/json"},
-                "body": {
+        if debug_collector and debug_collector.enabled:
+            debug_collector.capture_api_request(
+                url=provider.url,
+                method="POST",
+                headers={"Content-Type": "application/json"},
+                body={
                     "model": provider.model,
                     "messages": formatted_messages,
                     "temperature": 0.7,
                     "stream": True,
                 },
-            }
+            )
 
         try:
             # Конвертируем в Message объекты
@@ -1708,7 +1711,7 @@ def chat_stream():
             
             if mcp_tools:
                 debug("MCP", f"Stream: Sending {len(mcp_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in mcp_tools]}")
-            for chunk in provider.stream_chat(llm_msgs, None, debug=debug_mode, tools=mcp_tools):
+            for chunk in provider.stream_chat(llm_msgs, None, debug_collector=debug_collector, tools=mcp_tools):
                 if chunk.tool_calls and not tool_calls_handled:
                     tool_calls_handled = True
                     tool_use_for_message = chunk.tool_calls  # Save for later
@@ -1769,7 +1772,7 @@ def chat_stream():
                         
                         debug("MCP", f"Executing {len(tool_call_results)} tool(s), continuing stream...")
                         
-                        for new_chunk in provider.stream_chat(tool_messages, None, debug=debug_mode, tools=None):
+                        for new_chunk in provider.stream_chat(tool_messages, None, debug_collector=debug_collector, tools=None):
                             full_content = new_chunk.content
                             full_reasoning = new_chunk.reasoning if new_chunk.reasoning else full_reasoning
                             debug("MCP", f"Stream after tool: content='{full_content[:100] if full_content else 'EMPTY'}', is_final={new_chunk.is_final}, tool_calls={new_chunk.tool_calls}")
@@ -1807,9 +1810,12 @@ def chat_stream():
             if not full_content:
                 raise Exception("Empty response from provider")
 
-            debug_info = {"request": debug_request, "response": debug_response, "raw_model_response": full_content} if debug_mode else None
-            if debug_info and full_reasoning:
-                debug_info['reasoning'] = full_reasoning
+            if debug_collector.enabled:
+                debug_collector.capture_raw_model_response(full_content)
+                debug_collector.capture_reasoning(full_reasoning)
+                debug_collector.capture_session_info(session.session_id, provider.model, provider.get_provider_name())
+
+            debug_info = debug_collector.get_debug_info()
             
             content_for_user = full_content
             status_error = None
@@ -1945,6 +1951,18 @@ def chat_stream():
                 debug_info['mcp_calls'] = mcp_calls
             
             # Update or add assistant message
+            if debug_collector.enabled:
+                if session.status:
+                    debug_collector.capture_status(session.status)
+                for mcp in mcp_calls:
+                    debug_collector.capture_mcp_call(
+                        tool=mcp.get("tool", ""),
+                        arguments=mcp.get("arguments", {}),
+                        result=mcp.get("result", ""),
+                        is_error=mcp.get("is_error", False)
+                    )
+            debug_info = debug_collector.get_debug_info()
+            
             if preliminary_saved:
                 # Update the last message with full debug info
                 last_msg = session.messages[-1]
@@ -2292,6 +2310,9 @@ def set_context_settings(session_id: str):
         if limit > 1000:
             limit = 1000
         session.session_settings["sliding_window_limit"] = limit
+
+    if "debug_enabled" in data:
+        session.session_settings["debug_enabled"] = bool(data["debug_enabled"])
 
     session_manager.save_session(session_id)
 

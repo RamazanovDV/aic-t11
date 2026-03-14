@@ -39,6 +39,7 @@ graph TB
             context["context.py<br/>ContextManager, get_system_prompt"]
             logger["logger.py<br/>debug, info, warning, error"]
             request_tracker["request_tracker.py<br/>RequestTracker"]
+            debug["debug.py<br/>DebugCollector"]
         end
     end
     
@@ -60,6 +61,7 @@ graph TB
     routes --> project_mgr
     routes --> scheduler
     routes --> storage
+    routes --> debug
     
     session --> models
     session --> storage

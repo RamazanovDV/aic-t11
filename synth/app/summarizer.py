@@ -1,6 +1,7 @@
 from app.config import config
 from app.llm.base import Message
 from app.llm import ProviderFactory
+from app.debug import DebugCollector
 
 
 def get_summarizer_prompt() -> str:
@@ -33,8 +34,10 @@ def summarize_messages(messages: list[Message], debug: bool = False) -> tuple[st
 
     provider = ProviderFactory.create(config.summarizer_provider, provider_config)
 
+    debug_collector = DebugCollector(enabled=debug)
+    
     summary_messages = [Message(role="user", content=full_prompt, usage={})]
-    response = provider.chat(summary_messages, "", debug=debug)
+    response = provider.chat(summary_messages, "", debug_collector=debug_collector)
 
     debug_info = {}
     if debug:
@@ -43,9 +46,10 @@ def summarize_messages(messages: list[Message], debug: bool = False) -> tuple[st
             "summarized_messages": formatted,
             "model": config.summarizer_model,
             "provider": config.summarizer_provider,
-            "request": response.debug_request if hasattr(response, 'debug_request') else {},
-            "response": response.debug_response if hasattr(response, 'debug_response') else {},
         }
+        if debug_collector.enabled:
+            debug_info["request"] = debug_collector._api_request
+            debug_info["response"] = debug_collector._api_response
 
     return response.content, debug_info
 

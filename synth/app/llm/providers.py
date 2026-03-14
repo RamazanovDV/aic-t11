@@ -4,6 +4,7 @@ from typing import Generator
 import requests
 
 from app.llm.base import BaseProvider, LLMChunk, LLMResponse, Message
+from app.debug import DebugCollector
 from app.logger import debug as dbg, info, warning, error
 
 
@@ -52,7 +53,7 @@ class ContextLengthExceededError(Exception):
 
 
 class GenericOpenAIProvider(BaseProvider):
-    def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False, tools: list[dict] | None = None) -> LLMResponse:
+    def chat(self, messages: list[Message], system_prompt: str | None = None, debug_collector: DebugCollector | None = None, tools: list[dict] | None = None) -> LLMResponse:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -79,16 +80,13 @@ class GenericOpenAIProvider(BaseProvider):
         if tools:
             payload["tools"] = tools
 
-        debug_request = None
-        debug_response = None
-        
-        if debug:
-            debug_request = {
-                "url": self.url,
-                "method": "POST",
-                "headers": {**headers, "Authorization": f"Bearer {API_KEY_MASK}"},
-                "body": payload,
-            }
+        if debug_collector:
+            debug_collector.capture_api_request(
+                url=self.url,
+                method="POST",
+                headers=headers,
+                body=payload,
+            )
 
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
         try:
@@ -102,7 +100,7 @@ class GenericOpenAIProvider(BaseProvider):
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
-                        debug_response=error_data if debug else None
+                        debug_response=error_data if debug_collector and debug_collector.enabled else None
                     )
             raise
 
@@ -122,15 +120,13 @@ class GenericOpenAIProvider(BaseProvider):
         
         usage = extract_usage(data)
 
-        if debug:
-            debug_response = data
+        if debug_collector:
+            debug_collector.capture_api_response(data)
 
         return LLMResponse(
             content=content,
             model=self.model,
             usage=usage,
-            debug_request=debug_request,
-            debug_response=debug_response,
             tool_calls=tool_calls,
             reasoning=reasoning if reasoning else None,
         )
@@ -162,7 +158,7 @@ class GenericOpenAIProvider(BaseProvider):
     def get_provider_name(self) -> str:
         return "generic"
 
-    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False, tools: list | None = None) -> Generator[LLMChunk, None, None]:
+    def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug_collector: DebugCollector | None = None, tools: list | None = None) -> Generator[LLMChunk, None, None]:
         from app.llm.base import LLMChunk
 
         headers = {
@@ -199,7 +195,7 @@ class GenericOpenAIProvider(BaseProvider):
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
-                        debug_response=error_data if debug else None
+                        debug_response=error_data if debug_collector and debug_collector.enabled else None
                     )
             raise
 
@@ -244,7 +240,7 @@ class GenericOpenAIProvider(BaseProvider):
 
 
 class OpenAIProvider(GenericOpenAIProvider):
-    def chat(self, messages: list[Message], system_prompt: str | None = None, debug: bool = False, tools: list | None = None) -> LLMResponse:
+    def chat(self, messages: list[Message], system_prompt: str | None = None, debug_collector: DebugCollector | None = None, tools: list | None = None) -> LLMResponse:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -266,16 +262,13 @@ class OpenAIProvider(GenericOpenAIProvider):
         if tools:
             payload["tools"] = tools
 
-        debug_request = None
-        debug_response = None
-        
-        if debug:
-            debug_request = {
-                "url": self.url,
-                "method": "POST",
-                "headers": {**headers, "Authorization": f"Bearer {API_KEY_MASK}"},
-                "body": payload,
-            }
+        if debug_collector:
+            debug_collector.capture_api_request(
+                url=self.url,
+                method="POST",
+                headers=headers,
+                body=payload,
+            )
 
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
         try:
@@ -289,7 +282,7 @@ class OpenAIProvider(GenericOpenAIProvider):
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
-                        debug_response=error_data if debug else None
+                        debug_response=error_data if debug_collector and debug_collector.enabled else None
                     )
             raise
 
@@ -306,15 +299,13 @@ class OpenAIProvider(GenericOpenAIProvider):
                 "total_tokens": data["usage"].get("total_tokens", 0),
             }
 
-        if debug:
-            debug_response = data
+        if debug_collector:
+            debug_collector.capture_api_response(data)
 
         return LLMResponse(
             content=content,
             model=self.model,
             usage=usage,
-            debug_request=debug_request,
-            debug_response=debug_response,
             reasoning=reasoning if reasoning else None,
         )
 
@@ -323,7 +314,7 @@ class OpenAIProvider(GenericOpenAIProvider):
 
 
 class AnthropicProvider(BaseProvider):
-    def chat(self, messages, system_prompt=None, debug=False, tools=None) -> LLMResponse:
+    def chat(self, messages, system_prompt=None, debug_collector: DebugCollector | None = None, tools=None) -> LLMResponse:
         dbg("ANTHROPIC", f"STEP1: Entered chat(), messages={len(messages)}, tools={bool(tools)}")
         
         headers = {
@@ -399,19 +390,16 @@ class AnthropicProvider(BaseProvider):
                 except Exception as me:
                     dbg("ANTHROPIC", f"  Message {i}: PROBLEM - {me}")
                     dbg("ANTHROPIC", f"    Content: {str(msg.get('content', ''))[:500]}")
-
-        debug_request = None
-        debug_response = None
         
         dbg("ANTHROPIC", "chat() STEP7: Calling requests.post()...")
         
-        if debug:
-            debug_request = {
-                "url": self.url,
-                "method": "POST",
-                "headers": {**headers, "Authorization": f"Bearer {API_KEY_MASK}"},
-                "body": payload,
-            }
+        if debug_collector:
+            debug_collector.capture_api_request(
+                url=self.url,
+                method="POST",
+                headers=headers,
+                body=payload,
+            )
 
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
         
@@ -431,7 +419,7 @@ class AnthropicProvider(BaseProvider):
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
-                        debug_response=error_data if debug else None
+                        debug_response=error_data if debug_collector and debug_collector.enabled else None
                     )
             raise
 
@@ -460,15 +448,13 @@ class AnthropicProvider(BaseProvider):
         
         usage = extract_usage(data)
 
-        if debug:
-            debug_response = data
+        if debug_collector:
+            debug_collector.capture_api_response(data)
 
         return LLMResponse(
             content=content,
             model=self.model,
             usage=usage,
-            debug_request=debug_request,
-            debug_response=debug_response,
             tool_calls=tool_calls,
             reasoning=reasoning if reasoning else None,
         )
@@ -507,7 +493,7 @@ class AnthropicProvider(BaseProvider):
     def get_provider_name(self) -> str:
         return "anthropic"
 
-    def stream_chat(self, messages, system_prompt=None, debug=False, tools=None):
+    def stream_chat(self, messages, system_prompt=None, debug_collector: DebugCollector | None = None, tools=None):
         from app.llm.base import LLMChunk
 
         headers = {
@@ -561,16 +547,15 @@ class AnthropicProvider(BaseProvider):
         if tools:
             payload["tools"] = tools
 
-        debug_request = None
-        if debug:
-            debug_request = {
-                "url": self.url,
-                "method": "POST",
-                "headers": {**headers, "Authorization": f"Bearer {API_KEY_MASK}"},
-                "body": payload,
-            }
+        if debug_collector:
+            debug_collector.capture_api_request(
+                url=self.url,
+                method="POST",
+                headers={**headers, "Authorization": f"Bearer {API_KEY_MASK}"},
+                body=payload,
+            )
 
-        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout, stream=True)
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
@@ -585,7 +570,7 @@ class AnthropicProvider(BaseProvider):
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
-                        debug_response=error_data if debug else None
+                        debug_response=error_data if debug_collector and debug_collector.enabled else None
                     )
             raise
 
@@ -669,7 +654,7 @@ class AnthropicProvider(BaseProvider):
 
 
 class OllamaProvider(BaseProvider):
-    def chat(self, messages, system_prompt=None, debug=False, tools=None):
+    def chat(self, messages, system_prompt=None, debug_collector: DebugCollector | None = None, tools=None):
         headers = {
             "Content-Type": "application/json",
         }
@@ -724,23 +709,16 @@ class OllamaProvider(BaseProvider):
             content_type = 'text' if isinstance(content, str) else 'array'
             dbg("DEBUG", f"Message {i}: role={msg.get('role')}, content_type={content_type}")
         
-        # Log the actual payload for debugging
-        if debug:
-            dbg("DEBUG", f"Full payload: {json.dumps(payload, indent=2)[:1000]}")
-
-        debug_request = None
-        debug_response = None
-        
-        if debug:
+        if debug_collector:
             debug_headers = {**headers}
             if "Authorization" in debug_headers:
                 debug_headers["Authorization"] = f"Bearer {API_KEY_MASK}"
-            debug_request = {
-                "url": self.url,
-                "method": "POST",
-                "headers": debug_headers,
-                "body": payload,
-            }
+            debug_collector.capture_api_request(
+                url=self.url,
+                method="POST",
+                headers=debug_headers,
+                body=payload,
+            )
 
         response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
         try:
@@ -754,7 +732,7 @@ class OllamaProvider(BaseProvider):
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context window exceeded",
-                        debug_response=error_data if debug else None
+                        debug_response=error_data if debug_collector and debug_collector.enabled else None
                     )
             raise
 
@@ -765,8 +743,6 @@ class OllamaProvider(BaseProvider):
                 content="",
                 model=self.model,
                 usage={},
-                debug_request=debug_request,
-                debug_response=None,
                 tool_calls=None,
             )
         
@@ -811,20 +787,18 @@ class OllamaProvider(BaseProvider):
         if not total_usage and full_content:
             total_usage = estimate_tokens(full_content)
 
-        if debug:
-            debug_response = final_data
+        if debug_collector and final_data:
+            debug_collector.capture_api_response(final_data)
 
         return LLMResponse(
             content=full_content,
             model=self.model,
             usage=total_usage,
-            debug_request=debug_request,
-            debug_response=debug_response,
             tool_calls=tool_calls,
             reasoning=full_thinking if full_thinking else None,
         )
 
-    def stream_chat(self, messages, system_prompt=None, debug=False, tools=None):
+    def stream_chat(self, messages, system_prompt=None, debug_collector: DebugCollector | None = None, tools=None):
         from app.llm.base import LLMChunk
 
         headers = {
@@ -865,19 +839,15 @@ class OllamaProvider(BaseProvider):
         if tools:
             payload["tools"] = tools
 
-        debug_request = None
-        if debug:
-            debug_headers = {**headers}
-            if "Authorization" in debug_headers:
-                debug_headers["Authorization"] = f"Bearer {API_KEY_MASK}"
-            debug_request = {
-                "url": self.url,
-                "method": "POST",
-                "headers": debug_headers,
-                "body": payload,
-            }
+        if debug_collector:
+            debug_collector.capture_api_request(
+                url=self.url,
+                method="POST",
+                headers={**headers, "Authorization": f"Bearer {API_KEY_MASK}"},
+                body=payload,
+            )
 
-        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
+        response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout, stream=True)
         try:
             response.raise_for_status()
         except requests.HTTPError as e:
@@ -889,7 +859,7 @@ class OllamaProvider(BaseProvider):
                 if "context" in error_message.lower() or "length" in error_message.lower() or "token" in error_message.lower():
                     raise ContextLengthExceededError(
                         error_message or "Context length exceeded",
-                        debug_response=error_data if debug else None
+                        debug_response=error_data if debug_collector and debug_collector.enabled else None
                     )
             raise
 

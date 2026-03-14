@@ -190,3 +190,11 @@ llm:
 ## Important Notes
 ### Debug Usage
 The `debug` field in messages is intended ONLY for user-facing information in Debug mode. It must NEVER be used in any internal mechanisms, UI logic, or backend processing. Use dedicated fields (like `status`) for such purposes.
+
+### Debug System
+Debug information is collected via `DebugCollector` class (`app/debug.py`):
+- Controlled by `session.debug_enabled` (stored at root of session JSON)
+- Default: enabled for new sessions
+- Use `DebugCollector.from_session(session)` to create a collector
+- All API calls should use `debug_collector` parameter instead of `debug: bool`
+- Get debug info via `debug_collector.get_debug_info()` (returns None if disabled)
