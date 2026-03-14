@@ -1708,6 +1708,7 @@ def chat_stream():
             tool_calls_handled = False
             tool_use_for_message = None  # Track tool_use for saving to session
             preliminary_saved = False  # Track if we've already saved to avoid duplicate messages
+            preliminary_message_id = None  # ID сообщения для последующего обновления
             
             if mcp_tools:
                 debug("MCP", f"Stream: Sending {len(mcp_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in mcp_tools]}")
@@ -1780,6 +1781,7 @@ def chat_stream():
                                 total_usage = new_chunk.usage
                                 debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
                                 session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning)
+                                preliminary_message_id = session.messages[-1].id
                                 session_manager.save_session(session_id)
                                 preliminary_saved = True
                             yield f"data: {json.dumps({'content': full_content, 'reasoning': full_reasoning, 'done': new_chunk.is_final})}\n\n"
@@ -1799,6 +1801,7 @@ def chat_stream():
                     debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
                     # Save to session immediately to avoid race condition with UI
                     session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning)
+                    preliminary_message_id = session.messages[-1].id
                     session_manager.save_session(session_id)
                     preliminary_saved = True
                     break
@@ -1963,8 +1966,20 @@ def chat_stream():
                     )
             debug_info = debug_collector.get_debug_info()
             
-            if preliminary_saved:
-                # Update the last message with full debug info
+            if preliminary_saved and preliminary_message_id:
+                # Find assistant message by ID (search from end to handle info messages added after)
+                target_msg = None
+                for msg in reversed(session.messages):
+                    if msg.id == preliminary_message_id:
+                        target_msg = msg
+                        break
+                if target_msg:
+                    target_msg.content = content_for_user
+                    target_msg.usage = total_usage
+                    target_msg.debug = debug_info
+                    target_msg.tool_use = tool_use_for_message
+            elif preliminary_saved:
+                # Fallback: update last message if no ID stored
                 last_msg = session.messages[-1]
                 last_msg.content = content_for_user
                 last_msg.usage = total_usage
