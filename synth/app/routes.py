@@ -699,12 +699,6 @@ async def _process_status_block(
                 if use_tools:
                     debug("MCP", f"Sending {len(use_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in use_tools]}")
                 
-                # Debug: dump messages being sent
-                print(f"[DEBUG ROUTES] llm_messages count: {len(llm_messages)}")
-                for i, msg in enumerate(llm_messages):
-                    if hasattr(msg, 'role'):
-                        print(f"[DEBUG ROUTES] msg[{i}] role={msg.role}, tool_use={getattr(msg, 'tool_use', None)[:2] if getattr(msg, 'tool_use', None) else None}")
-                
                 response = provider.chat(llm_messages, prompt_with_reminder, debug_collector=debug_collector, tools=use_tools)
             except Exception as e:
                 import traceback
@@ -728,14 +722,11 @@ async def _process_status_block(
             if group_id is None:
                 group_id = str(uuid.uuid4())
             
-            print(f"[DEBUG ROUTES] tool_calls from response: {json.dumps(response.tool_calls, ensure_ascii=False)[:500]}")
-            
             session.add_assistant_message(
                 response.content or "",
                 response.usage or {},
                 debug={"usage": response.usage or {}, "model": provider.model},
                 model=provider.model,
-                tool_use=response.tool_calls,
                 reasoning=response.reasoning,
                 group_id=group_id
             )
@@ -783,7 +774,6 @@ async def _process_status_block(
                         "tool_call_id": tc.get("id"),
                         "content": tool_result_content,
                     })
-                    print(f"[DEBUG ROUTES] tool_call_id from tc.get('id'): {tc.get('id')}")
                 
                 # Build tool messages and call model again
                 tool_messages = list(llm_messages)
@@ -1323,7 +1313,7 @@ def chat():
     debug_info = debug_collector.get_debug_info()
 
     message_index = len(session.messages)
-    session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls, reasoning=response.reasoning, group_id=group_id)
+    session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, reasoning=response.reasoning, group_id=group_id)
     
     debug("STORAGE", f"Saving session after assistant message, messages count: {len(session.messages)}")
     session_manager.save_session(session_id)
@@ -1823,7 +1813,7 @@ def chat_stream():
                             if new_chunk.is_final:
                                 total_usage = new_chunk.usage
                                 debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
-                                session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning, group_id=group_id)
+                                session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, reasoning=full_reasoning, group_id=group_id)
                                 preliminary_message_id = session.messages[-1].id
                                 session_manager.save_session(session_id)
                                 preliminary_saved = True
@@ -1843,7 +1833,7 @@ def chat_stream():
                     info("STREAM", f"Model: {provider.model}")
                     debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
                     # Save to session immediately to avoid race condition with UI
-                    session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning, group_id=group_id)
+                    session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, reasoning=full_reasoning, group_id=group_id)
                     preliminary_message_id = session.messages[-1].id
                     session_manager.save_session(session_id)
                     preliminary_saved = True
@@ -2031,7 +2021,7 @@ def chat_stream():
                 last_msg.tool_use = tool_use_for_message
                 last_msg.group_id = group_id
             else:
-                session.add_assistant_message(content_for_user, total_usage, debug=debug_info, model=provider.model, tool_use=tool_use_for_message, group_id=group_id)
+                session.add_assistant_message(content_for_user, total_usage, debug=debug_info, model=provider.model, group_id=group_id)
 
             session_manager.save_session(session_id)
 
