@@ -699,6 +699,12 @@ async def _process_status_block(
                 if use_tools:
                     debug("MCP", f"Sending {len(use_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in use_tools]}")
                 
+                # Debug: dump messages being sent
+                print(f"[DEBUG ROUTES] llm_messages count: {len(llm_messages)}")
+                for i, msg in enumerate(llm_messages):
+                    if hasattr(msg, 'role'):
+                        print(f"[DEBUG ROUTES] msg[{i}] role={msg.role}, tool_use={getattr(msg, 'tool_use', None)[:2] if getattr(msg, 'tool_use', None) else None}")
+                
                 response = provider.chat(llm_messages, prompt_with_reminder, debug_collector=debug_collector, tools=use_tools)
             except Exception as e:
                 import traceback
@@ -721,6 +727,8 @@ async def _process_status_block(
             # Создаём group_id и сохраняем промежуточное сообщение
             if group_id is None:
                 group_id = str(uuid.uuid4())
+            
+            print(f"[DEBUG ROUTES] tool_calls from response: {json.dumps(response.tool_calls, ensure_ascii=False)[:500]}")
             
             session.add_assistant_message(
                 response.content or "",
@@ -775,6 +783,7 @@ async def _process_status_block(
                         "tool_call_id": tc.get("id"),
                         "content": tool_result_content,
                     })
+                    print(f"[DEBUG ROUTES] tool_call_id from tc.get('id'): {tc.get('id')}")
                 
                 # Build tool messages and call model again
                 tool_messages = list(llm_messages)

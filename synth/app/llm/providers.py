@@ -337,6 +337,7 @@ class AnthropicProvider(BaseProvider):
             
             # Handle tool role: convert to anthropic format
             if msg.role == "tool":
+                print(f"[DEBUG PROVIDER] tool role - tool_call_id: {msg.tool_call_id}, content: {msg.content[:100] if msg.content else 'empty'}")
                 formatted_messages.append({
                     "role": "user",
                     "content": [{
@@ -354,6 +355,7 @@ class AnthropicProvider(BaseProvider):
                 if msg.role == "assistant" and msg.tool_use:
                     for tool_use_block in msg.tool_use:
                         func = tool_use_block.get("function", {})
+                        print(f"[DEBUG PROVIDER] assistant with tool_use - id: {tool_use_block.get('id')}, name: {func.get('name')}")
                         content_blocks.append({
                             "type": "tool_use",
                             "id": tool_use_block.get("id", ""),
