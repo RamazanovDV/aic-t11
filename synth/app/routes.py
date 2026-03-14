@@ -1,5 +1,6 @@
 import json
 import re
+import uuid
 import asyncio
 from datetime import datetime
 
@@ -658,11 +659,12 @@ async def _process_status_block(
     """Обработать ответ LLM с валидацией статуса.
     
     Returns:
-        tuple: (response, message_for_user, status_error, debug_info)
+        tuple: (response, message_for_user, status_error, debug_info, group_id)
             - response: LLMResponse или dict с content/usage для orchestrator
             - message_for_user: очищенный контент без JSON блока
             - status_error: строка с ошибкой если все попытки неудачны
             - debug_info: отладочная информация
+            - group_id: ID группы сообщений (если были tool calls)
     """
     debug_mode = debug_collector.enabled if debug_collector else False
     
@@ -684,6 +686,7 @@ async def _process_status_block(
     
     tools_called_in_current_attempt = False
     response = None
+    group_id = None  # ID группы для связанных сообщений
     
     for attempt in range(max_retries):
         
@@ -714,6 +717,20 @@ async def _process_status_block(
                 break
             
             tools_called_in_current_attempt = True
+            
+            # Создаём group_id и сохраняем промежуточное сообщение
+            if group_id is None:
+                group_id = str(uuid.uuid4())
+            
+            session.add_assistant_message(
+                response.content or "",
+                response.usage or {},
+                debug={"usage": response.usage or {}, "model": provider.model},
+                model=provider.model,
+                tool_use=response.tool_calls,
+                reasoning=response.reasoning,
+                group_id=group_id
+            )
             
             # Execute tool calls
             debug("MCP", f"Detected {len(response.tool_calls)} tool call(s)")
@@ -785,7 +802,7 @@ async def _process_status_block(
             debug("MCP", "Tools were called but no status block - returning error")
             # Return the content anyway, don't retry
             cleaned_content = response.content if response.content else ""
-            return response, cleaned_content, "Модель вызвала инструменты, но не предоставила статусный блок", None
+            return response, cleaned_content, "Модель вызвала инструменты, но не предоставила статусный блок", None, group_id
         
         if response:
             parsed_status, cleaned_content = status_validator.validate_status_block(response.content)
@@ -796,13 +813,13 @@ async def _process_status_block(
         if tools_called_in_current_attempt and response:
             debug("MCP", "Tools were called but no status block - returning content without error")
             cleaned_content = response.content if response.content else ""
-            return response, cleaned_content, None, None
+            return response, cleaned_content, None, None, group_id
         
         # If no status block - just return content without error, keep old status
         if parsed_status is None:
             debug("ROUTES", "No status block in response - returning content without updating status")
             cleaned_content = response.content if response.content else ""
-            return response, cleaned_content, None, None
+            return response, cleaned_content, None, None, group_id
         
         # Process status transition if status block exists
         parsed_status = tsm.process_state_transition(session, parsed_status)
@@ -813,7 +830,7 @@ async def _process_status_block(
         
         _handle_user_info_update(parsed_status, user_id)
         
-        return response, cleaned_content, None, None
+        return response, cleaned_content, None, None, group_id
 
         if attempt < max_retries - 1:
             llm_messages = session.get_messages_for_llm()
@@ -1247,14 +1264,14 @@ def chat():
     mcp_tools = run_mcp_async(_get_mcp_tools(session, actual_provider_type))
 
     try:
-        response, message_for_user, status_error, orchestrator_debug = run_mcp_async(_process_status_block(
+        response, message_for_user, status_error, orchestrator_debug, group_id = run_mcp_async(_process_status_block(
             provider, llm_messages, system_prompt, session, session_id, debug_collector, 
             request.headers.get("X-User-Id"), mcp_tools=mcp_tools, mcp_calls=mcp_calls
         ))
         if status_error:
             # Save assistant message first
             if message_for_user:
-                session.add_assistant_message(message_for_user, response.usage if response else {}, debug=orchestrator_debug if debug_mode else None, model=response.model if response else provider.model)
+                session.add_assistant_message(message_for_user, response.usage if response else {}, debug=orchestrator_debug if debug_mode else None, model=response.model if response else provider.model, group_id=group_id)
             session.add_error_message(f"[Ошибка статуса] {status_error}", debug=orchestrator_debug if debug_mode else None, model=provider.model)
             session_manager.save_session(session_id)
             RequestTracker.error(request_id, status_error)
@@ -1297,7 +1314,7 @@ def chat():
     debug_info = debug_collector.get_debug_info()
 
     message_index = len(session.messages)
-    session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls, reasoning=response.reasoning)
+    session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls, reasoning=response.reasoning, group_id=group_id)
     
     debug("STORAGE", f"Saving session after assistant message, messages count: {len(session.messages)}")
     session_manager.save_session(session_id)
@@ -1709,6 +1726,7 @@ def chat_stream():
             tool_use_for_message = None  # Track tool_use for saving to session
             preliminary_saved = False  # Track if we've already saved to avoid duplicate messages
             preliminary_message_id = None  # ID сообщения для последующего обновления
+            group_id = None  # ID группы для связанных сообщений
             
             if mcp_tools:
                 debug("MCP", f"Stream: Sending {len(mcp_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in mcp_tools]}")
@@ -1716,8 +1734,24 @@ def chat_stream():
                 if chunk.tool_calls and not tool_calls_handled:
                     tool_calls_handled = True
                     tool_use_for_message = chunk.tool_calls  # Save for later
+                    group_id = str(uuid.uuid4())  # Новый group_id для группы сообщений
                     debug("MCP", f"Stream: Detected {len(chunk.tool_calls)} tool call(s)")
                     debug("MCP", f"Stream: Tool calls: {json.dumps(chunk.tool_calls, ensure_ascii=False)[:500]}")
+                    
+                    # Сохраняем промежуточное сообщение с group_id
+                    session.add_assistant_message(
+                        chunk.content or "",
+                        chunk.usage or {},
+                        debug={"usage": chunk.usage or {}, "model": provider.model},
+                        model=provider.model,
+                        tool_use=chunk.tool_calls,
+                        reasoning=chunk.reasoning,
+                        group_id=group_id
+                    )
+                    preliminary_message_id = session.messages[-1].id
+                    preliminary_saved = True
+                    session_manager.save_session(session_id)
+                    
                     try:
                         from app.mcp import MCPManager
                         import asyncio
@@ -1780,7 +1814,7 @@ def chat_stream():
                             if new_chunk.is_final:
                                 total_usage = new_chunk.usage
                                 debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
-                                session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning)
+                                session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning, group_id=group_id)
                                 preliminary_message_id = session.messages[-1].id
                                 session_manager.save_session(session_id)
                                 preliminary_saved = True
@@ -1800,7 +1834,7 @@ def chat_stream():
                     info("STREAM", f"Model: {provider.model}")
                     debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
                     # Save to session immediately to avoid race condition with UI
-                    session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning)
+                    session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, tool_use=tool_use_for_message, reasoning=full_reasoning, group_id=group_id)
                     preliminary_message_id = session.messages[-1].id
                     session_manager.save_session(session_id)
                     preliminary_saved = True
@@ -1978,6 +2012,7 @@ def chat_stream():
                     target_msg.usage = total_usage
                     target_msg.debug = debug_info
                     target_msg.tool_use = tool_use_for_message
+                    target_msg.group_id = group_id
             elif preliminary_saved:
                 # Fallback: update last message if no ID stored
                 last_msg = session.messages[-1]
@@ -1985,8 +2020,9 @@ def chat_stream():
                 last_msg.usage = total_usage
                 last_msg.debug = debug_info
                 last_msg.tool_use = tool_use_for_message
+                last_msg.group_id = group_id
             else:
-                session.add_assistant_message(content_for_user, total_usage, debug=debug_info, model=provider.model, tool_use=tool_use_for_message)
+                session.add_assistant_message(content_for_user, total_usage, debug=debug_info, model=provider.model, tool_use=tool_use_for_message, group_id=group_id)
 
             session_manager.save_session(session_id)
 

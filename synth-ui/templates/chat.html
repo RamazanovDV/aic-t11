@@ -17,6 +17,11 @@
 <div id="debug-modal" class="modal" style="display: none;">
     <div class="debug-modal-content">
         <h3>Debug Info</h3>
+        <div id="group-nav" style="display: none; text-align: center; margin: 10px 0;">
+            <button class="btn btn-small" onclick="prevGroupMessage()">◀</button>
+            <span id="group-counter" style="margin: 0 10px;">1 / 1</span>
+            <button class="btn btn-small" onclick="nextGroupMessage()">▶</button>
+        </div>
         <div class="debug-tabs">
             <button class="debug-tab active" data-tab="request" onclick="switchDebugTab('request')">Request</button>
             <button class="debug-tab" data-tab="response" onclick="switchDebugTab('response')">Response</button>
@@ -298,6 +303,9 @@
     let panels = [];
     let debugMode = localStorage.getItem('t6_debug') === 'true';
     let currentDebugData = null;
+    let currentGroupId = null;
+    let currentGroupIndex = 0;
+    let currentGroupMessages = [];
     let availableProviders = [];
     let allSessions = [];
     let sessionEventSources = {};
@@ -889,8 +897,9 @@
                     else if (s.task_name && s.task_name !== 'conversation') statusClass = 'state-active';
                 }
                 
-                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass, msg.reasoning || null);
+                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass, msg.reasoning || null, msg.group_id || null);
                 panel.messages[idx]._renderIndex = idx;
+                panel.messages[idx].messageIndex = idx;
             });
             
             const lastMsg = panel.messages[panel.messages.length - 1];
@@ -910,7 +919,7 @@
         }
     }
 
-    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null) {
+    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null) {
         const panel = panels[panelIndex];
         const container = panel.messagesContainer;
         if (!container) return;
@@ -1007,7 +1016,7 @@
         // 3. Debug (bottom-left)
         if ((role === 'assistant' || role === 'error' || role === 'summary') && debugData) {
             const debugJson = encodeURIComponent(JSON.stringify(debugData));
-            actionsHtml += `<button class="message-debug-btn" data-debug="${debugJson}" title="Debug">🔍</button>`;
+            actionsHtml += `<button class="message-debug-btn" data-debug="${debugJson}" data-group-id="${groupId || ''}" data-msg-index="${messageIndex}" title="Debug">🔍</button>`;
         }
         
         // 4. Delete (bottom-right)
@@ -1023,8 +1032,69 @@
             rowDiv.appendChild(actionsDiv);
         }
         
+        // Группировка сообщений - скрываем промежуточные
+        let isInGroup = false;
+        let isLastInGroup = true;
+        let groupCount = 0;
+        
+        if (groupId && panel.messages) {
+            const groupMessages = panel.messages.filter(m => m.group_id === groupId);
+            groupCount = groupMessages.length;
+            isInGroup = groupCount > 1;
+            
+            if (isInGroup) {
+                // Найти текущее сообщение в группе
+                const currentMsgIndex = panel.messages.findIndex(m => m.messageIndex === messageIndex);
+                const groupMsgIndices = groupMessages.map(m => m.messageIndex).sort((a, b) => a - b);
+                const currentInGroupIndex = groupMsgIndices.indexOf(currentMsgIndex);
+                isLastInGroup = currentInGroupIndex === groupMsgIndices.length - 1;
+                
+                if (!isLastInGroup) {
+                    // Скрыть промежуточное сообщение
+                    rowDiv.style.display = 'none';
+                    rowDiv.classList.add('hidden-group-message');
+                    rowDiv.dataset.groupId = groupId;
+                }
+            }
+        }
+        
         container.appendChild(rowDiv);
+        
+        // Добавить кнопку раскрытия группы для последнего сообщения
+        if (isInGroup && isLastInGroup && groupCount > 1 && actionsHtml) {
+            const groupExpandBtn = document.createElement('button');
+            groupExpandBtn.className = 'group-expand-btn';
+            groupExpandBtn.textContent = `Показать ${groupCount - 1}...`;
+            groupExpandBtn.title = `Показать ${groupCount - 1} промежуточных ответов`;
+            groupExpandBtn.onclick = function() { toggleGroup(groupId, panelIndex); };
+            actionsDiv.appendChild(groupExpandBtn);
+        }
+        
         container.scrollTop = container.scrollHeight;
+    }
+    
+    function toggleGroup(groupId, panelIndex) {
+        const panel = panels[panelIndex];
+        const container = document.getElementById(`messages-${panelIndex}`);
+        const hiddenMessages = container.querySelectorAll(`.hidden-group-message[data-group-id="${groupId}"]`);
+        const isHidden = hiddenMessages.length > 0 && hiddenMessages[0].style.display === 'none';
+        
+        hiddenMessages.forEach(el => {
+            el.style.display = isHidden ? '' : 'none';
+        });
+        
+        // Обновить текст кнопки
+        const btn = container.querySelector(`.group-expand-btn`);
+        if (btn) {
+            if (isHidden) {
+                btn.textContent = 'Скрыть';
+                btn.title = 'Скрыть промежуточные ответы';
+            } else {
+                const groupMessages = panel.messages.filter(m => m.group_id === groupId);
+                btn.textContent = `Показать ${groupMessages.length - 1}...`;
+                btn.title = `Показать ${groupMessages.length - 1} промежуточных ответов`;
+            }
+        }
     }
 
     function updatePanelStats(panelIndex, inputTokens, outputTokens, totalTokens) {
@@ -1840,8 +1910,37 @@
         }
     }
 
-    function showDebugModal(debugData) {
+    function showDebugModal(debugData, groupId = null, msgIndex = -1) {
         currentDebugData = debugData;
+        currentGroupId = groupId;
+        currentGroupIndex = 0;
+        currentGroupMessages = [];
+        
+        // Найти все сообщения в группе если есть groupId
+        if (groupId) {
+            for (const panel of panels) {
+                if (panel.messages) {
+                    const groupMsgs = panel.messages.filter(m => m.group_id === groupId);
+                    if (groupMsgs.length > 0) {
+                        currentGroupMessages = groupMsgs;
+                        currentGroupIndex = groupMsgs.findIndex(m => m.messageIndex === msgIndex);
+                        if (currentGroupIndex === -1) currentGroupIndex = 0;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Показать переключатель группы если есть
+        const groupNav = document.getElementById('group-nav');
+        if (groupNav) {
+            if (currentGroupMessages.length > 1) {
+                groupNav.style.display = 'block';
+                updateGroupNavCounter();
+            } else {
+                groupNav.style.display = 'none';
+            }
+        }
         
         // Check if this is a summary debug (has summarized_messages)
         const isSummary = debugData && debugData.summarized_messages;
@@ -2022,6 +2121,40 @@
                 data = currentDebugData.reasoning ? {reasoning: currentDebugData.reasoning} : null;
             }
             document.getElementById('debug-json').textContent = JSON.stringify(data, null, 2);
+        }
+    }
+    
+    function updateGroupNavCounter() {
+        const counter = document.getElementById('group-counter');
+        if (counter) {
+            counter.textContent = `${currentGroupIndex + 1} / ${currentGroupMessages.length}`;
+        }
+    }
+    
+    function prevGroupMessage() {
+        if (currentGroupIndex > 0 && currentGroupMessages.length > 0) {
+            currentGroupIndex--;
+            const msg = currentGroupMessages[currentGroupIndex];
+            if (msg && msg.debug) {
+                currentDebugData = msg.debug;
+                document.getElementById('debug-json').textContent = JSON.stringify(msg.debug, null, 2);
+                updateGroupNavCounter();
+                // Переключить на вкладку с отображением всего
+                switchDebugTab('raw');
+            }
+        }
+    }
+    
+    function nextGroupMessage() {
+        if (currentGroupIndex < currentGroupMessages.length - 1 && currentGroupMessages.length > 0) {
+            currentGroupIndex++;
+            const msg = currentGroupMessages[currentGroupIndex];
+            if (msg && msg.debug) {
+                currentDebugData = msg.debug;
+                document.getElementById('debug-json').textContent = JSON.stringify(msg.debug, null, 2);
+                updateGroupNavCounter();
+                switchDebugTab('raw');
+            }
         }
     }
 
@@ -2440,10 +2573,12 @@
         const btn = e.target.closest('.message-debug-btn');
         if (btn) {
             const debugJson = btn.dataset.debug;
+            const groupId = btn.dataset.groupId;
+            const msgIndex = parseInt(btn.dataset.msgIndex) || -1;
             if (debugJson) {
                 try {
                     const debugData = JSON.parse(decodeURIComponent(debugJson));
-                    showDebugModal(debugData);
+                    showDebugModal(debugData, groupId, msgIndex);
                 } catch (err) {
                     console.error('Failed to parse debug data:', err);
                 }

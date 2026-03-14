@@ -47,6 +47,7 @@ class FileStorage:
                     "reasoning": m.reasoning,
                     "tool_call_id": m.tool_call_id,
                     "tool_use": m.tool_use,
+                    "group_id": m.group_id,
                 }
                 for m in session.messages
             ],

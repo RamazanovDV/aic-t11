@@ -131,8 +131,8 @@ class Session:
             "total_tokens": self.total_tokens,
         }
 
-    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None, tool_use: list[dict] | None = None, reasoning: str | None = None) -> None:
-        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch, status=self.status.copy() if self.status else None, tool_use=tool_use, reasoning=reasoning)
+    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None, tool_use: list[dict] | None = None, reasoning: str | None = None, group_id: str | None = None) -> None:
+        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch, status=self.status.copy() if self.status else None, tool_use=tool_use, reasoning=reasoning, group_id=group_id)
         self.messages.append(msg)
         if usage:
             self.total_tokens += usage.get("total_tokens", 0)
@@ -850,6 +850,7 @@ class SessionManager:
                         reasoning=m.get("reasoning"),
                         tool_call_id=m.get("tool_call_id"),
                         tool_use=m.get("tool_use"),
+                        group_id=m.get("group_id"),
                     ))
 
                 branches = [
@@ -936,6 +937,7 @@ class SessionManager:
                         reasoning=m.get("reasoning"),
                         tool_call_id=m.get("tool_call_id"),
                         tool_use=m.get("tool_use"),
+                        group_id=m.get("group_id"),
                     ))
                 
                 branches = []
@@ -1024,6 +1026,7 @@ class SessionManager:
                         reasoning=m.get("reasoning"),
                         tool_call_id=m.get("tool_call_id"),
                         tool_use=m.get("tool_use"),
+                        group_id=m.get("group_id"),
                     ))
                 
                 branches = []
