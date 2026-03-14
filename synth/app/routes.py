@@ -1289,6 +1289,8 @@ def chat():
             debug_info['subtasks'] = session.status.get('subtasks', [])
         if mcp_calls:
             debug_info['mcp_calls'] = mcp_calls
+        if response.reasoning:
+            debug_info['reasoning'] = response.reasoning
 
     message_index = len(session.messages)
     session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, tool_use=response.tool_calls, reasoning=response.reasoning)
