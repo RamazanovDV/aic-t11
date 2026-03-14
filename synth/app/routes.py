@@ -3064,21 +3064,25 @@ def delete_model(model_name: str):
 def session_events(session_id: str):
     """SSE endpoint for session updates."""
     import time
+    from flask import stream_with_context
     
+    @stream_with_context
     def generate():
-        from flask import stream_with_context, request
+        from flask import request
         from app import events
         
-        @stream_with_context
-        def yield_messages():
-            response = request._get_current_object()
-            events.subscribe(session_id, response)
-            try:
-                while True:
-                    time.sleep(1)
-            except GeneratorExit:
-                events.unsubscribe(session_id, response)
+        response = request._get_current_object()
         
-        return yield_messages()
+        # Send initial comment to establish connection
+        yield ":\n\n"
+        
+        events.subscribe(session_id, response)
+        
+        try:
+            while True:
+                time.sleep(1)
+                yield ":\n\n"  # Keep-alive
+        except GeneratorExit:
+            events.unsubscribe(session_id, response)
     
-    return Response(generate(), mimetype="text/event-stream")
+    return Response(generate(), mimetype='text/event-stream')

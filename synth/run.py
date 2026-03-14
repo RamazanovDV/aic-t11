@@ -13,4 +13,5 @@ app = create_app()
 
 if __name__ == "__main__":
     print(f"Starting backend on {config.host}:{config.port}")
-    app.run(host=config.host, port=config.port, debug=True)
+    # Use reloader=False to avoid double-loading issues
+    app.run(host=config.host, port=config.port, debug=True, use_reloader=False)
