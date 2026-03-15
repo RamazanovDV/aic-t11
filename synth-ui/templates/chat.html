@@ -922,7 +922,6 @@
 
     function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null) {
         const panel = panels[panelIndex];
-        console.log('[DEBUG] addMessageToPanel - groupId:', groupId, 'role:', role, 'messageIndex:', messageIndex);
         const container = panel.messagesContainer;
         if (!container) return;
 
@@ -1035,72 +1034,39 @@
             rowDiv.appendChild(actionsDiv);
         }
         
-        // Группировка сообщений - скрываем промежуточные
-        let isInGroup = false;
-        let isLastInGroup = true;
-        let groupCount = 0;
-        
+        // Группировка сообщений - добавляем атрибуты для группы
         if (groupId && panel.messages) {
-            console.log('[DEBUG] groupId:', groupId);
             const groupMessages = panel.messages.filter(m => m.group_id === groupId);
-            console.log('[DEBUG] groupMessages count:', groupMessages.length, 'panel.messages length:', panel.messages.length);
-            groupCount = groupMessages.length;
-            isInGroup = groupCount > 1;
+            const groupCount = groupMessages.length;
+            const isInGroup = groupCount > 1;
             
             if (isInGroup) {
-                // Находим все сообщения с таким же group_id
-                const allGroupMessages = panel.messages.filter(m => m.group_id === groupId);
-                
-                // Находим максимальный messageIndex в группе
-                let maxMsgIdx = -1;
-                for (const msg of allGroupMessages) {
-                    if (msg.messageIndex !== undefined && msg.messageIndex !== null) {
-                        maxMsgIdx = Math.max(maxMsgIdx, msg.messageIndex);
-                    }
-                }
-                
-                // Также проверяем messageIndex текущего сообщения (который ещё не установлен)
-                maxMsgIdx = Math.max(maxMsgIdx, messageIndex);
-                
-                isLastInGroup = (maxMsgIdx === messageIndex);
-                console.log('[DEBUG] maxMsgIdx:', maxMsgIdx, 'messageIndex:', messageIndex, 'isLastInGroup:', isLastInGroup);
-                
-                if (!isLastInGroup) {
-                    // Скрыть промежуточное сообщение
-                    rowDiv.style.display = 'none';
-                    rowDiv.classList.add('hidden-group-message');
-                    rowDiv.dataset.groupId = groupId;
-                    console.log('[DEBUG] HIDING message');
-                } else {
-                    console.log('[DEBUG] NOT hiding - is last in group');
-                }
+                rowDiv.dataset.groupId = groupId;
+                rowDiv.classList.add('group-message');
             }
-        } else {
-            console.log('[DEBUG] No group - displaying normally');
         }
+        
+        console.log('[DEBUG] addMessageToPanel - groupId:', groupId, 'role:', role, 'messageIndex:', messageIndex);
         
         container.appendChild(rowDiv);
         
         // Добавить кнопку раскрытия группы для последнего сообщения
             if (isInGroup && isLastInGroup && groupCount > 1 && actionsDiv) {
-                const groupExpandBtn = document.createElement('button');
-                groupExpandBtn.className = 'group-expand-btn';
-                groupExpandBtn.textContent = `Показать ${groupCount - 1}...`;
-                groupExpandBtn.title = `Показать ${groupCount - 1} промежуточных ответов`;
-                groupExpandBtn.onclick = function() { toggleGroup(groupId, panelIndex); };
-                actionsDiv.appendChild(groupExpandBtn);
+                // Кнопку пока убираем - нужно переделать логику
             }
         
         container.scrollTop = container.scrollHeight;
     }
     
     function toggleGroup(groupId, panelIndex) {
-        const panel = panels[panelIndex];
         const container = document.getElementById(`messages-${panelIndex}`);
-        const hiddenMessages = container.querySelectorAll(`.hidden-group-message[data-group-id="${groupId}"]`);
-        const isHidden = hiddenMessages.length > 0 && hiddenMessages[0].style.display === 'none';
+        if (!container) return;
         
-        hiddenMessages.forEach(el => {
+        // Toggle all messages in group
+        const groupMessages = container.querySelectorAll(`.group-message[data-group-id="${groupId}"]`);
+        const isHidden = groupMessages.length > 0 && groupMessages[0].style.display === 'none';
+        
+        groupMessages.forEach(el => {
             el.style.display = isHidden ? '' : 'none';
         });
         
