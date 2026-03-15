@@ -852,6 +852,7 @@ body {
     color: var(--text-secondary);
     font-style: italic;
     border-radius: 12px;
+    flex: none;
 }
 
 .message.message-error {

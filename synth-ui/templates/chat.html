@@ -879,6 +879,19 @@
             panel.totalOutput = data.output_tokens || 0;
             panel.totalTokens = data.total_tokens || 0;
             
+            // Построить groupInfo: groupId -> { intermediateCount, lastIndex }
+            const groupInfoMap = new Map();
+            panel.messages.forEach((msg, idx) => {
+                if (msg.group_id && msg.role === 'assistant') {
+                    if (!groupInfoMap.has(msg.group_id)) {
+                        groupInfoMap.set(msg.group_id, { intermediateCount: 0, lastIndex: idx });
+                    }
+                    const info = groupInfoMap.get(msg.group_id);
+                    info.intermediateCount++;
+                    info.lastIndex = idx;
+                }
+            });
+            
             panel.messages.forEach((msg, idx) => {
                 let statusClass = 'state-free';
                 
@@ -897,7 +910,9 @@
                     else if (s.task_name && s.task_name !== 'conversation') statusClass = 'state-active';
                 }
                 
-                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass, msg.reasoning || null, msg.group_id || null);
+                const groupId = msg.group_id || null;
+                const groupInfo = groupId ? groupInfoMap.get(groupId) : null;
+                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass, msg.reasoning || null, groupId, groupInfo);
                 panel.messages[idx]._renderIndex = idx;
                 panel.messages[idx].messageIndex = idx;
                 panel.messages[idx].group_id = msg.group_id || null;
@@ -923,7 +938,7 @@
         }
     }
     
-    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null) {
+    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null, groupInfo = null) {
         const panel = panels[panelIndex];
         const container = panel.messagesContainer;
         if (!container) return;
@@ -937,6 +952,21 @@
         
         if (statusClass && (role === 'user' || role === 'assistant')) {
             div.classList.add(statusClass);
+        }
+        
+        // Блок для промежуточных сообщений (скрытый по умолчанию)
+        let intermediateBlockHtml = '';
+        if (role === 'assistant' && groupInfo && groupInfo.intermediateCount > 0) {
+            intermediateBlockHtml = `
+                <div class="group-toggle-block" data-group-id="${groupId}" style="display:none">
+                    <div class="group-toggle-header" onclick="toggleGroupToggle(this)">
+                        <span class="group-toggle-icon">▼</span>
+                        <span class="group-toggle-text" data-count="${groupInfo.intermediateCount}">${groupInfo.intermediateCount} промежуточных</span>
+                    </div>
+                    <div class="group-toggle-content">
+                    </div>
+                </div>
+            `;
         }
         
         let contentHtml = '';
@@ -991,7 +1021,7 @@
             sourceHtml = `<div class="message-tokens" style="cursor: pointer;" onclick="openProfileModal('${username}')">${source}</div>`;
         }
         
-        let html = thinkingBlockHtml + contentHtml;
+        let html = thinkingBlockHtml + intermediateBlockHtml + contentHtml;
         if (tokensHtml) {
             html += tokensHtml;
         }
@@ -1070,10 +1100,9 @@
             if (groupMsgIndices.length <= 1) continue;
             
             const lastIndex = groupMsgIndices[groupMsgIndices.length - 1];
-            const hiddenCount = groupMsgIndices.length - 1;
             
+            // Найти предсозданный блок
             const allRows = Array.from(container.querySelectorAll('.message-row'));
-            
             const lastRow = allRows.find(row => {
                 const idx = row.dataset.messageIndex;
                 return idx !== undefined && parseInt(idx) === lastIndex;
@@ -1081,18 +1110,14 @@
             
             if (!lastRow) continue;
             
-            lastRow.dataset.groupId = groupId;
+            // Найти контейнер для промежуточных сообщений
+            const groupBlock = lastRow.querySelector('.group-toggle-block');
+            if (!groupBlock) continue;
             
-            let groupToggleBlockHtml = `
-                <div class="group-toggle-block">
-                    <div class="group-toggle-header" onclick="toggleGroupToggle(this)">
-                        <span class="group-toggle-icon">▼</span>
-                        <span class="group-toggle-text" data-count="${hiddenCount}">${hiddenCount} промежуточных</span>
-                    </div>
-                    <div class="group-toggle-content" style="display:none">
-            `;
+            const contentContainer = groupBlock.querySelector('.group-toggle-content');
+            if (!contentContainer) continue;
             
-            // Добавить промежуточные сообщения в блок и УДАЛИТЬ оригиналы
+            // Добавить промежуточные сообщения в блок и удалить оригинальные
             for (let i = 0; i < groupMsgIndices.length - 1; i++) {
                 const idx = groupMsgIndices[i];
                 const msgRow = allRows.find(row => {
@@ -1104,24 +1129,15 @@
                     const clonedContent = msgRow.cloneNode(true);
                     clonedContent.style.display = '';
                     clonedContent.classList.add('group-nested-message');
-                    groupToggleBlockHtml += clonedContent.outerHTML;
+                    contentContainer.appendChild(clonedContent);
                     
-                    // Удаляем оригинальный ряд полностью
+                    // Удаляем оригинальный ряд
                     msgRow.remove();
                 }
             }
             
-            groupToggleBlockHtml += `
-                    </div>
-                </div>
-            `;
-            
-            // Вставить блок В НАЧАЛО .message div (после message-content)
-            const msgDiv = lastRow.querySelector('.message');
-            const msgContentDiv = msgDiv?.querySelector('.message-content');
-            if (msgContentDiv) {
-                msgContentDiv.insertAdjacentHTML('afterend', groupToggleBlockHtml);
-            }
+            // Показать блок
+            groupBlock.style.display = 'block';
         }
     }
     
