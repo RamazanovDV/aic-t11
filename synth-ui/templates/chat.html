@@ -1047,15 +1047,28 @@
             isInGroup = groupCount > 1;
             
             if (isInGroup) {
-                // Проверить является ли это сообщение последним в группе
+                // Детальная отладка
+                console.log('[DEBUG] panel.messages sample:', panel.messages.slice(0, 3).map(m => ({messageIndex: m.messageIndex, group_id: m.group_id})));
+                console.log('[DEBUG] current messageIndex:', messageIndex, 'groupId:', groupId);
+                
                 // Находим все сообщения с таким же group_id
                 const allGroupMessages = panel.messages.filter(m => m.group_id === groupId);
-                // Сортируем по messageIndex
-                allGroupMessages.sort((a, b) => (a.messageIndex || 0) - (b.messageIndex || 0));
-                // Последнее сообщение в группе
-                const lastMessageInGroup = allGroupMessages[allGroupMessages.length - 1];
-                isLastInGroup = (lastMessageInGroup && lastMessageInGroup.messageIndex === messageIndex);
-                console.log('[DEBUG] messageIndex:', messageIndex, 'lastMessageInGroup.messageIndex:', lastMessageInGroup ? lastMessageInGroup.messageIndex : 'N/A', 'isLastInGroup:', isLastInGroup);
+                console.log('[DEBUG] allGroupMessages:', allGroupMessages.map(m => ({messageIndex: m.messageIndex, group_id: m.group_id})));
+                
+                // Проверить есть ли messageIndex у элементов
+                if (allGroupMessages.length > 0) {
+                    console.log('[DEBUG] first in group has messageIndex:', allGroupMessages[0].messageIndex);
+                }
+                
+                // Последнее сообщение в группе - по messageIndex
+                let lastMsgIdx = -1;
+                for (const msg of allGroupMessages) {
+                    if (msg.messageIndex > lastMsgIdx) {
+                        lastMsgIdx = msg.messageIndex;
+                    }
+                }
+                isLastInGroup = (lastMsgIdx === messageIndex);
+                console.log('[DEBUG] lastMsgIdx:', lastMsgIdx, 'isLastInGroup:', isLastInGroup);
                 
                 if (!isLastInGroup) {
                     // Скрыть промежуточное сообщение
