@@ -930,6 +930,7 @@
 
         const rowDiv = document.createElement('div');
         rowDiv.className = `message-row message-${role}${disabled ? ' message-disabled' : ''}`;
+        rowDiv.dataset.messageIndex = messageIndex;
         
         const div = document.createElement('div');
         div.className = `message message-${role}${disabled ? ' message-disabled' : ''}`;
@@ -1041,7 +1042,8 @@
         const panel = panels[panelIndex];
         if (!panel.messages) return;
         
-        // Найти все уникальные group_id
+        console.log('[GROUP] Starting finalizeGroupedMessages for panel', panelIndex);
+        
         const groupIds = new Set();
         for (const msg of panel.messages) {
             if (msg.group_id) {
@@ -1049,196 +1051,82 @@
             }
         }
         
-        const container = panel.messagesContainer;
+        console.log('[GROUP] Found groupIds:', Array.from(groupIds));
         
-        for (const groupId of groupIds) {
-            // Найти все сообщения с этим group_id
-            const groupMsgIndices = panel.messages
-                .filter(m => m.group_id === groupId)
-                .map(m => m.messageIndex)
-                .filter(idx => idx !== undefined && idx !== null)
-                .sort((a, b) => a - b);
-            
-            if (groupMsgIndices.length <= 1) continue;
-            
-            const lastIndex = groupMsgIndices[groupMsgIndices.length - 1];
-            const hiddenCount = groupMsgIndices.length - 1;
-            
-            // Найти последнее сообщение в группе
-            const lastRow = container.querySelector(`.message-row:nth-child(${lastIndex + 1})`);
-            if (!lastRow) continue;
-            
-            // Добавить groupId для поиска
-            lastRow.dataset.groupId = groupId;
-            
-            // Создать контейнер для вложенных сообщений внутри последнего сообщения
-            let nestedContainer = lastRow.querySelector('.nested-messages-container');
-            if (!nestedContainer) {
-                const msgContent = lastRow.querySelector('.message-content');
-                if (msgContent) {
-                    nestedContainer = document.createElement('div');
-                    nestedContainer.className = 'nested-messages-container';
-                    nestedContainer.style.display = 'none';
-                    msgContent.parentNode.insertBefore(nestedContainer, msgContent.nextSibling);
-                }
-            }
-            
-            // Переместить промежуточные сообщения в контейнер
-            for (let i = 0; i < groupMsgIndices.length - 1; i++) {
-                const idx = groupMsgIndices[i];
-                const msgRow = container.querySelector(`.message-row:nth-child(${idx + 1})`);
-                if (msgRow && nestedContainer) {
-                    // Скрыть оригинальную строку
-                    msgRow.style.display = 'none';
-                    // Клонировать содержимое во вложенный контейнер
-                    const clonedContent = msgRow.cloneNode(true);
-                    clonedContent.style.display = '';
-                    clonedContent.classList.add('nested-message');
-                    nestedContainer.appendChild(clonedContent);
-                }
-            }
-            
-            // Добавить кнопку
-            if (nestedContainer) {
-                let actionsDiv = lastRow.querySelector('.message-actions');
-                if (!actionsDiv) {
-                    actionsDiv = document.createElement('div');
-                    actionsDiv.className = 'message-actions';
-                    lastRow.appendChild(actionsDiv);
-                }
-                
-                const expandBtn = document.createElement('button');
-                expandBtn.className = 'group-expand-btn';
-                expandBtn.textContent = `▼ ${hiddenCount} промежуточных`;
-                expandBtn.dataset.groupId = groupId;
-                expandBtn.dataset.panelIndex = panelIndex;
-                expandBtn.onclick = function() { 
-                    const gId = this.dataset.groupId;
-                    const pIdx = parseInt(this.dataset.panelIndex);
-                    toggleGroup(gId, pIdx); 
-                };
-                actionsDiv.appendChild(expandBtn);
-            }
-        }
-    }
-    
-    function toggleGroup(groupId, panelIndex) {
-        const panel = panels[panelIndex];
+        if (groupIds.size === 0) return;
+        
         const container = panel.messagesContainer;
         if (!container) return;
         
-        // Найти последнее сообщение в группе
-        const lastRow = container.querySelector(`.message-row[data-group-id="${groupId}"]`);
-        if (!lastRow) return;
-        
-        const nestedContainer = lastRow.querySelector('.nested-messages-container');
-        if (!nestedContainer) return;
-        
-        const isHidden = nestedContainer.style.display === 'none';
-        nestedContainer.style.display = isHidden ? '' : 'none';
-        
-        // Обновить кнопку
-        const btn = lastRow.querySelector('.group-expand-btn');
-        if (btn) {
-            if (isHidden) {
-                btn.textContent = '▲ скрыть';
-            } else {
-                const nestedCount = nestedContainer.querySelectorAll('.nested-message').length;
-                btn.textContent = `▼ ${nestedCount} промежуточных`;
-            }
-        }
-    }
-    
-    console.log('[DEBUG] groupIds:', groupIds.size);
-        
-        const container = panel.messagesContainer;
-        
         for (const groupId of groupIds) {
-            console.log('[DEBUG] processing groupId:', groupId);
-            
-            // Найти все сообщения с этим group_id
-            const groupMsgIndices = panel.messages
-                .filter(m => m.group_id === groupId)
+            const groupMsgs = panel.messages.filter(m => m.group_id === groupId && m.role === 'assistant');
+            const groupMsgIndices = groupMsgs
                 .map(m => m.messageIndex)
                 .filter(idx => idx !== undefined && idx !== null)
                 .sort((a, b) => a - b);
             
-            console.log('[DEBUG] groupMsgIndices:', groupMsgIndices);
+            console.log('[GROUP] Group', groupId, 'indices:', groupMsgIndices);
             
             if (groupMsgIndices.length <= 1) continue;
             
             const lastIndex = groupMsgIndices[groupMsgIndices.length - 1];
             const hiddenCount = groupMsgIndices.length - 1;
             
-            // Скрыть все кроме последнего
-            for (let i = 0; i < groupMsgIndices.length - 1; i++) {
-                const idx = groupMsgIndices[i];
-                const msgRow = container.querySelector(`.message-row:nth-child(${idx + 1})`);
-                if (msgRow) {
-                    msgRow.style.display = 'none';
-                    msgRow.classList.add('hidden-group-message');
-                    msgRow.dataset.groupId = groupId;
-                }
-            }
+            const allRows = Array.from(container.querySelectorAll('.message-row'));
             
-            // Найти последнее сообщение в группе
-            const lastRow = container.querySelector(`.message-row:nth-child(${lastIndex + 1})`);
+            const lastRow = allRows.find(row => {
+                const idx = row.dataset.messageIndex;
+                return idx !== undefined && parseInt(idx) === lastIndex;
+            });
+            
             if (!lastRow) continue;
             
-            // Добавить groupId для поиска
             lastRow.dataset.groupId = groupId;
             
-            // Создать контейнер для вложенных сообщений внутри последнего сообщения
-            let nestedContainer = lastRow.querySelector('.nested-messages-container');
-            if (!nestedContainer) {
-                const msgContent = lastRow.querySelector('.message-content');
-                if (msgContent) {
-                    nestedContainer = document.createElement('div');
-                    nestedContainer.className = 'nested-messages-container';
-                    nestedContainer.style.display = 'none';
-                    msgContent.parentNode.insertBefore(nestedContainer, msgContent.nextSibling);
-                }
-            }
+            let groupToggleBlockHtml = `
+                <div class="group-toggle-block">
+                    <div class="group-toggle-header" onclick="toggleGroupToggle(this)">
+                        <span class="group-toggle-icon">▼</span>
+                        <span class="group-toggle-text" data-count="${hiddenCount}">${hiddenCount} промежуточных</span>
+                    </div>
+                    <div class="group-toggle-content" style="display:none">
+            `;
             
-            // Переместить промежуточные сообщения в контейнер
+            // Добавить промежуточные сообщения в блок и УДАЛИТЬ оригиналы
             for (let i = 0; i < groupMsgIndices.length - 1; i++) {
                 const idx = groupMsgIndices[i];
-                const msgRow = container.querySelector(`.message-row:nth-child(${idx + 1})`);
-                if (msgRow && nestedContainer) {
-                    // Скрыть оригинальную строку
-                    msgRow.style.display = 'none';
-                    // Клонировать содержимое во вложенный контейнер
+                const msgRow = allRows.find(row => {
+                    const rowIdx = row.dataset.messageIndex;
+                    return rowIdx !== undefined && parseInt(rowIdx) === idx;
+                });
+                if (msgRow) {
+                    // Клонируем для блока
                     const clonedContent = msgRow.cloneNode(true);
                     clonedContent.style.display = '';
-                    clonedContent.classList.add('nested-message');
-                    nestedContainer.appendChild(clonedContent);
+                    clonedContent.classList.add('group-nested-message');
+                    groupToggleBlockHtml += clonedContent.outerHTML;
+                    
+                    // Удаляем оригинальный ряд полностью
+                    msgRow.remove();
                 }
             }
             
-            // Добавить кнопку
-            if (nestedContainer) {
-                let actionsDiv = lastRow.querySelector('.message-actions');
-                if (!actionsDiv) {
-                    actionsDiv = document.createElement('div');
-                    actionsDiv.className = 'message-actions';
-                    lastRow.appendChild(actionsDiv);
-                }
-                
-                const expandBtn = document.createElement('button');
-                expandBtn.className = 'group-expand-btn';
-                expandBtn.textContent = `▼ ${hiddenCount} промежуточных`;
-                expandBtn.dataset.groupId = groupId;
-                expandBtn.dataset.panelIndex = panelIndex;
-                expandBtn.onclick = function() { 
-                    const gId = this.dataset.groupId;
-                    const pIdx = parseInt(this.dataset.panelIndex);
-                    toggleGroup(gId, pIdx); 
-                };
-                actionsDiv.appendChild(expandBtn);
+            groupToggleBlockHtml += `
+                    </div>
+                </div>
+            `;
+            
+            // Вставить блок В НАЧАЛО .message div (после message-content)
+            const msgDiv = lastRow.querySelector('.message');
+            const msgContentDiv = msgDiv?.querySelector('.message-content');
+            if (msgContentDiv) {
+                msgContentDiv.insertAdjacentHTML('afterend', groupToggleBlockHtml);
             }
         }
     }
-
+    
+    // Удалена функция toggleGroup - теперь используется встроенный onclick в заголовке
+    
     function updatePanelStats(panelIndex, inputTokens, outputTokens, totalTokens) {
         const panel = panels[panelIndex];
         panel.totalInput = inputTokens;
@@ -1945,6 +1833,30 @@
         } else {
             toggle.classList.remove('expanded');
             content.style.display = 'none';
+        }
+    }
+
+    function toggleGroupToggle(header) {
+        const content = header.nextElementSibling;
+        if (!content) return;
+        
+        const isHidden = content.style.display === 'none';
+        content.style.display = isHidden ? '' : 'none';
+        
+        const icon = header.querySelector('.group-toggle-icon');
+        const text = header.querySelector('.group-toggle-text');
+        
+        if (isHidden) {
+            // Показываем - меняем на "скрыть"
+            if (icon) icon.textContent = '▲';
+            if (text) text.textContent = 'скрыть';
+        } else {
+            // Скрываем - восстанавливаем количество
+            if (icon) icon.textContent = '▼';
+            if (text) {
+                const count = text.dataset.count || '1';
+                text.textContent = `${count} промежуточных`;
+            }
         }
     }
 
