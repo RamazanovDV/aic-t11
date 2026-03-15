@@ -1041,6 +1041,8 @@
         const panel = panels[panelIndex];
         if (!panel.messages) return;
         
+        console.log('[DEBUG] finalizeGroupedMessages - panel.messages:', panel.messages.length);
+        
         // Найти все уникальные group_id
         const groupIds = new Set();
         for (const msg of panel.messages) {
@@ -1049,9 +1051,13 @@
             }
         }
         
+        console.log('[DEBUG] groupIds:', groupIds.size);
+        
         const container = panel.messagesContainer;
         
         for (const groupId of groupIds) {
+            console.log('[DEBUG] processing groupId:', groupId);
+            
             // Найти все сообщения с этим group_id
             const groupMsgIndices = panel.messages
                 .filter(m => m.group_id === groupId)
@@ -1059,22 +1065,34 @@
                 .filter(idx => idx !== undefined && idx !== null)
                 .sort((a, b) => a - b);
             
+            console.log('[DEBUG] groupMsgIndices:', groupMsgIndices);
+            
             if (groupMsgIndices.length <= 1) continue;
             
             const lastIndex = groupMsgIndices[groupMsgIndices.length - 1];
             const hiddenCount = groupMsgIndices.length - 1;
             
+            // Скрыть все кроме последнего
+            for (let i = 0; i < groupMsgIndices.length - 1; i++) {
+                const idx = groupMsgIndices[i];
+                const msgRow = container.querySelector(`.message-row:nth-child(${idx + 1})`);
+                if (msgRow) {
+                    msgRow.style.display = 'none';
+                    msgRow.classList.add('hidden-group-message');
+                    msgRow.dataset.groupId = groupId;
+                }
+            }
+            
             // Найти последнее сообщение в группе
             const lastRow = container.querySelector(`.message-row:nth-child(${lastIndex + 1})`);
             if (!lastRow) continue;
             
-            // Добавить groupId для поиска в toggleGroup
+            // Добавить groupId для поиска
             lastRow.dataset.groupId = groupId;
             
             // Создать контейнер для вложенных сообщений внутри последнего сообщения
             let nestedContainer = lastRow.querySelector('.nested-messages-container');
             if (!nestedContainer) {
-                // Найти message-content div и добавить после него
                 const msgContent = lastRow.querySelector('.message-content');
                 if (msgContent) {
                     nestedContainer = document.createElement('div');
@@ -1099,7 +1117,7 @@
                 }
             }
             
-            // Добавить кнопку в actions
+            // Добавить кнопку
             if (nestedContainer) {
                 let actionsDiv = lastRow.querySelector('.message-actions');
                 if (!actionsDiv) {
@@ -1149,49 +1167,6 @@
             }
         }
     }
-        }
-        
-        console.log('[DEBUG] groupIds:', groupIds.size);
-        
-        const container = panel.messagesContainer;
-        
-        for (const groupId of groupIds) {
-            console.log('[DEBUG] processing groupId:', groupId);
-            
-            // Найти все сообщения с этим group_id
-            const groupMsgIndices = panel.messages
-                .filter(m => m.group_id === groupId)
-                .map(m => m.messageIndex)
-                .filter(idx => idx !== undefined && idx !== null)
-                .sort((a, b) => a - b);
-            
-            console.log('[DEBUG] groupMsgIndices:', groupMsgIndices);
-            
-            if (groupMsgIndices.length <= 1) continue;
-            
-            const lastIndex = groupMsgIndices[groupMsgIndices.length - 1];
-            const hiddenCount = groupMsgIndices.length - 1;
-            
-            // Скрыть все кроме последнего
-            for (let i = 0; i < groupMsgIndices.length - 1; i++) {
-                const idx = groupMsgIndices[i];
-                const msgRow = container.querySelector(`.message-row:nth-child(${idx + 1})`);
-                if (msgRow) {
-                    msgRow.style.display = 'none';
-                    msgRow.classList.add('hidden-group-message');
-                    msgRow.dataset.groupId = groupId;
-                }
-            }
-            
-            // Найти последнее сообщение в группе и добавить кнопку
-            const lastRow = container.querySelector(`.message-row:nth-child(${lastIndex + 1})`);
-            if (lastRow) {
-                let actionsDiv = lastRow.querySelector('.message-actions');
-                if (!actionsDiv) {
-                    actionsDiv = document.createElement('div');
-                    actionsDiv.className = 'message-actions';
-                    lastRow.appendChild(actionsDiv);
-                }
                 
                 const expandBtn = document.createElement('button');
                 expandBtn.className = 'group-expand-btn';
