@@ -1183,34 +1183,6 @@
             }
         }
     }
-    
-    function toggleGroup(groupId, panelIndex) {
-        const panel = panels[panelIndex];
-        const container = panel.messagesContainer;
-        if (!container) return;
-        
-        // Toggle hidden messages in group
-        const hiddenMessages = container.querySelectorAll(`.hidden-group-message[data-group-id="${groupId}"]`);
-        console.log('[DEBUG] hiddenMessages found:', hiddenMessages.length);
-        const isHidden = hiddenMessages.length > 0 && hiddenMessages[0].style.display === 'none';
-        console.log('[DEBUG] isHidden:', isHidden);
-        
-        hiddenMessages.forEach(el => {
-            el.style.display = isHidden ? '' : 'none';
-        });
-        
-        // Обновить текст кнопки
-        const btn = container.querySelector(`.group-expand-btn`);
-        if (btn) {
-            if (isHidden) {
-                btn.textContent = 'Скрыть';
-                btn.title = 'Скрыть промежуточные ответы';
-            } else {
-                btn.textContent = `Показать ${hiddenMessages.length}...`;
-                btn.title = `Показать ${hiddenMessages.length} промежуточных ответов`;
-            }
-        }
-    }
 
     function updatePanelStats(panelIndex, inputTokens, outputTokens, totalTokens) {
         const panel = panels[panelIndex];
