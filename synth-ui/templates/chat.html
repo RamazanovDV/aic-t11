@@ -1110,9 +1110,8 @@
     }
     
     function toggleGroup(groupId, panelIndex) {
-        console.log('[DEBUG] toggleGroup called with groupId:', groupId, 'panelIndex:', panelIndex);
-        const container = document.getElementById(`messages-${panelIndex}`);
-        console.log('[DEBUG] container:', container);
+        const panel = panels[panelIndex];
+        const container = panel.messagesContainer;
         if (!container) return;
         
         // Toggle hidden messages in group
@@ -1132,10 +1131,8 @@
                 btn.textContent = 'Скрыть';
                 btn.title = 'Скрыть промежуточные ответы';
             } else {
-                const panel = panels[panelIndex];
-                const groupMessages = panel.messages.filter(m => m.group_id === groupId);
-                btn.textContent = `Показать ${groupMessages.length - 1}...`;
-                btn.title = `Показать ${groupMessages.length - 1} промежуточных ответов`;
+                btn.textContent = `Показать ${hiddenMessages.length}...`;
+                btn.title = `Показать ${hiddenMessages.length} промежуточных ответов`;
             }
         }
     }
