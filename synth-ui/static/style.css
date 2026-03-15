@@ -1032,6 +1032,25 @@ body {
     max-width: 100%;
 }
 
+.nested-messages-container {
+    margin-top: 10px;
+    padding: 10px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border-left: 3px solid var(--accent-color);
+}
+
+.nested-message {
+    margin-bottom: 8px;
+    padding: 8px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+}
+
+.nested-message:last-child {
+    margin-bottom: 0;
+}
+
 .message-tokens {
     font-size: 0.65rem;
     color: var(--text-secondary);
