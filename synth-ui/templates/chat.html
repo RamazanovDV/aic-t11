@@ -1041,6 +1041,8 @@
         const panel = panels[panelIndex];
         if (!panel.messages) return;
         
+        console.log('[DEBUG] finalizeGroupedMessages - panel.messages:', panel.messages.length);
+        
         // Найти все уникальные group_id
         const groupIds = new Set();
         for (const msg of panel.messages) {
@@ -1049,15 +1051,21 @@
             }
         }
         
+        console.log('[DEBUG] groupIds:', groupIds.size);
+        
         const container = panel.messagesContainer;
         
         for (const groupId of groupIds) {
+            console.log('[DEBUG] processing groupId:', groupId);
+            
             // Найти все сообщения с этим group_id
             const groupMsgIndices = panel.messages
                 .filter(m => m.group_id === groupId)
                 .map(m => m.messageIndex)
                 .filter(idx => idx !== undefined && idx !== null)
                 .sort((a, b) => a - b);
+            
+            console.log('[DEBUG] groupMsgIndices:', groupMsgIndices);
             
             if (groupMsgIndices.length <= 1) continue;
             
