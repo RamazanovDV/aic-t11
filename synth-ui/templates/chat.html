@@ -1099,11 +1099,13 @@
         const container = document.getElementById(`messages-${panelIndex}`);
         if (!container) return;
         
-        // Toggle all messages in group
-        const groupMessages = container.querySelectorAll(`.group-message[data-group-id="${groupId}"]`);
-        const isHidden = groupMessages.length > 0 && groupMessages[0].style.display === 'none';
+        // Toggle hidden messages in group
+        const hiddenMessages = container.querySelectorAll(`.hidden-group-message[data-group-id="${groupId}"]`);
+        const isHidden = hiddenMessages.length > 0 && hiddenMessages[0].style.display === 'none';
         
-        groupMessages.forEach(el => {
+        console.log('[DEBUG] toggleGroup - groupId:', groupId, 'hiddenMessages:', hiddenMessages.length, 'isHidden:', isHidden);
+        
+        hiddenMessages.forEach(el => {
             el.style.display = isHidden ? '' : 'none';
         });
         
@@ -1114,6 +1116,7 @@
                 btn.textContent = 'Скрыть';
                 btn.title = 'Скрыть промежуточные ответы';
             } else {
+                const panel = panels[panelIndex];
                 const groupMessages = panel.messages.filter(m => m.group_id === groupId);
                 btn.textContent = `Показать ${groupMessages.length - 1}...`;
                 btn.title = `Показать ${groupMessages.length - 1} промежуточных ответов`;
