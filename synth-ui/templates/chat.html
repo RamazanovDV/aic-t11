@@ -1110,14 +1110,16 @@
     }
     
     function toggleGroup(groupId, panelIndex) {
+        console.log('[DEBUG] toggleGroup called with groupId:', groupId, 'panelIndex:', panelIndex);
         const container = document.getElementById(`messages-${panelIndex}`);
+        console.log('[DEBUG] container:', container);
         if (!container) return;
         
         // Toggle hidden messages in group
         const hiddenMessages = container.querySelectorAll(`.hidden-group-message[data-group-id="${groupId}"]`);
+        console.log('[DEBUG] hiddenMessages found:', hiddenMessages.length);
         const isHidden = hiddenMessages.length > 0 && hiddenMessages[0].style.display === 'none';
-        
-        console.log('[DEBUG] toggleGroup - groupId:', groupId, 'hiddenMessages:', hiddenMessages.length, 'isHidden:', isHidden);
+        console.log('[DEBUG] isHidden:', isHidden);
         
         hiddenMessages.forEach(el => {
             el.style.display = isHidden ? '' : 'none';
