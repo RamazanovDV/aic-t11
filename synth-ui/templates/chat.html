@@ -1052,14 +1052,20 @@
                 const groupMsgIndices = groupMessages.map(m => m.messageIndex).sort((a, b) => a - b);
                 const currentInGroupIndex = groupMsgIndices.indexOf(currentMsgIndex);
                 isLastInGroup = currentInGroupIndex === groupMsgIndices.length - 1;
+                console.log('[DEBUG] currentMsgIndex:', currentMsgIndex, 'groupMsgIndices:', groupMsgIndices, 'currentInGroupIndex:', currentInGroupIndex, 'isLastInGroup:', isLastInGroup);
                 
                 if (!isLastInGroup) {
                     // Скрыть промежуточное сообщение
                     rowDiv.style.display = 'none';
                     rowDiv.classList.add('hidden-group-message');
                     rowDiv.dataset.groupId = groupId;
+                    console.log('[DEBUG] HIDING message');
+                } else {
+                    console.log('[DEBUG] NOT hiding - is last in group');
                 }
             }
+        } else {
+            console.log('[DEBUG] No group - displaying normally');
         }
         
         container.appendChild(rowDiv);
