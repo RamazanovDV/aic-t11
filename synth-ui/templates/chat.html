@@ -1048,11 +1048,14 @@
             
             if (isInGroup) {
                 // Проверить является ли это сообщение последним в группе
-                // Сортируем groupMessages по messageIndex
-                const sortedGroupMessages = [...groupMessages].sort((a, b) => (a.messageIndex || 0) - (b.messageIndex || 0));
-                const lastInGroup = sortedGroupMessages[sortedGroupMessages.length - 1];
-                isLastInGroup = (lastInGroup.messageIndex === messageIndex);
-                console.log('[DEBUG] messageIndex:', messageIndex, 'lastInGroup.messageIndex:', lastInGroup.messageIndex, 'isLastInGroup:', isLastInGroup);
+                // Находим все сообщения с таким же group_id
+                const allGroupMessages = panel.messages.filter(m => m.group_id === groupId);
+                // Сортируем по messageIndex
+                allGroupMessages.sort((a, b) => (a.messageIndex || 0) - (b.messageIndex || 0));
+                // Последнее сообщение в группе
+                const lastMessageInGroup = allGroupMessages[allGroupMessages.length - 1];
+                isLastInGroup = (lastMessageInGroup && lastMessageInGroup.messageIndex === messageIndex);
+                console.log('[DEBUG] messageIndex:', messageIndex, 'lastMessageInGroup.messageIndex:', lastMessageInGroup ? lastMessageInGroup.messageIndex : 'N/A', 'isLastInGroup:', isLastInGroup);
                 
                 if (!isLastInGroup) {
                     // Скрыть промежуточное сообщение
