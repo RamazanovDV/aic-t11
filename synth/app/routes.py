@@ -722,8 +722,6 @@ async def _process_status_block(
             if group_id is None:
                 group_id = str(uuid.uuid4())
             
-            print(f"[DEBUG] Saving intermediate message with group_id: {group_id}")
-            
             session.add_assistant_message(
                 response.content or "",
                 response.usage or {},
@@ -1736,7 +1734,6 @@ def chat_stream():
                     tool_calls_handled = True
                     tool_use_for_message = chunk.tool_calls  # Save for later
                     group_id = str(uuid.uuid4())  # Новый group_id для группы сообщений
-                    print(f"[DEBUG] Stream: Saving intermediate message with group_id: {group_id}")
                     debug("MCP", f"Stream: Detected {len(chunk.tool_calls)} tool call(s)")
                     debug("MCP", f"Stream: Tool calls: {json.dumps(chunk.tool_calls, ensure_ascii=False)[:500]}")
                     
@@ -1752,7 +1749,6 @@ def chat_stream():
                     preliminary_message_id = session.messages[-1].id
                     preliminary_saved = True
                     session_manager.save_session(session_id)
-                    print(f"[DEBUG] Stream: Saved, last message group_id: {session.messages[-1].group_id}")
                     
                     try:
                         from app.mcp import MCPManager
@@ -2095,6 +2091,7 @@ def get_session(session_id: str):
             "status": m.status,
             "reasoning": m.reasoning,
             "id": m.id,
+            "group_id": m.group_id,
         }
         for m in current_branch_messages
     ]

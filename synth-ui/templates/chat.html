@@ -922,7 +922,6 @@
 
     function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null) {
         const panel = panels[panelIndex];
-        console.log('[DEBUG UI] addMessageToPanel called with groupId:', groupId, 'role:', role, 'messageIndex:', messageIndex, 'panel.messages length:', panel.messages ? panel.messages.length : 'no messages');
         const container = panel.messagesContainer;
         if (!container) return;
 
@@ -1043,7 +1042,6 @@
             const groupMessages = panel.messages.filter(m => m.group_id === groupId);
             groupCount = groupMessages.length;
             isInGroup = groupCount > 1;
-            console.log('[DEBUG UI] Group check - groupId:', groupId, 'groupMessages count:', groupCount, 'isInGroup:', isInGroup);
             
             if (isInGroup) {
                 // Найти текущее сообщение в группе
@@ -1051,14 +1049,12 @@
                 const groupMsgIndices = groupMessages.map(m => m.messageIndex).sort((a, b) => a - b);
                 const currentInGroupIndex = groupMsgIndices.indexOf(currentMsgIndex);
                 isLastInGroup = currentInGroupIndex === groupMsgIndices.length - 1;
-                console.log('[DEBUG UI] currentMsgIndex:', currentMsgIndex, 'groupMsgIndices:', groupMsgIndices, 'currentInGroupIndex:', currentInGroupIndex, 'isLastInGroup:', isLastInGroup);
                 
                 if (!isLastInGroup) {
                     // Скрыть промежуточное сообщение
                     rowDiv.style.display = 'none';
                     rowDiv.classList.add('hidden-group-message');
                     rowDiv.dataset.groupId = groupId;
-                    console.log('[DEBUG UI] Hiding message as not last in group');
                 }
             }
         }
