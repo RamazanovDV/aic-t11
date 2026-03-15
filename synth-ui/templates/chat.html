@@ -881,15 +881,22 @@
             
             // Построить groupInfo: groupId -> { intermediateCount, lastIndex }
             const groupInfoMap = new Map();
+            
+            // Сначала соберём все индексы для каждой группы
             panel.messages.forEach((msg, idx) => {
                 if (msg.group_id && msg.role === 'assistant') {
                     if (!groupInfoMap.has(msg.group_id)) {
-                        groupInfoMap.set(msg.group_id, { intermediateCount: 0, lastIndex: idx });
+                        groupInfoMap.set(msg.group_id, { indices: [], lastIndex: idx });
                     }
                     const info = groupInfoMap.get(msg.group_id);
-                    info.intermediateCount++;
+                    info.indices.push(idx);
                     info.lastIndex = idx;
                 }
+            });
+            
+            // Теперь посчитаем intermediateCount (всего - 1)
+            groupInfoMap.forEach((info, groupId) => {
+                info.intermediateCount = Math.max(0, info.indices.length - 1);
             });
             
             panel.messages.forEach((msg, idx) => {
@@ -960,10 +967,10 @@
             intermediateBlockHtml = `
                 <div class="group-toggle-block" data-group-id="${groupId}" style="display:none">
                     <div class="group-toggle-header" onclick="toggleGroupToggle(this)">
-                        <span class="group-toggle-icon">▼</span>
-                        <span class="group-toggle-text" data-count="${groupInfo.intermediateCount}">${groupInfo.intermediateCount} промежуточных</span>
+                        <span class="group-toggle-icon"></span>
+                        <span class="group-toggle-text" data-count="${groupInfo.intermediateCount}">🎯 Подзадания (${groupInfo.intermediateCount})</span>
                     </div>
-                    <div class="group-toggle-content">
+                    <div class="group-toggle-content" style="display:none">
                     </div>
                 </div>
             `;
@@ -1860,19 +1867,13 @@
         content.style.display = isHidden ? '' : 'none';
         
         const icon = header.querySelector('.group-toggle-icon');
-        const text = header.querySelector('.group-toggle-text');
         
         if (isHidden) {
-            // Показываем - меняем на "скрыть"
-            if (icon) icon.textContent = '▲';
-            if (text) text.textContent = 'скрыть';
+            // Показываем
+            if (icon) icon.classList.add('expanded');
         } else {
-            // Скрываем - восстанавливаем количество
-            if (icon) icon.textContent = '▼';
-            if (text) {
-                const count = text.dataset.count || '1';
-                text.textContent = `${count} промежуточных`;
-            }
+            // Скрываем
+            if (icon) icon.classList.remove('expanded');
         }
     }
 

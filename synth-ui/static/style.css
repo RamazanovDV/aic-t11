@@ -972,13 +972,12 @@ body {
 }
 
 .group-toggle-block {
-    background: var(--bg-secondary);
-    border-left: 3px solid var(--accent-color);
+    display: none;
+    background: #d0d0d0;
+    border-left: 3px solid #666;
     padding: 8px 12px;
     margin: 8px 0;
     border-radius: 8px;
-    width: 100%;
-    box-sizing: border-box;
 }
 
 .group-toggle-header {
@@ -987,18 +986,23 @@ body {
     align-items: center;
     gap: 8px;
     font-weight: 600;
-    color: var(--text-secondary);
+    color: #444;
     user-select: none;
     font-size: 0.85em;
 }
 
-.group-toggle-header:hover {
-    color: var(--text-primary);
-}
-
 .group-toggle-icon {
     display: inline-block;
+    width: 0;
+    height: 0;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 6px solid #444;
     transition: transform 0.2s;
+}
+
+.group-toggle-icon.expanded {
+    transform: rotate(90deg);
 }
 
 .group-toggle-content {
