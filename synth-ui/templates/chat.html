@@ -1047,28 +1047,22 @@
             isInGroup = groupCount > 1;
             
             if (isInGroup) {
-                // Детальная отладка
-                console.log('[DEBUG] panel.messages sample:', panel.messages.slice(0, 3).map(m => ({messageIndex: m.messageIndex, group_id: m.group_id})));
-                console.log('[DEBUG] current messageIndex:', messageIndex, 'groupId:', groupId);
-                
                 // Находим все сообщения с таким же group_id
                 const allGroupMessages = panel.messages.filter(m => m.group_id === groupId);
-                console.log('[DEBUG] allGroupMessages:', allGroupMessages.map(m => ({messageIndex: m.messageIndex, group_id: m.group_id})));
                 
-                // Проверить есть ли messageIndex у элементов
-                if (allGroupMessages.length > 0) {
-                    console.log('[DEBUG] first in group has messageIndex:', allGroupMessages[0].messageIndex);
-                }
-                
-                // Последнее сообщение в группе - по messageIndex
-                let lastMsgIdx = -1;
+                // Находим максимальный messageIndex в группе
+                let maxMsgIdx = -1;
                 for (const msg of allGroupMessages) {
-                    if (msg.messageIndex > lastMsgIdx) {
-                        lastMsgIdx = msg.messageIndex;
+                    if (msg.messageIndex !== undefined && msg.messageIndex !== null) {
+                        maxMsgIdx = Math.max(maxMsgIdx, msg.messageIndex);
                     }
                 }
-                isLastInGroup = (lastMsgIdx === messageIndex);
-                console.log('[DEBUG] lastMsgIdx:', lastMsgIdx, 'isLastInGroup:', isLastInGroup);
+                
+                // Также проверяем messageIndex текущего сообщения (который ещё не установлен)
+                maxMsgIdx = Math.max(maxMsgIdx, messageIndex);
+                
+                isLastInGroup = (maxMsgIdx === messageIndex);
+                console.log('[DEBUG] maxMsgIdx:', maxMsgIdx, 'messageIndex:', messageIndex, 'isLastInGroup:', isLastInGroup);
                 
                 if (!isLastInGroup) {
                     // Скрыть промежуточное сообщение
