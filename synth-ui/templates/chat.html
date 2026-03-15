@@ -922,6 +922,7 @@
 
     function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null) {
         const panel = panels[panelIndex];
+        console.log('[DEBUG] addMessageToPanel - groupId:', groupId, 'role:', role, 'messageIndex:', messageIndex);
         const container = panel.messagesContainer;
         if (!container) return;
 
@@ -1039,7 +1040,9 @@
         let groupCount = 0;
         
         if (groupId && panel.messages) {
+            console.log('[DEBUG] groupId:', groupId);
             const groupMessages = panel.messages.filter(m => m.group_id === groupId);
+            console.log('[DEBUG] groupMessages count:', groupMessages.length, 'panel.messages length:', panel.messages.length);
             groupCount = groupMessages.length;
             isInGroup = groupCount > 1;
             
