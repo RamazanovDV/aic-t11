@@ -1027,8 +1027,9 @@
             actionsHtml += `<button class="message-delete-btn" onclick="deleteMessage(${panelIndex}, ${msgIndex})" title="Удалить">🗑️</button>`;
         }
         
+        let actionsDiv = null;
         if (actionsHtml) {
-            const actionsDiv = document.createElement('div');
+            actionsDiv = document.createElement('div');
             actionsDiv.className = 'message-actions';
             actionsDiv.innerHTML = actionsHtml;
             rowDiv.appendChild(actionsDiv);
@@ -1081,14 +1082,14 @@
         container.appendChild(rowDiv);
         
         // Добавить кнопку раскрытия группы для последнего сообщения
-        if (isInGroup && isLastInGroup && groupCount > 1 && actionsHtml) {
-            const groupExpandBtn = document.createElement('button');
-            groupExpandBtn.className = 'group-expand-btn';
-            groupExpandBtn.textContent = `Показать ${groupCount - 1}...`;
-            groupExpandBtn.title = `Показать ${groupCount - 1} промежуточных ответов`;
-            groupExpandBtn.onclick = function() { toggleGroup(groupId, panelIndex); };
-            actionsDiv.appendChild(groupExpandBtn);
-        }
+            if (isInGroup && isLastInGroup && groupCount > 1 && actionsDiv) {
+                const groupExpandBtn = document.createElement('button');
+                groupExpandBtn.className = 'group-expand-btn';
+                groupExpandBtn.textContent = `Показать ${groupCount - 1}...`;
+                groupExpandBtn.title = `Показать ${groupCount - 1} промежуточных ответов`;
+                groupExpandBtn.onclick = function() { toggleGroup(groupId, panelIndex); };
+                actionsDiv.appendChild(groupExpandBtn);
+            }
         
         container.scrollTop = container.scrollHeight;
     }
