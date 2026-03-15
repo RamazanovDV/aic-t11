@@ -1097,7 +1097,13 @@
                 expandBtn.className = 'group-expand-btn';
                 expandBtn.textContent = `Показать ${hiddenCount}...`;
                 expandBtn.title = `Показать ${hiddenCount} промежуточных ответов`;
-                expandBtn.onclick = function() { toggleGroup(groupId, panelIndex); };
+                expandBtn.dataset.groupId = groupId;
+                expandBtn.dataset.panelIndex = panelIndex;
+                expandBtn.onclick = function() { 
+                    const gId = this.dataset.groupId;
+                    const pIdx = parseInt(this.dataset.panelIndex);
+                    toggleGroup(gId, pIdx); 
+                };
                 actionsDiv.appendChild(expandBtn);
             }
         }
