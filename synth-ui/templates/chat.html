@@ -1047,12 +1047,12 @@
             isInGroup = groupCount > 1;
             
             if (isInGroup) {
-                // Найти текущее сообщение в группе
-                const currentMsgIndex = panel.messages.findIndex(m => m.messageIndex === messageIndex);
-                const groupMsgIndices = groupMessages.map(m => m.messageIndex).sort((a, b) => a - b);
-                const currentInGroupIndex = groupMsgIndices.indexOf(currentMsgIndex);
-                isLastInGroup = currentInGroupIndex === groupMsgIndices.length - 1;
-                console.log('[DEBUG] currentMsgIndex:', currentMsgIndex, 'groupMsgIndices:', groupMsgIndices, 'currentInGroupIndex:', currentInGroupIndex, 'isLastInGroup:', isLastInGroup);
+                // Проверить является ли это сообщение последним в группе
+                // Сортируем groupMessages по messageIndex
+                const sortedGroupMessages = [...groupMessages].sort((a, b) => (a.messageIndex || 0) - (b.messageIndex || 0));
+                const lastInGroup = sortedGroupMessages[sortedGroupMessages.length - 1];
+                isLastInGroup = (lastInGroup.messageIndex === messageIndex);
+                console.log('[DEBUG] messageIndex:', messageIndex, 'lastInGroup.messageIndex:', lastInGroup.messageIndex, 'isLastInGroup:', isLastInGroup);
                 
                 if (!isLastInGroup) {
                     // Скрыть промежуточное сообщение
