@@ -1753,72 +1753,99 @@ def chat_stream():
                     try:
                         from app.mcp import MCPManager
                         import asyncio
-                        tool_call_results = []
                         
-                        for tc in chunk.tool_calls:
-                            tool_name = tc.get("function", {}).get("name") or tc.get("name", "")
-                            tool_args = tc.get("function", {}).get("arguments") or tc.get("arguments", {}) or {}
+                        current_tool_calls = chunk.tool_calls
+                        max_tool_iterations = 10
+                        tool_iteration = 0
+                        
+                        while current_tool_calls and tool_iteration < max_tool_iterations:
+                            tool_iteration += 1
+                            debug("MCP", f"Tool iteration {tool_iteration}: processing {len(current_tool_calls)} tool call(s)")
                             
-                            if isinstance(tool_args, str):
+                            tool_call_results = []
+                            
+                            for tc in current_tool_calls:
+                                tool_name = tc.get("function", {}).get("name") or tc.get("name", "")
+                                tool_args = tc.get("function", {}).get("arguments") or tc.get("arguments", {}) or {}
+                                
+                                if isinstance(tool_args, str):
+                                    try:
+                                        tool_args = json.loads(tool_args)
+                                    except:
+                                        tool_args = {}
+                                
+                                debug("MCP", f"Calling tool: {tool_name}")
+                                debug("MCP", f"Arguments: {json.dumps(tool_args, ensure_ascii=False)[:500]}")
+                                
                                 try:
-                                    tool_args = json.loads(tool_args)
-                                except:
-                                    tool_args = {}
+                                    result = run_mcp_async(MCPManager.call_tool(tool_name, tool_args))
+                                    tool_result_content = result.content
+                                    is_error = getattr(result, 'is_error', False)
+                                    debug("MCP", f"Result: {tool_result_content[:500] if tool_result_content else 'empty'}")
+                                    debug("MCP", f"Is error: {is_error}")
+                                except Exception as e:
+                                    tool_result_content = f"Error: {str(e)}"
+                                    is_error = True
+                                    error("MCP", f"Tool error: {e}")
+                                
+                                mcp_calls.append({
+                                    "tool": tool_name,
+                                    "arguments": tool_args,
+                                    "result": tool_result_content,
+                                    "is_error": is_error
+                                })
+                                
+                                tool_call_results.append({
+                                    "role": "tool",
+                                    "tool_call_id": tc.get("id"),
+                                    "content": tool_result_content,
+                                })
                             
-                            debug("MCP", f"Calling tool: {tool_name}")
-                            debug("MCP", f"Arguments: {json.dumps(tool_args, ensure_ascii=False)[:500]}")
+                            assistant_msg = Message(role="assistant", content=chunk.content or "", usage=chunk.usage, tool_use=current_tool_calls)
+                            tool_messages = list(llm_msgs)
+                            tool_messages.append(assistant_msg)
+                            for tc_result in tool_call_results:
+                                tool_messages.append(Message(
+                                    role="tool",
+                                    content=tc_result["content"],
+                                    tool_call_id=tc_result.get("tool_call_id"),
+                                    usage={}
+                                ))
                             
-                            try:
-                                result = run_mcp_async(MCPManager.call_tool(tool_name, tool_args))
-                                tool_result_content = result.content
-                                is_error = getattr(result, 'is_error', False)
-                                debug("MCP", f"Result: {tool_result_content[:500] if tool_result_content else 'empty'}")
-                                debug("MCP", f"Is error: {is_error}")
-                            except Exception as e:
-                                tool_result_content = f"Error: {str(e)}"
-                                is_error = True
-                                error("MCP", f"Tool error: {e}")
+                            debug("MCP", f"Executing {len(tool_call_results)} tool(s), continuing stream...")
                             
-                            mcp_calls.append({
-                                "tool": tool_name,
-                                "arguments": tool_args,
-                                "result": tool_result_content,
-                                "is_error": is_error
-                            })
+                            current_tool_calls = None
+                            for new_chunk in provider.stream_chat(tool_messages, None, debug_collector=debug_collector, tools=mcp_tools):
+                                full_content = new_chunk.content
+                                full_reasoning = new_chunk.reasoning if new_chunk.reasoning else full_reasoning
+                                debug("MCP", f"Stream after tool: content='{full_content[:100] if full_content else 'EMPTY'}', is_final={new_chunk.is_final}, tool_calls={new_chunk.tool_calls}")
+                                
+                                if new_chunk.tool_calls:
+                                    current_tool_calls = new_chunk.tool_calls
+                                    debug("MCP", f"Detected {len(current_tool_calls)} new tool call(s) in response")
+                                
+                                if new_chunk.is_final:
+                                    total_usage = new_chunk.usage
+                                    debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
+                                    session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, reasoning=full_reasoning, group_id=group_id)
+                                    preliminary_message_id = session.messages[-1].id
+                                    session_manager.save_session(session_id)
+                                    preliminary_saved = True
+                                yield f"data: {json.dumps({'content': full_content, 'reasoning': full_reasoning, 'done': new_chunk.is_final and not current_tool_calls})}\n\n"
+                                
+                                if new_chunk.is_final:
+                                    break
                             
-                            tool_call_results.append({
-                                "role": "tool",
-                                "tool_call_id": tc.get("id"),
-                                "content": tool_result_content,
-                            })
+                            if current_tool_calls:
+                                chunk = type('obj', (object,), {
+                                    'content': full_content,
+                                    'usage': new_chunk.usage,
+                                    'tool_calls': current_tool_calls,
+                                    'is_final': True
+                                })()
                         
-                        assistant_msg = Message(role="assistant", content=chunk.content or "", usage=chunk.usage, tool_use=chunk.tool_calls)
-                        tool_messages = list(llm_msgs)
-                        tool_messages.append(assistant_msg)
-                        for tc_result in tool_call_results:
-                            tool_messages.append(Message(
-                                role="tool",
-                                content=tc_result["content"],
-                                tool_call_id=tc_result.get("tool_call_id"),
-                                usage={}
-                            ))
-                        
-                        debug("MCP", f"Executing {len(tool_call_results)} tool(s), continuing stream...")
-                        
-                        for new_chunk in provider.stream_chat(tool_messages, None, debug_collector=debug_collector, tools=None):
-                            full_content = new_chunk.content
-                            full_reasoning = new_chunk.reasoning if new_chunk.reasoning else full_reasoning
-                            debug("MCP", f"Stream after tool: content='{full_content[:100] if full_content else 'EMPTY'}', is_final={new_chunk.is_final}, tool_calls={new_chunk.tool_calls}")
-                            if new_chunk.is_final:
-                                total_usage = new_chunk.usage
-                                debug_response = {"usage": total_usage, "model": provider.model, "content_length": len(full_content)}
-                                session.add_assistant_message(full_content, total_usage, debug={"usage": total_usage, "model": provider.model}, model=provider.model, reasoning=full_reasoning, group_id=group_id)
-                                preliminary_message_id = session.messages[-1].id
-                                session_manager.save_session(session_id)
-                                preliminary_saved = True
-                            yield f"data: {json.dumps({'content': full_content, 'reasoning': full_reasoning, 'done': new_chunk.is_final})}\n\n"
-                            if new_chunk.is_final:
-                                break
+                        if tool_iteration >= max_tool_iterations:
+                            warning("MCP", f"Reached max tool iterations ({max_tool_iterations})")
                         
                         break
                         
