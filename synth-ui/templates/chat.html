@@ -915,142 +915,70 @@
             updatePanelStats(panelIndex, panel.totalInput, panel.totalOutput, panel.totalTokens);
             
             container.scrollTop = savedScrollTop;
+            
+            // Обработка групп сообщений - скрыть промежуточные и добавить кнопки
+            finalizeGroupedMessages(panelIndex);
         } catch (err) {
             console.error('Failed to load panel messages:', err);
         }
     }
-
-    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null) {
+    
+    function finalizeGroupedMessages(panelIndex) {
         const panel = panels[panelIndex];
-        const container = panel.messagesContainer;
-        if (!container) return;
-
-        const rowDiv = document.createElement('div');
-        rowDiv.className = `message-row message-${role}${disabled ? ' message-disabled' : ''}`;
+        if (!panel.messages) return;
         
-        const div = document.createElement('div');
-        div.className = `message message-${role}${disabled ? ' message-disabled' : ''}`;
-        
-        if (statusClass && (role === 'user' || role === 'assistant')) {
-            div.classList.add(statusClass);
-        }
-        
-        let contentHtml = '';
-        if (role === 'assistant') {
-            contentHtml = `<div class="message-content">${marked.parse(content.trim())}</div>`;
-        } else if (role === 'note' || role === 'info') {
-            contentHtml = `<div class="message-content">${escapeHtml(content)}</div>`;
-        } else {
-            contentHtml = `<div class="message-content">${escapeHtml(content)}</div>`;
-        }
-
-        let thinkingBlockHtml = '';
-        if (role === 'assistant' && reasoning) {
-            const escapedReasoning = escapeHtml(reasoning);
-            thinkingBlockHtml = `
-                <div class="thinking-block">
-                    <div class="thinking-header" onclick="toggleThinking(this)">
-                        <span class="thinking-toggle"></span>
-                        <span>🤔 Размышления</span>
-                    </div>
-                    <div class="thinking-content" style="display:none">${escapedReasoning}</div>
-                </div>
-            `;
-        }
-        
-        let tokensHtml = '';
-        if (role === 'assistant' || role === 'error' || role === 'note') {
-            let tokensInfo = '';
-            if (usage) {
-                const inTokens = usage.input_tokens || 0;
-                const outTokens = usage.output_tokens || 0;
-                const totalTokens = usage.total_tokens || (inTokens + outTokens);
-                tokensInfo = `вх: ${inTokens} | вых: ${outTokens} | всего: ${totalTokens}`;
+        // Найти все уникальные group_id
+        const groupIds = new Set();
+        for (const msg of panel.messages) {
+            if (msg.group_id) {
+                groupIds.add(msg.group_id);
             }
-            if (!model && debugData) {
-                if (debugData.response && debugData.response.model) {
-                    model = debugData.response.model;
-                } else if (debugData.request && debugData.request.model) {
-                    model = debugData.request.model;
-                } else if (debugData.request && debugData.request.body && debugData.request.body.model) {
-                    model = debugData.request.body.model;
+        }
+        
+        const container = panel.messagesContainer;
+        
+        for (const groupId of groupIds) {
+            // Найти все сообщения с этим group_id
+            const groupMsgIndices = panel.messages
+                .filter(m => m.group_id === groupId)
+                .map(m => m.messageIndex)
+                .filter(idx => idx !== undefined && idx !== null)
+                .sort((a, b) => a - b);
+            
+            if (groupMsgIndices.length <= 1) continue;
+            
+            const lastIndex = groupMsgIndices[groupMsgIndices.length - 1];
+            const hiddenCount = groupMsgIndices.length - 1;
+            
+            // Скрыть все кроме последнего
+            for (let i = 0; i < groupMsgIndices.length - 1; i++) {
+                const idx = groupMsgIndices[i];
+                const msgRow = container.querySelector(`.message-row:nth-child(${idx + 1})`);
+                if (msgRow) {
+                    msgRow.style.display = 'none';
+                    msgRow.classList.add('hidden-group-message');
+                    msgRow.dataset.groupId = groupId;
                 }
             }
-            if (tokensInfo || model) {
-                tokensHtml = `<div class="message-tokens">${model ? model + (tokensInfo ? ' • ' : '') : ''}${tokensInfo}</div>`;
-            }
-        }
-        
-        let sourceHtml = '';
-        if (role === 'user' && source) {
-            const username = source.split(' | ')[0];
-            sourceHtml = `<div class="message-tokens" style="cursor: pointer;" onclick="openProfileModal('${username}')">${source}</div>`;
-        }
-        
-        let html = thinkingBlockHtml + contentHtml;
-        if (tokensHtml) {
-            html += tokensHtml;
-        }
-        if (sourceHtml) {
-            html += sourceHtml;
-        }
-        div.innerHTML = html;
-        rowDiv.appendChild(div);
-        
-        let actionsHtml = '';
-        
-        // 1. Copy (top-left)
-        if (role === 'user' || role === 'assistant' || role === 'error') {
-            const plainContent = role === 'assistant' ? content.replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"') : content;
-            const escapedContent = plainContent.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            actionsHtml += `<button class="message-copy-btn" onclick="copyMessage(this, '${role}')" data-content="${escapedContent}" title="Копировать">📋</button>`;
-        }
-        
-        // 2. Toggle visibility (top-right)
-        if (role === 'user' || role === 'assistant' || role === 'error' || role === 'summary') {
-            const msgIndex = messageIndex >= 0 ? messageIndex : (panel.messages ? panel.messages.length - 1 : 0);
-            const toggleIcon = disabled ? '👁️' : '👁️‍🗨️';
-            const toggleTitle = disabled ? 'Включить в контекст' : 'Отключить из контекста';
-            actionsHtml += `<button class="message-toggle-btn" onclick="toggleMessage(${panelIndex}, ${msgIndex})" title="${toggleTitle}">${toggleIcon}</button>`;
-        }
-        
-        // 3. Debug (bottom-left)
-        if ((role === 'assistant' || role === 'error' || role === 'summary') && debugData) {
-            const debugJson = encodeURIComponent(JSON.stringify(debugData));
-            actionsHtml += `<button class="message-debug-btn" data-debug="${debugJson}" data-group-id="${groupId || ''}" data-msg-index="${messageIndex}" title="Debug">🔍</button>`;
-        }
-        
-        // 4. Delete (bottom-right)
-        if (role === 'user' || role === 'assistant' || role === 'error' || role === 'summary' || role === 'note' || role === 'info') {
-            const msgIndex = messageIndex >= 0 ? messageIndex : (panel.messages ? panel.messages.length - 1 : 0);
-            actionsHtml += `<button class="message-delete-btn" onclick="deleteMessage(${panelIndex}, ${msgIndex})" title="Удалить">🗑️</button>`;
-        }
-        
-        let actionsDiv = null;
-        if (actionsHtml) {
-            actionsDiv = document.createElement('div');
-            actionsDiv.className = 'message-actions';
-            actionsDiv.innerHTML = actionsHtml;
-            rowDiv.appendChild(actionsDiv);
-        }
-        
-        // Группировка сообщений - добавляем атрибуты для группы
-        if (groupId && panel.messages) {
-            const groupMessages = panel.messages.filter(m => m.group_id === groupId);
-            const groupCount = groupMessages.length;
-            const isInGroup = groupCount > 1;
             
-            if (isInGroup) {
-                rowDiv.dataset.groupId = groupId;
-                rowDiv.classList.add('group-message');
+            // Найти последнее сообщение в группе и добавить кнопку
+            const lastRow = container.querySelector(`.message-row:nth-child(${lastIndex + 1})`);
+            if (lastRow) {
+                let actionsDiv = lastRow.querySelector('.message-actions');
+                if (!actionsDiv) {
+                    actionsDiv = document.createElement('div');
+                    actionsDiv.className = 'message-actions';
+                    lastRow.appendChild(actionsDiv);
+                }
+                
+                const expandBtn = document.createElement('button');
+                expandBtn.className = 'group-expand-btn';
+                expandBtn.textContent = `Показать ${hiddenCount}...`;
+                expandBtn.title = `Показать ${hiddenCount} промежуточных ответов`;
+                expandBtn.onclick = function() { toggleGroup(groupId, panelIndex); };
+                actionsDiv.appendChild(expandBtn);
             }
         }
-        
-        console.log('[DEBUG] addMessageToPanel - groupId:', groupId, 'role:', role, 'messageIndex:', messageIndex);
-        
-        container.appendChild(rowDiv);
-        
-        container.scrollTop = container.scrollHeight;
     }
     
     function toggleGroup(groupId, panelIndex) {
