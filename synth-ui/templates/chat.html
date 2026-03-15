@@ -1041,8 +1041,6 @@
         const panel = panels[panelIndex];
         if (!panel.messages) return;
         
-        console.log('[DEBUG] finalizeGroupedMessages - panel.messages:', panel.messages.length);
-        
         // Найти все уникальные group_id
         const groupIds = new Set();
         for (const msg of panel.messages) {
@@ -1051,13 +1049,9 @@
             }
         }
         
-        console.log('[DEBUG] groupIds:', groupIds.size);
-        
         const container = panel.messagesContainer;
         
         for (const groupId of groupIds) {
-            console.log('[DEBUG] processing groupId:', groupId);
-            
             // Найти все сообщения с этим group_id
             const groupMsgIndices = panel.messages
                 .filter(m => m.group_id === groupId)
@@ -1065,23 +1059,10 @@
                 .filter(idx => idx !== undefined && idx !== null)
                 .sort((a, b) => a - b);
             
-            console.log('[DEBUG] groupMsgIndices:', groupMsgIndices);
-            
             if (groupMsgIndices.length <= 1) continue;
             
             const lastIndex = groupMsgIndices[groupMsgIndices.length - 1];
             const hiddenCount = groupMsgIndices.length - 1;
-            
-            // Скрыть все кроме последнего
-            for (let i = 0; i < groupMsgIndices.length - 1; i++) {
-                const idx = groupMsgIndices[i];
-                const msgRow = container.querySelector(`.message-row:nth-child(${idx + 1})`);
-                if (msgRow) {
-                    msgRow.style.display = 'none';
-                    msgRow.classList.add('hidden-group-message');
-                    msgRow.dataset.groupId = groupId;
-                }
-            }
             
             // Найти последнее сообщение в группе
             const lastRow = container.querySelector(`.message-row:nth-child(${lastIndex + 1})`);
@@ -1167,11 +1148,85 @@
             }
         }
     }
+    
+    console.log('[DEBUG] groupIds:', groupIds.size);
+        
+        const container = panel.messagesContainer;
+        
+        for (const groupId of groupIds) {
+            console.log('[DEBUG] processing groupId:', groupId);
+            
+            // Найти все сообщения с этим group_id
+            const groupMsgIndices = panel.messages
+                .filter(m => m.group_id === groupId)
+                .map(m => m.messageIndex)
+                .filter(idx => idx !== undefined && idx !== null)
+                .sort((a, b) => a - b);
+            
+            console.log('[DEBUG] groupMsgIndices:', groupMsgIndices);
+            
+            if (groupMsgIndices.length <= 1) continue;
+            
+            const lastIndex = groupMsgIndices[groupMsgIndices.length - 1];
+            const hiddenCount = groupMsgIndices.length - 1;
+            
+            // Скрыть все кроме последнего
+            for (let i = 0; i < groupMsgIndices.length - 1; i++) {
+                const idx = groupMsgIndices[i];
+                const msgRow = container.querySelector(`.message-row:nth-child(${idx + 1})`);
+                if (msgRow) {
+                    msgRow.style.display = 'none';
+                    msgRow.classList.add('hidden-group-message');
+                    msgRow.dataset.groupId = groupId;
+                }
+            }
+            
+            // Найти последнее сообщение в группе
+            const lastRow = container.querySelector(`.message-row:nth-child(${lastIndex + 1})`);
+            if (!lastRow) continue;
+            
+            // Добавить groupId для поиска
+            lastRow.dataset.groupId = groupId;
+            
+            // Создать контейнер для вложенных сообщений внутри последнего сообщения
+            let nestedContainer = lastRow.querySelector('.nested-messages-container');
+            if (!nestedContainer) {
+                const msgContent = lastRow.querySelector('.message-content');
+                if (msgContent) {
+                    nestedContainer = document.createElement('div');
+                    nestedContainer.className = 'nested-messages-container';
+                    nestedContainer.style.display = 'none';
+                    msgContent.parentNode.insertBefore(nestedContainer, msgContent.nextSibling);
+                }
+            }
+            
+            // Переместить промежуточные сообщения в контейнер
+            for (let i = 0; i < groupMsgIndices.length - 1; i++) {
+                const idx = groupMsgIndices[i];
+                const msgRow = container.querySelector(`.message-row:nth-child(${idx + 1})`);
+                if (msgRow && nestedContainer) {
+                    // Скрыть оригинальную строку
+                    msgRow.style.display = 'none';
+                    // Клонировать содержимое во вложенный контейнер
+                    const clonedContent = msgRow.cloneNode(true);
+                    clonedContent.style.display = '';
+                    clonedContent.classList.add('nested-message');
+                    nestedContainer.appendChild(clonedContent);
+                }
+            }
+            
+            // Добавить кнопку
+            if (nestedContainer) {
+                let actionsDiv = lastRow.querySelector('.message-actions');
+                if (!actionsDiv) {
+                    actionsDiv = document.createElement('div');
+                    actionsDiv.className = 'message-actions';
+                    lastRow.appendChild(actionsDiv);
+                }
                 
                 const expandBtn = document.createElement('button');
                 expandBtn.className = 'group-expand-btn';
-                expandBtn.textContent = `Показать ${hiddenCount}...`;
-                expandBtn.title = `Показать ${hiddenCount} промежуточных ответов`;
+                expandBtn.textContent = `▼ ${hiddenCount} промежуточных`;
                 expandBtn.dataset.groupId = groupId;
                 expandBtn.dataset.panelIndex = panelIndex;
                 expandBtn.onclick = function() { 
