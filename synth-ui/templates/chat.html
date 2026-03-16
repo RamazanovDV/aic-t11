@@ -2095,7 +2095,9 @@
             document.querySelectorAll('.debug-tab').forEach(t => {
                 t.style.display = (hasRequest && hasResponse) ? '' : 'none';
             });
-            document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
+            if (hasSubagents) {
+                document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
+            }
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
             if (hasReasoning) {
                 document.querySelector('.debug-tab[data-tab="reasoning"]').style.display = '';
@@ -2107,7 +2109,9 @@
             // Show only status
             document.getElementById('debug-json').textContent = JSON.stringify(debugData.status, null, 2);
             document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
-            document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
+            if (hasSubagents) {
+                document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
+            }
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
             if (hasReasoning) {
                 document.querySelector('.debug-tab[data-tab="reasoning"]').style.display = '';
@@ -2130,7 +2134,9 @@
             document.querySelectorAll('.debug-tab').forEach(t => {
                 t.style.display = (hasRequest && hasResponse) ? '' : 'none';
             });
-            document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
+            if (hasSubagents) {
+                document.querySelector('.debug-tab[data-tab="subagents"]').style.display = '';
+            }
             document.querySelector('.debug-tab[data-tab="session"]').style.display = '';
             if (hasReasoning) {
                 document.querySelector('.debug-tab[data-tab="reasoning"]').style.display = '';
