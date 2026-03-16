@@ -384,5 +384,289 @@ def main():
         cli(obj={})
 
 
+def login(username: str, password: str) -> dict:
+    url = f"{config.backend_url}/api/auth/login"
+    try:
+        response = requests.post(url, json={"username": username, "password": password}, timeout=10)
+        if response.status_code == 200:
+            return {"success": True, "cookies": response.cookies}
+        else:
+            return {"success": False, "error": response.json().get("error", "Login failed")}
+    except requests.RequestException as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_auth_headers(use_cookies: bool = False) -> dict:
+    headers = {
+        "X-API-Key": config.backend_api_key or config.auth_api_key,
+    }
+    if use_cookies:
+        return headers
+    return headers
+
+
+@click.group()
+def embeddings():
+    """Manage embedding indexes"""
+    pass
+
+
+@embeddings.command("create")
+@click.option("--name", required=True, help="Index name")
+@click.option("--description", default="", help="Index description")
+@click.option("--source", "source_dir", required=True, help="Source directory to index")
+@click.option("--provider", default="ollama", help="Embedding provider (ollama/openai)")
+@click.option("--model", default="nomic-embed-text-v2-moe:latest", help="Embedding model")
+@click.option("--strategy", default="structure", help="Chunking strategy (fixed/structure)")
+@click.option("--chunk-size", default=512, help="Chunk size (for fixed strategy)")
+@click.option("--overlap", default=50, help="Chunk overlap (for fixed strategy)")
+@click.option("--min-chunk", default=100, help="Min chunk size (for structure strategy)")
+@click.option("--max-chunk", default=1000, help="Max chunk size (for structure strategy)")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def embeddings_create(name, description, source_dir, provider, model, strategy, chunk_size, overlap, min_chunk, max_chunk, username, password):
+    """Create a new embedding index"""
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+
+    chunking_params = {}
+    if strategy == "fixed":
+        chunking_params = {"chunk_size": chunk_size, "overlap": overlap}
+    else:
+        chunking_params = {"min_chunk_size": min_chunk, "max_chunk_size": max_chunk}
+
+    url = f"{config.backend_url}/api/embeddings"
+    headers = get_auth_headers()
+    headers["Content-Type"] = "application/json"
+
+    payload = {
+        "name": name,
+        "description": description,
+        "source_dir": source_dir,
+        "provider": provider,
+        "model": model,
+        "chunking_strategy": strategy,
+        "chunking_params": chunking_params,
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, cookies=cookies, timeout=300)
+        response.raise_for_status()
+        result = response.json()
+        click.echo(click.style(f"Index created: {result.get('id')}", fg="green"))
+        click.echo(f"Version: {result.get('version')}")
+        click.echo(f"Chunks: {result.get('chunk_count')}")
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+@embeddings.command("list")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def embeddings_list(username, password):
+    """List all embedding indexes"""
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+
+    url = f"{config.backend_url}/api/embeddings"
+    headers = get_auth_headers()
+
+    try:
+        response = requests.get(url, headers=headers, cookies=cookies, timeout=10)
+        response.raise_for_status()
+        indexes = response.json()
+
+        if not indexes:
+            click.echo("No indexes found")
+            return
+
+        click.echo(f"Found {len(indexes)} index(es):\n")
+        for idx in indexes:
+            click.echo(f"  {idx.get('name')} (v{idx.get('version')})")
+            click.echo(f"    ID: {idx.get('id')}")
+            click.echo(f"    Provider: {idx.get('provider')}/{idx.get('model')}")
+            click.echo(f"    Strategy: {idx.get('chunking_strategy')}")
+            click.echo(f"    Files: {idx.get('file_count')}, Chunks: {idx.get('chunk_count')}")
+            click.echo(f"    Ratings: +{idx.get('ratings', {}).get('thumbs_up', 0)} / -{idx.get('ratings', {}).get('thumbs_down', 0)}")
+            click.echo()
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+@embeddings.command("info")
+@click.argument("index_id")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def embeddings_info(index_id, username, password):
+    """Get embedding index info"""
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+
+    url = f"{config.backend_url}/api/embeddings/{index_id}"
+    headers = get_auth_headers()
+
+    try:
+        response = requests.get(url, headers=headers, cookies=cookies, timeout=10)
+        if response.status_code == 404:
+            click.echo(click.style(f"Index '{index_id}' not found", fg="yellow"))
+            return
+        response.raise_for_status()
+        idx = response.json()
+
+        click.echo(f"Index: {idx.get('name')}")
+        click.echo(f"Version: {idx.get('version')}")
+        click.echo(f"ID: {idx.get('id')}")
+        click.echo(f"Description: {idx.get('description')}")
+        click.echo(f"Provider: {idx.get('provider')}/{idx.get('model')}")
+        click.echo(f"Strategy: {idx.get('chunking_strategy')}")
+        click.echo(f"Chunking params: {idx.get('chunking_params')}")
+        click.echo(f"Source: {idx.get('source_dir')}")
+        click.echo(f"Files: {idx.get('file_count')}")
+        click.echo(f"Chunks: {idx.get('chunk_count')}")
+        click.echo(f"Dimension: {idx.get('dimension')}")
+        click.echo(f"Ratings: +{idx.get('ratings', {}).get('thumbs_up', 0)} / -{idx.get('ratings', {}).get('thumbs_down', 0)}")
+        click.echo(f"Created: {idx.get('created_at')}")
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+@embeddings.command("delete")
+@click.argument("index_id")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def embeddings_delete(index_id, username, password):
+    """Delete an embedding index"""
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+
+    url = f"{config.backend_url}/api/embeddings/{index_id}"
+    headers = get_auth_headers()
+
+    try:
+        response = requests.delete(url, headers=headers, cookies=cookies, timeout=10)
+        if response.status_code == 404:
+            click.echo(click.style(f"Index '{index_id}' not found", fg="yellow"))
+            return
+        response.raise_for_status()
+        click.echo(click.style(f"Index '{index_id}' deleted", fg="green"))
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+@embeddings.command("search")
+@click.argument("query")
+@click.option("--name", "index_name", help="Index name to search in")
+@click.option("--id", "index_id", help="Index ID to search in")
+@click.option("--top-k", default=5, help="Number of results")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def embeddings_search(query, index_name, index_id, top_k, username, password):
+    """Search in embedding index"""
+    if not index_name and not index_id:
+        click.echo(click.style("Must provide either --name or --id", fg="red"), err=True)
+        return
+
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+
+    url = f"{config.backend_url}/api/embeddings/search"
+    headers = get_auth_headers()
+    headers["Content-Type"] = "application/json"
+
+    payload = {
+        "query": query,
+        "top_k": top_k,
+    }
+    if index_name:
+        payload["index_name"] = index_name
+    if index_id:
+        payload["index_id"] = index_id
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, cookies=cookies, timeout=60)
+        response.raise_for_status()
+        data = response.json()
+        results = data.get("results", [])
+
+        if not results:
+            click.echo("No results found")
+            return
+
+        click.echo(f"Found {len(results)} result(s):\n")
+        for i, result in enumerate(results, 1):
+            metadata = result.get("metadata", {})
+            source = metadata.get("source", "unknown")
+            section = metadata.get("section", "")
+            click.echo(f"--- Result {i} (distance: {result.get('distance', 0):.4f}) ---")
+            click.echo(f"Source: {source}")
+            if section:
+                click.echo(f"Section: {section}")
+            click.echo(f"Content: {result.get('content', '')[:300]}...")
+            click.echo()
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+@embeddings.command("rate")
+@click.argument("index_id")
+@click.option("--thumbs-up", "thumbs_up", is_flag=True, help="Thumbs up")
+@click.option("--thumbs-down", "thumbs_down", is_flag=True, help="Thumbs down")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def embeddings_rate(index_id, thumbs_up, thumbs_down, username, password):
+    """Rate an embedding index"""
+    if not thumbs_up and not thumbs_down:
+        click.echo(click.style("Must provide either --thumbs-up or --thumbs-down", fg="red"), err=True)
+        return
+
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+
+    url = f"{config.backend_url}/api/embeddings/{index_id}/rate"
+    headers = get_auth_headers()
+    headers["Content-Type"] = "application/json"
+
+    rating = "thumbs_up" if thumbs_up else "thumbs_down"
+
+    try:
+        response = requests.post(url, headers=headers, json={"rating": rating}, cookies=cookies, timeout=10)
+        if response.status_code == 404:
+            click.echo(click.style(f"Index '{index_id}' not found", fg="yellow"))
+            return
+        response.raise_for_status()
+        result = response.json()
+        click.echo(click.style("Rating updated", fg="green"))
+        click.echo(f"Ratings: +{result.get('ratings', {}).get('thumbs_up', 0)} / -{result.get('ratings', {}).get('thumbs_down', 0)}")
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+cli.add_command(embeddings)
+
+
 if __name__ == "__main__":
     main()
