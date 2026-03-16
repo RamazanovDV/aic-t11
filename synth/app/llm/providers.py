@@ -158,6 +158,53 @@ class GenericOpenAIProvider(BaseProvider):
     def get_provider_name(self) -> str:
         return "generic"
 
+    def embed(self, text: str) -> list[float]:
+        base_url = self.url
+        if "/chat/completions" in base_url:
+            base_url = base_url.split("/chat/completions")[0]
+        elif "/v1" in base_url and "/embeddings" not in base_url:
+            base_url = base_url.split("/v1")[0] + "/v1"
+        
+        embed_url = f"{base_url}/embeddings"
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        response = requests.post(
+            embed_url,
+            headers=headers,
+            json={"input": text, "model": self.model},
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        return response.json()["data"][0]["embedding"]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        base_url = self.url
+        if "/chat/completions" in base_url:
+            base_url = base_url.split("/chat/completions")[0]
+        elif "/v1" in base_url and "/embeddings" not in base_url:
+            base_url = base_url.split("/v1")[0] + "/v1"
+        
+        embed_url = f"{base_url}/embeddings"
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        response = requests.post(
+            embed_url,
+            headers=headers,
+            json={"input": texts, "model": self.model},
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        data = response.json()["data"]
+        return [item["embedding"] for item in sorted(data, key=lambda x: x["index"])]
+
     def stream_chat(self, messages: list[Message], system_prompt: str | None = None, debug_collector: DebugCollector | None = None, tools: list | None = None) -> Generator[LLMChunk, None, None]:
         from app.llm.base import LLMChunk
 
@@ -1007,3 +1054,17 @@ class OllamaProvider(BaseProvider):
 
     def get_provider_name(self) -> str:
         return "ollama"
+
+    def embed(self, text: str) -> list[float]:
+        base_url = self.url.split("/api/chat")[0] if "/api/chat" in self.url else self.url
+        embed_url = f"{base_url}/api/embeddings"
+        response = requests.post(
+            embed_url,
+            json={"model": self.model, "prompt": text},
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        return response.json()["embedding"]
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(text) for text in texts]

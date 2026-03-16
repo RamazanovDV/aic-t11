@@ -29,14 +29,27 @@ class EmbeddingIndexer:
         if not chunks:
             raise ValueError(f"No chunks created from {source_dir}")
 
-        print(f"Created {len(chunks)} chunks from {source_dir}")
+        print(f"Created {len(chunks)} from {source_dir}")
 
         embeddings = []
+        import time
+        
         for i, chunk in enumerate(chunks):
-            if i % 100 == 0:
+            if i % 10 == 0:
                 print(f"Embedding chunk {i + 1}/{len(chunks)}...")
-            emb = self.embedder.embed(chunk.content)
-            embeddings.append(emb)
+                time.sleep(0.5)
+            
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    emb = self.embedder.embed(chunk.content)
+                    embeddings.append(emb)
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+                        continue
+                    raise e
 
         embeddings_array = np.array(embeddings).astype("float32")
 

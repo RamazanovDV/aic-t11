@@ -63,6 +63,12 @@ class BaseProvider(ABC):
     def get_provider_name(self) -> str:
         pass
 
+    def embed(self, text: str) -> list[float]:
+        raise NotImplementedError(f"Provider {self.get_provider_name()} does not support embeddings")
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed(text) for text in texts]
+
 
 class ProviderFactory:
     _providers: dict[str, type[BaseProvider]] = {}
