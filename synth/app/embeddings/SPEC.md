@@ -106,6 +106,7 @@ DELETE /api/embeddings/{id}   # Delete
 
 POST /api/embeddings/search   # Semantic search
 POST /api/embeddings/{id}/rate # Rate (thumbs_up / thumbs_down)
+GET  /api/embeddings/list     # List (for UI dropdown)
 ```
 
 **Create request body:**
@@ -130,7 +131,13 @@ POST /api/embeddings/{id}/rate # Rate (thumbs_up / thumbs_down)
 }
 ```
 
-## 6. Chat Integration (RAG)
+## 6. Admin UI
+
+- Tab "Эмбединги" in admin page
+- Table with all indexes (name, version, provider, strategy, chunks, files, ratings, date)
+- Delete button with confirmation
+
+## 7. Chat Integration (RAG)
 
 In `/api/chat` add:
 ```json
@@ -157,7 +164,14 @@ Content...
 ...
 ```
 
-## 7. Chunking Strategies
+## 8. UI Integration
+
+- RAG modal in chat (🔍 button)
+- Select embedding index from dropdown
+- Toggle RAG on/off
+- Set top_k parameter
+
+## 9. Chunking Strategies
 
 **FixedChunker:**
 - `chunk_size` - size in tokens
@@ -167,20 +181,14 @@ Content...
 - Split by Markdown headers (#, ##, ###)
 - `min_chunk_size` / `max_chunk_size` - chunk size limits
 
-## 8. Dependencies
+## 10. Dependencies
 
 ```txt
 faiss-cpu>=1.7.0
-tiktoken>=0.5.0
 ```
 
-## 9. Implementation Plan
+## 11. Known Issues
 
-1. **Models + Storage** - `embeddings/models.py`, `embeddings/storage.py`
-2. **Chunking** - `embeddings/chunker.py` (interface + 2 implementations)
-3. **Embedder** - `embeddings/embedder.py` (OpenAI + Ollama)
-4. **Index + Search** - `embeddings/indexer.py`, `embeddings/search.py`
-5. **Config** - add to `config.py`
-6. **Routes** - `embeddings/routes.py` + integration in `app/routes.py`
-7. **CLI** - add commands to `synth-cli/main.py`
-8. **UI** - add section to admin (optional)
+- Ollama embedding API is unstable with large texts (>~1500 chars)
+- StructureChunker has bug with some files: 'list' object has no attribute 'metadata'
+- Chunk size must be kept small (≤50) for Ollama to work reliably
