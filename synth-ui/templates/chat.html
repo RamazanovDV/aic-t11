@@ -2062,7 +2062,7 @@
                     t.style.display = '';
                 } else if (t.dataset.tab === 'response' && (hasOrchestratorResponse || hasApiResponse)) {
                     t.style.display = '';
-                } else if (t.dataset.tab === 'subagents') {
+                } else if (t.dataset.tab === 'subagents' && hasSubagents) {
                     t.style.display = '';
                 } else if (t.dataset.tab === 'status' && hasStatus) {
                     t.style.display = '';
@@ -2070,7 +2070,7 @@
                     t.style.display = '';
                 } else if (t.dataset.tab === 'raw' && hasRaw) {
                     t.style.display = '';
-                } else if (t.dataset.tab === 'session') {
+                } else if (t.dataset.tab === 'session' && debugData.session) {
                     t.style.display = '';
                 } else if (t.dataset.tab === 'mcp' && hasMcpCalls) {
                     t.style.display = '';
