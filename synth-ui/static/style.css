@@ -762,7 +762,6 @@ body {
     overflow-wrap: break-word;
     display: flex;
     flex-direction: column;
-    flex: 1;
 }
 
 .message-row {
