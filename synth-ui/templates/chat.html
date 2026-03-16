@@ -17,11 +17,6 @@
 <div id="debug-modal" class="modal" style="display: none;">
     <div class="debug-modal-content">
         <h3>Debug Info</h3>
-        <div id="group-nav" style="display: none; text-align: center; margin: 10px 0;">
-            <button class="btn btn-small" onclick="prevGroupMessage()">◀</button>
-            <span id="group-counter" style="margin: 0 10px;">1 / 1</span>
-            <button class="btn btn-small" onclick="nextGroupMessage()">▶</button>
-        </div>
         <div class="debug-tabs">
             <button class="debug-tab active" data-tab="request" onclick="switchDebugTab('request')">Request</button>
             <button class="debug-tab" data-tab="response" onclick="switchDebugTab('response')">Response</button>
@@ -303,9 +298,6 @@
     let panels = [];
     let debugMode = localStorage.getItem('t6_debug') === 'true';
     let currentDebugData = null;
-    let currentGroupId = null;
-    let currentGroupIndex = 0;
-    let currentGroupMessages = [];
     let availableProviders = [];
     let allSessions = [];
     let sessionEventSources = {};
@@ -1983,35 +1975,6 @@
 
     function showDebugModal(debugData, groupId = null, msgIndex = -1) {
         currentDebugData = debugData;
-        currentGroupId = groupId;
-        currentGroupIndex = 0;
-        currentGroupMessages = [];
-        
-        // Найти все сообщения в группе если есть groupId
-        if (groupId) {
-            for (const panel of panels) {
-                if (panel.messages) {
-                    const groupMsgs = panel.messages.filter(m => m.group_id === groupId);
-                    if (groupMsgs.length > 0) {
-                        currentGroupMessages = groupMsgs;
-                        currentGroupIndex = groupMsgs.findIndex(m => m.messageIndex === msgIndex);
-                        if (currentGroupIndex === -1) currentGroupIndex = 0;
-                        break;
-                    }
-                }
-            }
-        }
-        
-        // Показать переключатель группы если есть
-        const groupNav = document.getElementById('group-nav');
-        if (groupNav) {
-            if (currentGroupMessages.length > 1) {
-                groupNav.style.display = 'block';
-                updateGroupNavCounter();
-            } else {
-                groupNav.style.display = 'none';
-            }
-        }
         
         // Check if this is a summary debug (has summarized_messages)
         const isSummary = debugData && debugData.summarized_messages;
@@ -2201,12 +2164,6 @@
         }
     }
     
-    function updateGroupNavCounter() {
-        const counter = document.getElementById('group-counter');
-        if (counter) {
-            counter.textContent = `${currentGroupIndex + 1} / ${currentGroupMessages.length}`;
-        }
-    }
     
     function prevGroupMessage() {
         if (currentGroupIndex > 0 && currentGroupMessages.length > 0) {
