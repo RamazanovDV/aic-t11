@@ -846,8 +846,6 @@
             
             panel.messages = data.messages || [];
             
-            console.log('Loaded messages, first with debug:', data.messages.filter(m => m.debug).length);
-            
             const container = panel.messagesContainer;
             if (!container) return;
             
@@ -1071,16 +1069,12 @@
         const panel = panels[panelIndex];
         if (!panel.messages) return;
         
-        console.log('[GROUP] Starting finalizeGroupedMessages for panel', panelIndex);
-        
         const groupIds = new Set();
         for (const msg of panel.messages) {
             if (msg.group_id) {
                 groupIds.add(msg.group_id);
             }
         }
-        
-        console.log('[GROUP] Found groupIds:', Array.from(groupIds));
         
         if (groupIds.size === 0) return;
         
@@ -1093,8 +1087,6 @@
                 .map(m => m.messageIndex)
                 .filter(idx => idx !== undefined && idx !== null)
                 .sort((a, b) => a - b);
-            
-            console.log('[GROUP] Group', groupId, 'indices:', groupMsgIndices);
             
             if (groupMsgIndices.length <= 1) continue;
             
