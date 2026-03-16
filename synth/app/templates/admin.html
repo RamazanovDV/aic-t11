@@ -9,6 +9,7 @@
         <button class="tab-btn" data-tab="summarization" onclick="switchTab('summarization')">Суммаризация</button>
         <button class="tab-btn" data-tab="models" onclick="switchTab('models')">Модели</button>
         <button class="tab-btn" data-tab="mcp" onclick="switchTab('mcp')">MCP Серверы</button>
+        <button class="tab-btn" data-tab="embeddings" onclick="switchTab('embeddings')">Эмбединги</button>
         <button class="tab-btn" data-tab="users" onclick="switchTab('users')">Пользователи</button>
         <button class="tab-btn" data-tab="debug" onclick="switchTab('debug')">Отладка</button>
     </div>
@@ -178,6 +179,17 @@
             
             <div id="mcp-servers-list">
                 <div class="loading">Загрузка серверов...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-content" id="tab-embeddings">
+        <div class="settings-section">
+            <h3>Эмбединги</h3>
+            <p class="help-text">Управление индексами для семантического поиска. Индексы создаются через CLI.</p>
+            
+            <div id="embeddings-list">
+                <div class="loading">Загрузка индексов...</div>
             </div>
         </div>
     </div>
@@ -519,8 +531,114 @@
         loadSummarizerConfig();
         loadModelList();
         loadMCPServers();
+        loadEmbeddings();
         loadUsers();
         loadDebugConfig();
+    }
+
+    // Embeddings Functions
+    async function loadEmbeddings() {
+        const container = document.getElementById('embeddings-list');
+        if (!container) {
+            return;
+        }
+        try {
+            const response = await fetch('/api/admin/embeddings', { headers: getAuthHeaders() });
+            if (response.status === 401 || response.status === 403) {
+                container.innerHTML = '<div class="error">Нет доступа</div>';
+                return;
+            }
+            const embeddings = await response.json();
+            renderEmbeddings(embeddings);
+        } catch (e) {
+            console.error('Failed to load embeddings:', e);
+            container.innerHTML = '<div class="error">Ошибка загрузки индексов</div>';
+        }
+    }
+
+    function renderEmbeddings(embeddings) {
+        const container = document.getElementById('embeddings-list');
+        
+        if (!embeddings || embeddings.length === 0) {
+            container.innerHTML = '<p class="help-text">Нет созданных индексов. Индексы создаются через CLI.</p>';
+            return;
+        }
+
+        let html = `
+            <table class="form-table" style="width: 100%;">
+                <thead>
+                    <tr>
+                        <th style="text-align: left; padding: 8px;">Название</th>
+                        <th style="text-align: left; padding: 8px;">Версия</th>
+                        <th style="text-align: left; padding: 8px;">Провайдер</th>
+                        <th style="text-align: left; padding: 8px;">Стратегия</th>
+                        <th style="text-align: left; padding: 8px;">Чанков</th>
+                        <th style="text-align: left; padding: 8px;">Файлов</th>
+                        <th style="text-align: left; padding: 8px;">Оценки</th>
+                        <th style="text-align: left; padding: 8px;">Создан</th>
+                        <th style="text-align: left; padding: 8px;">Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        for (const idx of embeddings) {
+            const ratings = idx.ratings || {};
+            const thumbsUp = ratings.thumbs_up || 0;
+            const thumbsDown = ratings.thumbs_down || 0;
+            const created = idx.created_at ? new Date(idx.created_at).toLocaleDateString('ru-RU') : '-';
+            const chunkingParams = JSON.stringify(idx.chunking_params || {});
+
+            html += `
+                <tr>
+                    <td style="padding: 8px;">
+                        <strong>${escapeHtml(idx.name)}</strong>
+                        ${idx.description ? `<br><small style="color: var(--text-secondary);">${escapeHtml(idx.description)}</small>` : ''}
+                    </td>
+                    <td style="padding: 8px;">v${idx.version}</td>
+                    <td style="padding: 8px;">${escapeHtml(idx.provider)}/${escapeHtml(idx.model)}</td>
+                    <td style="padding: 8px;">
+                        ${escapeHtml(idx.chunking_strategy)}
+                        <br><small style="color: var(--text-secondary);">${escapeHtml(chunkingParams)}</small>
+                    </td>
+                    <td style="padding: 8px;">${idx.chunk_count}</td>
+                    <td style="padding: 8px;">${idx.file_count}</td>
+                    <td style="padding: 8px;">
+                        <span style="color: #4CAF50;">+${thumbsUp}</span> / <span style="color: #f44336;">-${thumbsDown}</span>
+                    </td>
+                    <td style="padding: 8px;">${created}</td>
+                    <td style="padding: 8px;">
+                        <button class="btn btn-danger" style="padding: 4px 8px; font-size: 12px;" onclick="deleteEmbedding('${idx.id}', '${escapeHtml(idx.name)}')">Удалить</button>
+                    </td>
+                </tr>
+            `;
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    async function deleteEmbedding(indexId, indexName) {
+        if (!confirm(`Удалить индекс "${indexName}"?`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/admin/embeddings/${indexId}`, {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                loadEmbeddings();
+            } else {
+                const data = await response.json();
+                alert('Ошибка удаления: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            console.error('Failed to delete embedding:', e);
+            alert('Ошибка удаления индекса');
+        }
     }
 
     async function loadUsers() {

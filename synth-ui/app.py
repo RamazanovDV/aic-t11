@@ -912,6 +912,32 @@ def delete_context_file(filename: str):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/admin/embeddings", methods=["GET"])
+def admin_embeddings_list():
+    url = f"{ui_config.backend_url}/admin/embeddings"
+    headers = {"X-API-Key": ui_config.backend_api_key}
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/embeddings/<index_id>", methods=["DELETE"])
+def admin_embeddings_delete(index_id: str):
+    url = f"{ui_config.backend_url}/api/embeddings/{index_id}"
+    headers = {"X-API-Key": ui_config.backend_api_key}
+
+    try:
+        response = requests.delete(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/admin/context/<filename>/rename", methods=["POST"])
 def rename_context_file(filename: str):
     data = request.get_json()

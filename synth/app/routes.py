@@ -3317,6 +3317,14 @@ def delete_model(model_name: str):
     return jsonify({"error": "Cannot delete default model or model not found"}), 400
 
 
+@admin_bp.route("/embeddings", methods=["GET"])
+@require_user
+def admin_embeddings_list():
+    from app.embeddings.storage import embedding_storage
+    indexes = embedding_storage.list_indexes()
+    return jsonify([idx.to_dict() for idx in indexes])
+
+
 @api_bp.route("/sessions/<session_id>/events", methods=["GET"])
 def session_events(session_id: str):
     """SSE endpoint for session updates."""
