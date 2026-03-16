@@ -1984,6 +1984,12 @@ def chat_stream():
                         if tool_iteration >= max_tool_iterations:
                             warning("MCP", f"Reached max tool iterations ({max_tool_iterations})")
                         
+                        # Clean up tool_use from assistant messages after tool execution
+                        for msg in session.messages:
+                            if msg.role == "assistant" and msg.tool_use:
+                                debug("MCP", f"Stream: Cleaning up tool_use: {[tu.get('id') for tu in msg.tool_use]}")
+                                msg.tool_use = None
+                        
                         break
                         
                     except Exception as e:
@@ -2173,7 +2179,12 @@ def chat_stream():
                     target_msg.content = content_for_user
                     target_msg.usage = total_usage
                     target_msg.debug = debug_info
-                    target_msg.tool_use = tool_use_for_message
+                    # Store tool_use info in debug for UI, not in tool_use field (to avoid LLM issues)
+                    if tool_use_for_message:
+                        if target_msg.debug is None:
+                            target_msg.debug = {}
+                        target_msg.debug["tool_use"] = tool_use_for_message
+                    target_msg.tool_use = None  # Clear to avoid LLM issues
                     target_msg.group_id = group_id
             elif preliminary_saved:
                 # Fallback: update last message if no ID stored
@@ -2181,7 +2192,12 @@ def chat_stream():
                 last_msg.content = content_for_user
                 last_msg.usage = total_usage
                 last_msg.debug = debug_info
-                last_msg.tool_use = tool_use_for_message
+                # Store tool_use info in debug for UI, not in tool_use field (to avoid LLM issues)
+                if tool_use_for_message:
+                    if last_msg.debug is None:
+                        last_msg.debug = {}
+                    last_msg.debug["tool_use"] = tool_use_for_message
+                last_msg.tool_use = None  # Clear to avoid LLM issues
                 last_msg.group_id = group_id
             else:
                 session.add_assistant_message(content_for_user, total_usage, debug=debug_info, model=provider.model, group_id=group_id)
