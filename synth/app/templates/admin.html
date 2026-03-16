@@ -543,7 +543,7 @@
             return;
         }
         try {
-            const response = await fetch('/api/admin/embeddings', { headers: getAuthHeaders() });
+            const response = await fetch('/admin/embeddings', { headers: getAuthHeaders() });
             if (response.status === 401 || response.status === 403) {
                 container.innerHTML = '<div class="error">Нет доступа</div>';
                 return;
@@ -624,7 +624,7 @@
         }
         
         try {
-            const response = await fetch(`/api/admin/embeddings/${indexId}`, {
+            const response = await fetch(`/api/embeddings/${indexId}`, {
                 method: 'DELETE',
                 headers: getAuthHeaders()
             });

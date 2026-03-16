@@ -3315,7 +3315,6 @@ def list_available_models():
     available = {name: info for name, info in models.items() if info.get("enabled", True)}
     return jsonify({"models": available})
 
-
 @admin_bp.route("/models", methods=["POST"])
 @require_user
 def add_or_update_model():
