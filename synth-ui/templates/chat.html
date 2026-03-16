@@ -297,6 +297,7 @@
     let panelMode = localStorage.getItem(PANEL_MODE_KEY) || 'single';
     let panels = [];
     let debugMode = localStorage.getItem('t6_debug') === 'true';
+    let streamMode = localStorage.getItem('t6_stream') !== 'false';
     let currentDebugData = null;
     let availableProviders = [];
     let allSessions = [];
@@ -441,7 +442,7 @@
                             <span>Debug</span>
                         </label>
                         <label class="debug-toggle">
-                            <input type="checkbox" class="panel-stream-toggle" data-panel="${index}" checked>
+                            <input type="checkbox" class="panel-stream-toggle" data-panel="${index}" ${streamMode ? 'checked' : ''} onchange="togglePanelStream(${index})">
                             <span>Stream</span>
                         </label>
                         <button class="btn btn-icon" onclick="openSummarizationModal(${index})" title="Настройки суммаризации">📝</button>
@@ -714,6 +715,13 @@
                         task_name: data.task_name || 'conversation',
                         state: data.state
                     });
+                }
+
+                const streamToggle = document.querySelector(`.panel-stream-toggle[data-panel="${panelIndex}"]`);
+                if (streamToggle && data.session_settings) {
+                    const streamEnabled = data.session_settings.stream_enabled !== false;
+                    streamToggle.checked = streamEnabled;
+                    streamMode = streamEnabled;
                 }
             }
         } catch (e) {
@@ -1315,6 +1323,29 @@
         
         document.querySelectorAll('.panel-debug-toggle').forEach(cb => {
             cb.checked = debugMode;
+        });
+    }
+
+    async function togglePanelStream(panelIndex) {
+        const checkbox = document.querySelector(`.panel-stream-toggle[data-panel="${panelIndex}"]`);
+        streamMode = checkbox.checked;
+        localStorage.setItem('t6_stream', streamMode ? 'true' : 'false');
+        
+        const panel = panels[panelIndex];
+        if (panel && panel.sessionId) {
+            try {
+                await fetch(`/api/sessions/${panel.sessionId}/context-settings`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({stream_enabled: streamMode})
+                });
+            } catch (e) {
+                console.error('Failed to save stream setting:', e);
+            }
+        }
+        
+        document.querySelectorAll('.panel-stream-toggle').forEach(cb => {
+            cb.checked = streamMode;
         });
     }
 

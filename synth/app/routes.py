@@ -2437,6 +2437,9 @@ def set_context_settings(session_id: str):
     if "debug_enabled" in data:
         session.session_settings["debug_enabled"] = bool(data["debug_enabled"])
 
+    if "stream_enabled" in data:
+        session.session_settings["stream_enabled"] = bool(data["stream_enabled"])
+
     session_manager.save_session(session_id)
 
     return jsonify({"status": "saved"})

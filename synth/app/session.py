@@ -58,7 +58,7 @@ class Session:
     total_tokens: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    session_settings: dict[str, Any] = field(default_factory=lambda: {"debug_enabled": True})
+    session_settings: dict[str, Any] = field(default_factory=lambda: {"debug_enabled": True, "stream_enabled": True})
     branches: list[Branch] = field(default_factory=list)
     checkpoints: list[Checkpoint] = field(default_factory=list)
     current_branch: str = "main"
