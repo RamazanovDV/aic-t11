@@ -756,7 +756,7 @@ body {
 .message {
     position: relative;
     padding: 1rem 1.5rem;
-    margin: 0.5rem 0;
+    margin: 0;
     max-width: 85%;
     word-wrap: break-word;
     overflow-wrap: break-word;
@@ -1005,7 +1005,11 @@ body {
 }
 
 .group-toggle-content {
-    margin-top: 8px;
+    margin-top: 4px;
+}
+
+.group-toggle-content .message-row {
+    gap: 0.25rem;
 }
 
 .group-toggle-content ul,
@@ -1019,11 +1023,16 @@ body {
 }
 
 .group-nested-message {
-    padding: 8px;
-    margin: 4px 0;
-    background: var(--bg-primary);
+    padding: 4px;
+    margin: 0;
+    background: #d0d0d0;
     border-radius: 6px;
     border-left: 2px solid var(--accent-color);
+}
+
+.group-toggle-content .message-toggle-btn,
+.group-toggle-content .message-delete-btn {
+    display: none;
 }
 
 .message-tokens {
