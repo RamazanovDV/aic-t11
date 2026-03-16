@@ -202,6 +202,7 @@ class GenericOpenAIProvider(BaseProvider):
         full_content = ""
         full_reasoning = ""
         total_usage = {}
+        final_data = None
 
         for line in response.iter_lines():
             if line:
@@ -212,6 +213,7 @@ class GenericOpenAIProvider(BaseProvider):
                         break
                     try:
                         data = json.loads(data_str)
+                        final_data = data
                         delta = data.get("choices", [{}])[0].get("delta", {})
                         content = delta.get("content", "")
                         reasoning = delta.get("reasoning_content", "")
@@ -228,6 +230,8 @@ class GenericOpenAIProvider(BaseProvider):
 
                         if "usage" in data:
                             total_usage = extract_usage(data)
+                            if debug_collector:
+                                debug_collector.capture_api_response(data)
                     except json.JSONDecodeError:
                         continue
 
@@ -580,6 +584,7 @@ class AnthropicProvider(BaseProvider):
         tool_calls = []
         current_tool = None
         current_tool_input = ""
+        final_data = None
 
         for line in response.iter_lines():
             if line:
@@ -588,6 +593,7 @@ class AnthropicProvider(BaseProvider):
                     data_str = line[6:]
                     try:
                         data = json.loads(data_str)
+                        final_data = data
                         
                         if data.get("type") == "content_block_start":
                             block = data.get("content_block", {})
@@ -641,6 +647,8 @@ class AnthropicProvider(BaseProvider):
                         elif data.get("type") == "message_delta":
                             if "usage" in data:
                                 total_usage = extract_usage(data)
+                                if debug_collector:
+                                    debug_collector.capture_api_response(data)
                     except json.JSONDecodeError:
                         continue
 
@@ -867,6 +875,7 @@ class OllamaProvider(BaseProvider):
         full_thinking = ""
         total_usage = {}
         tool_calls = None
+        final_data = None
 
         for line in response.iter_lines():
             if line:
@@ -875,6 +884,7 @@ class OllamaProvider(BaseProvider):
                     continue
                 try:
                     data = json.loads(line)
+                    final_data = data
                     
                     if data.get("done"):
                         break
@@ -903,6 +913,8 @@ class OllamaProvider(BaseProvider):
                             "output_tokens": data.get("eval_count", 0),
                             "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
                         }
+                        if debug_collector:
+                            debug_collector.capture_api_response(data)
                 except json.JSONDecodeError:
                     continue
 

@@ -796,6 +796,9 @@ async def _process_status_block(
                             last_msg.debug = {}
                         last_msg.debug["mcp_calls"] = list(mcp_calls)
                 
+                # Save session after updating intermediate message
+                session_manager.save_session(session_id)
+                
                 # Build tool messages and call model again
                 tool_messages = list(llm_messages)
                 tool_messages.append(Message(role="assistant", content=response.content or "", usage={}, tool_use=response.tool_calls))
@@ -1769,7 +1772,6 @@ def chat_stream():
                     )
                     preliminary_message_id = session.messages[-1].id
                     preliminary_saved = True
-                    session_manager.save_session(session_id)
                     
                     try:
                         from app.mcp import MCPManager
@@ -1780,7 +1782,7 @@ def chat_stream():
                         tool_iteration = 0
                         
                         # Update last assistant message with tool_use and debug info if tools were called
-                        if current_tool_calls and debug_mode:
+                        if current_tool_calls and session.session_settings.get("debug_enabled", True):
                             debug_info = debug_collector.get_debug_info()
                             if debug_info is None:
                                 debug_info = {}
@@ -1834,12 +1836,15 @@ def chat_stream():
                                 })
                             
                             # Update last assistant message with mcp_calls after tools execution
-                            if current_tool_calls and debug_mode and mcp_calls:
+                            if current_tool_calls and session.session_settings.get("debug_enabled", True) and mcp_calls:
                                 if session.messages:
                                     last_msg = session.messages[-1]
                                     if last_msg.debug is None:
                                         last_msg.debug = {}
                                     last_msg.debug["mcp_calls"] = list(mcp_calls)
+                            
+                            # Save session after updating intermediate message
+                            session_manager.save_session(session_id)
                             
                             assistant_msg = Message(role="assistant", content=chunk.content or "", usage=chunk.usage, tool_use=current_tool_calls)
                             tool_messages = list(llm_msgs)
@@ -1892,7 +1897,7 @@ def chat_stream():
                     except Exception as e:
                         error("MCP", f"Tool handling error: {e}")
                 
-                if chunk.is_final:
+                if chunk.is_final and not preliminary_saved:
                     total_usage = chunk.usage
                     full_reasoning = chunk.reasoning if chunk.reasoning else full_reasoning
                     info("STREAM", f"Usage: {total_usage}")
@@ -2159,6 +2164,7 @@ def get_session(session_id: str):
             "reasoning": m.reasoning,
             "id": m.id,
             "group_id": m.group_id,
+            "tool_use": m.tool_use,
         }
         for m in current_branch_messages
     ]
