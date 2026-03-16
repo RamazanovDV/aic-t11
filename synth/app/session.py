@@ -496,7 +496,17 @@ class Session:
     def delete_message(self, index: int) -> bool:
         """Удалить сообщение по индексу"""
         if 0 <= index < len(self.messages):
+            msg_to_delete = self.messages[index]
+            group_id_to_delete = getattr(msg_to_delete, 'group_id', None)
+            
             del self.messages[index]
+            
+            # Если удаленное сообщение имеет group_id, удалить все связанные сообщения
+            if group_id_to_delete:
+                self.messages = [
+                    m for m in self.messages 
+                    if getattr(m, 'group_id', None) != group_id_to_delete
+                ]
             
             # Обновляем статус на основе последнего сообщения со статусом
             for msg in reversed(self.messages):
