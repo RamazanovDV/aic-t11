@@ -466,7 +466,7 @@ def process_orchestrator_response(
             subagent_call_info = {
                 "subtask_id": subtask_id,
                 "subtask_name": subtask_name,
-                "orchestrator_prepared_prompt": subtask_prompt[:200] + "..." if len(subtask_prompt) > 200 else subtask_prompt,
+                "orchestrator_prepared_prompt": subtask_prompt,
             }
             
             subagent_messages = [
@@ -510,8 +510,10 @@ def process_orchestrator_response(
             subagent_content = subagent_response.content
             
             if debug_collector:
+                subagent_call_info["model"] = provider.model if hasattr(provider, 'model') else None
+                subagent_call_info["usage"] = subagent_response.usage
                 subagent_call_info["subagent_response"] = {
-                    "content": subagent_content[:500] if subagent_content else ""
+                    "content": subagent_content
                 }
                 debug_info["subagent_calls"].append(subagent_call_info)
             
