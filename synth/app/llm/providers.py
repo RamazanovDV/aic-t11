@@ -329,7 +329,20 @@ class AnthropicProvider(BaseProvider):
         
         dbg("ANTHROPIC", "STEP2: Starting to format messages")
 
+        # First pass: collect all tool_use_ids from assistant messages
+        # This handles cases where tool_result appears before tool_use in message list
+        valid_tool_use_ids = set()
+        for msg in messages:
+            if msg.role == "assistant" and msg.tool_use:
+                for tool_use_block in msg.tool_use:
+                    tool_use_id = tool_use_block.get("id", "")
+                    if tool_use_id:
+                        valid_tool_use_ids.add(tool_use_id)
+        
+        dbg("ANTHROPIC", f"Collected {len(valid_tool_use_ids)} valid tool_use IDs")
+        
         formatted_messages = []
+        
         if system_prompt:
             formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
         
@@ -341,11 +354,16 @@ class AnthropicProvider(BaseProvider):
             
             # Handle tool role: convert to anthropic format
             if msg.role == "tool":
+                # Filter out orphan tool_result - skip if tool_use_id not in valid set
+                tool_call_id = msg.tool_call_id or ""
+                if tool_call_id and tool_call_id not in valid_tool_use_ids:
+                    dbg("ANTHROPIC", f"Skipping orphan tool_result: {tool_call_id}")
+                    continue
                 formatted_messages.append({
                     "role": "user",
                     "content": [{
                         "type": "tool_result",
-                        "tool_use_id": msg.tool_call_id or "",
+                        "tool_use_id": tool_call_id,
                         "content": msg.content
                     }]
                 })
@@ -358,9 +376,10 @@ class AnthropicProvider(BaseProvider):
                 if msg.role == "assistant" and msg.tool_use:
                     for tool_use_block in msg.tool_use:
                         func = tool_use_block.get("function", {})
+                        tool_use_id = tool_use_block.get("id", "")
                         content_blocks.append({
                             "type": "tool_use",
-                            "id": tool_use_block.get("id", ""),
+                            "id": tool_use_id,
                             "name": func.get("name", ""),
                             "input": func.get("arguments", {}),
                         })
@@ -378,6 +397,32 @@ class AnthropicProvider(BaseProvider):
             dbg("ANTHROPIC", f"STEP5: Added {len(tools)} tools to payload")
 
         dbg("ANTHROPIC", f"STEP6: Sending request to {self.url}")
+        
+        # Debug: show message roles and find tool issues
+        roles_summary = []
+        has_tool_result_without_tool_use = False
+        for i, msg in enumerate(formatted_messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", [])
+            # Check for tool_result without tool_use
+            has_tool_result = False
+            has_tool_use = False
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        if block.get("type") == "tool_result":
+                            has_tool_result = True
+                        if block.get("type") == "tool_use":
+                            has_tool_use = True
+            if has_tool_result and not has_tool_use and role == "user":
+                has_tool_result_without_tool_use = True
+                dbg("ANTHROPIC", f"  Message {i}: {role} - HAS tool_result but NO tool_use!")
+            roles_summary.append(f"{i}:{role}")
+        
+        if has_tool_result_without_tool_use:
+            error("ANTHROPIC", "FOUND tool_result without tool_use - this will cause 400 error!")
+        
+        dbg("ANTHROPIC", f"Message roles: {roles_summary}")
         
         # Print the full payload for debugging
         import json
@@ -506,7 +551,19 @@ class AnthropicProvider(BaseProvider):
             "Content-Type": "application/json",
         }
 
+        # First pass: collect all tool_use_ids from assistant messages
+        valid_tool_use_ids = set()
+        for msg in messages:
+            if msg.role == "assistant" and msg.tool_use:
+                for tool_use_block in msg.tool_use:
+                    tool_use_id = tool_use_block.get("id", "")
+                    if tool_use_id:
+                        valid_tool_use_ids.add(tool_use_id)
+        
+        dbg("ANTHROPIC", f"Stream: Collected {len(valid_tool_use_ids)} valid tool_use IDs")
+        
         formatted_messages = []
+        
         if system_prompt:
             formatted_messages.append({"role": "system", "content": [{"type": "text", "text": system_prompt}]})
 
@@ -517,11 +574,16 @@ class AnthropicProvider(BaseProvider):
             
             # Handle tool role: convert to anthropic format
             if msg.role == "tool":
+                # Filter out orphan tool_result - skip if tool_use_id not in valid set
+                tool_call_id = msg.tool_call_id or ""
+                if tool_call_id and tool_call_id not in valid_tool_use_ids:
+                    dbg("ANTHROPIC", f"Stream: Skipping orphan tool_result: {tool_call_id}")
+                    continue
                 formatted_messages.append({
                     "role": "user",
                     "content": [{
                         "type": "tool_result",
-                        "tool_use_id": msg.tool_call_id or "",
+                        "tool_use_id": tool_call_id,
                         "content": msg.content
                     }]
                 })
@@ -533,9 +595,10 @@ class AnthropicProvider(BaseProvider):
                 if msg.role == "assistant" and msg.tool_use:
                     for tool_use_block in msg.tool_use:
                         func = tool_use_block.get("function", {})
+                        tool_use_id = tool_use_block.get("id", "")
                         content_blocks.append({
                             "type": "tool_use",
-                            "id": tool_use_block.get("id", ""),
+                            "id": tool_use_id,
                             "name": func.get("name", ""),
                             "input": func.get("arguments", {}),
                         })

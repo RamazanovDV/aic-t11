@@ -39,6 +39,39 @@ def run_mcp_async(coro):
     loop = get_mcp_loop()
     return loop.run_until_complete(coro)
 
+
+def _cleanup_orphan_tool_results(session) -> int:
+    """Удалить сообщения с tool_result без соответствующего tool_use.
+    
+    Возвращает количество удалённых сообщений.
+    """
+    tool_use_ids = set()
+    messages_to_remove = []
+    
+    for i, msg in enumerate(session.messages):
+        # Собираем все tool_use_id из assistant сообщений
+        if msg.role == "assistant" and msg.tool_use:
+            for tu in msg.tool_use:
+                if tu.get("id"):
+                    tool_use_ids.add(tu.get("id"))
+        
+        # Проверяем tool_result без соответствующего tool_use
+        if msg.role == "tool":
+            tc_id = msg.tool_call_id
+            if tc_id and tc_id not in tool_use_ids:
+                messages_to_remove.append(i)
+                warning("CLEANUP", f"Found orphan tool_result: {tc_id}")
+    
+    # Удаляем в обратном порядке (чтобы не сбились индексы)
+    for i in reversed(messages_to_remove):
+        session.messages.pop(i)
+    
+    if messages_to_remove:
+        info("CLEANUP", f"Removed {len(messages_to_remove)} orphan tool_result messages")
+    
+    return len(messages_to_remove)
+
+
 api_bp = Blueprint("api", __name__)
 admin_bp = Blueprint("admin", __name__)
 auth_bp = Blueprint("auth", __name__)
@@ -684,22 +717,51 @@ async def _process_status_block(
     if status_reminder:
         system_prompt += "\n\n" + status_reminder
     
-    tools_called_in_current_attempt = False
     response = None
     group_id = None  # ID группы для связанных сообщений
     
     for attempt in range(max_retries):
         
         while True:
-            # If we've already called tools in this attempt and got no more tool calls - don't retry with tools
-            use_tools = mcp_tools if not tools_called_in_current_attempt else None
+            # Pass tools if MCP tools are available
+            # Provider will filter out orphan tool_results
+            use_tools = mcp_tools if mcp_tools else None
+            
+            prompt_with_reminder = system_prompt + status_reminder if attempt > 0 else system_prompt
             
             try:
-                prompt_with_reminder = system_prompt + status_reminder if attempt > 0 else system_prompt
                 if use_tools:
                     debug("MCP", f"Sending {len(use_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in use_tools]}")
                 
                 response = provider.chat(llm_messages, prompt_with_reminder, debug_collector=debug_collector, tools=use_tools)
+            except requests.HTTPError as e:
+                # Check for tool-related 400 errors
+                if e.response and e.response.status_code == 400:
+                    try:
+                        error_data = e.response.json()
+                        error_msg = error_data.get("error", {}).get("message", "")
+                    except:
+                        error_msg = str(e)
+                    
+                    if "tool call result does not follow" in error_msg:
+                        error("ROUTES", "Got 400 tool error, cleaning up orphan tool_results and retrying...")
+                        # Clean up orphan tool_results and retry
+                        cleaned = _cleanup_orphan_tool_results(session)
+                        session_manager.save_session(session_id)
+                        
+                        # Reload messages after cleanup
+                        llm_messages = session.get_messages_for_llm()
+                        
+                        # Retry once
+                        try:
+                            response = provider.chat(llm_messages, prompt_with_reminder, debug_collector=debug_collector, tools=use_tools)
+                        except Exception as retry_e:
+                            error("ROUTES", f"Retry after cleanup failed: {retry_e}")
+                            raise
+                    else:
+                        raise
+                else:
+                    raise
             except Exception as e:
                 import traceback
                 error("ROUTES", f"provider.chat() failed: {e}")
@@ -713,10 +775,17 @@ async def _process_status_block(
             
             if not response.tool_calls:
                 # No more tool calls, exit the loop
-                tools_called_in_current_attempt = False  # Reset after tools completed
+                # Clean up ALL tool_use from assistant messages in session
+                # (tool_use was needed only for tool execution, not for future requests)
+                cleaned_count = 0
+                for msg in session.messages:
+                    if msg.role == "assistant" and msg.tool_use:
+                        debug("MCP", f"Cleaning up tool_use: {[tu.get('id') for tu in msg.tool_use]}")
+                        msg.tool_use = None
+                        cleaned_count += 1
+                if cleaned_count:
+                    debug("MCP", f"Cleaned up tool_use from {cleaned_count} messages")
                 break
-            
-            tools_called_in_current_attempt = True
             
             # Создаём group_id и сохраняем промежуточное сообщение
             if group_id is None:
@@ -821,7 +890,7 @@ async def _process_status_block(
         # After while loop, check for status block
         # If tools were called and we're here, it means model didn't provide status - that's an error
         parsed_status = None
-        if tools_called_in_current_attempt and response:
+        if response and response.tool_calls:
             debug("MCP", "Tools were called but no status block - returning error")
             # Return the content anyway, don't retry
             cleaned_content = response.content if response.content else ""
@@ -833,7 +902,7 @@ async def _process_status_block(
             parsed_status, cleaned_content = None, ""
 
         # If tools were called but no status - return content without error, keep old status
-        if tools_called_in_current_attempt and response:
+        if response and response.tool_calls:
             debug("MCP", "Tools were called but no status block - returning content without error")
             cleaned_content = response.content if response.content else ""
             return response, cleaned_content, None, None, group_id
@@ -1753,7 +1822,30 @@ def chat_stream():
             
             if mcp_tools:
                 debug("MCP", f"Stream: Sending {len(mcp_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in mcp_tools]}")
-            for chunk in provider.stream_chat(llm_msgs, None, debug_collector=debug_collector, tools=mcp_tools):
+            
+            try:
+                stream_generator = provider.stream_chat(llm_msgs, None, debug_collector=debug_collector, tools=mcp_tools)
+            except requests.HTTPError as e:
+                if e.response and e.response.status_code == 400:
+                    try:
+                        error_data = e.response.json()
+                        error_msg = error_data.get("error", {}).get("message", "")
+                    except:
+                        error_msg = str(e)
+                    
+                    if "tool call result does not follow" in error_msg:
+                        error("ROUTES", "Stream: Got 400 tool error, cleaning up orphan tool_results...")
+                        _cleanup_orphan_tool_results(session)
+                        session_manager.save_session(session_id)
+                        yield f"data: {json.dumps({'type': 'error', 'error': 'Tool execution error. Please retry.', 'can_retry': True})}\n\n"
+                        return
+                raise
+            except Exception as e:
+                error("ROUTES", f"Stream: stream_chat() failed: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+                return
+            
+            for chunk in stream_generator:
                 if chunk.tool_calls and not tool_calls_handled:
                     tool_calls_handled = True
                     tool_use_for_message = chunk.tool_calls  # Save for later
