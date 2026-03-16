@@ -216,6 +216,42 @@
     </div>
 </div>
 
+<div id="rag-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3>RAG Поиск</h3>
+        
+        <div class="settings-section">
+            <p class="help-text">Используйте семантический поиск по индексам эмбеддингов для добавления контекста к запросу.</p>
+            
+            <div class="form-group">
+                <label for="rag-enable">
+                    <input type="checkbox" id="rag-enable" onchange="toggleRagOptions()">
+                    Включить RAG поиск
+                </label>
+            </div>
+            
+            <div id="rag-options" style="display: none; margin-top: 1rem;">
+                <div class="form-group">
+                    <label for="rag-index">Индекс:</label>
+                    <select id="rag-index" class="form-input">
+                        <option value="">Выберите индекс</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="rag-top-k">Количество результатов (top_k):</label>
+                    <input type="number" id="rag-top-k" class="form-input" value="5" min="1" max="20">
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeRagModal()">Отмена</button>
+            <button class="btn btn-primary" onclick="saveRagSettings()">Сохранить</button>
+        </div>
+    </div>
+</div>
+
 <div id="schedules-modal" class="modal" style="display: none;">
     <div class="modal-content" style="max-width: 600px;">
         <h3>Задания по расписанию</h3>
@@ -448,6 +484,7 @@
                         <button class="btn btn-icon" onclick="openSummarizationModal(${index})" title="Настройки суммаризации">📝</button>
                         <button class="btn btn-icon" onclick="openTsmModal(${index})" title="Task State Machine">🔄</button>
                         <button class="btn btn-icon" onclick="openMcpModal(${index})" title="MCP Серверы">🔌</button>
+                        <button class="btn btn-icon" onclick="openRagModal(${index})" title="RAG Поиск">🔍</button>
                         <button class="btn btn-icon" onclick="openSchedulesModal(${index})" title="Расписание">⏰</button>
                     </div>
                     <button class="btn btn-secondary btn-small" onclick="resetPanelChat(${index})" title="Сбросить чат">🗑️</button>
@@ -1450,7 +1487,13 @@
                     'X-User-Id': user ? user.id : '',
                 },
                 signal: panel.abortController ? panel.abortController.signal : null,
-                body: JSON.stringify({ message, provider, model, debug: debugMode, source: 'web', tsm_mode: panel.tsmMode || null })
+                body: JSON.stringify({ 
+                    message, provider, model, debug: debugMode, source: 'web', 
+                    tsm_mode: panel.tsmMode || null,
+                    use_rag: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].enabled : false,
+                    rag_index_name: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].indexName : '',
+                    rag_top_k: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].topK : 5
+                })
             });
 
             if (response.status === 401) {
@@ -1515,7 +1558,13 @@
                     'X-User-Id': user ? user.id : '',
                 },
                 signal: panel.abortController ? panel.abortController.signal : null,
-                body: JSON.stringify({ message, provider, model, debug: debugMode, source: 'web', tsm_mode: panel.tsmMode || null })
+                body: JSON.stringify({ 
+                    message, provider, model, debug: debugMode, source: 'web', 
+                    tsm_mode: panel.tsmMode || null,
+                    use_rag: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].enabled : false,
+                    rag_index_name: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].indexName : '',
+                    rag_top_k: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].topK : 5
+                })
             });
 
             if (response.status === 401) {
@@ -3111,6 +3160,66 @@
             console.error('Failed to save MCP settings:', err);
             alert('Ошибка сохранения настроек MCP');
         }
+    }
+
+    // RAG Modal Functions
+    let currentRagPanelIndex = 0;
+    let panelRagSettings = {};
+
+    async function openRagModal(panelIndex) {
+        currentRagPanelIndex = panelIndex;
+        const modal = document.getElementById('rag-modal');
+        const settings = panelRagSettings[panelIndex] || { enabled: false, indexName: '', topK: 5 };
+        
+        document.getElementById('rag-enable').checked = settings.enabled;
+        document.getElementById('rag-top-k').value = settings.topK;
+        
+        toggleRagOptions();
+        
+        const indexSelect = document.getElementById('rag-index');
+        indexSelect.innerHTML = '<option value="">Загрузка...</option>';
+        
+        try {
+            const response = await fetch('/api/embeddings/list', { credentials: 'include' });
+            if (response.ok) {
+                const indexes = await response.json();
+                indexSelect.innerHTML = '<option value="">Выберите индекс</option>';
+                for (const idx of indexes) {
+                    const selected = idx.name === settings.indexName ? ' selected' : '';
+                    indexSelect.innerHTML += `<option value="${idx.name}"${selected}>${idx.name}</option>`;
+                }
+            } else {
+                indexSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+            }
+        } catch (err) {
+            console.error('Failed to load embeddings:', err);
+            indexSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+        }
+        
+        modal.style.display = 'flex';
+    }
+
+    function toggleRagOptions() {
+        const enabled = document.getElementById('rag-enable').checked;
+        document.getElementById('rag-options').style.display = enabled ? 'block' : 'none';
+    }
+
+    function closeRagModal() {
+        document.getElementById('rag-modal').style.display = 'none';
+    }
+
+    function saveRagSettings() {
+        const enabled = document.getElementById('rag-enable').checked;
+        const indexName = document.getElementById('rag-index').value;
+        const topK = parseInt(document.getElementById('rag-top-k').value) || 5;
+        
+        panelRagSettings[currentRagPanelIndex] = {
+            enabled: enabled,
+            indexName: indexName,
+            topK: topK
+        };
+        
+        closeRagModal();
     }
 
     function renderSubtaskProgress(container, subtaskResults) {

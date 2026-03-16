@@ -1256,6 +1256,11 @@ def chat():
     mcp_servers = data.get("mcp_servers", [])
     mcp_calls = []
     
+    # RAG parameters
+    use_rag = data.get("use_rag", False)
+    rag_index_name = data.get("rag_index_name")
+    rag_top_k = data.get("rag_top_k", 5)
+
     current_user = get_current_user()
     if current_user:
         username = current_user.username
@@ -1334,6 +1339,33 @@ def chat():
     system_prompt += get_status_prompt(session)
     if should_show_interview(session, request.headers.get("X-User-Id")):
         system_prompt += get_interview_prompt()
+
+    # RAG - Add relevant context from embeddings index
+    rag_context = ""
+    if use_rag and rag_index_name:
+        try:
+            from app.embeddings.search import search
+            results = search(
+                query=user_message,
+                index_name=rag_index_name,
+                top_k=rag_top_k,
+            )
+            if results:
+                rag_context = "\n\n## Relevant Context\n"
+                for i, result in enumerate(results, 1):
+                    metadata = result.get("metadata", {})
+                    source = metadata.get("source", "unknown")
+                    section = metadata.get("section", "")
+                    content = result.get("content", "")
+                    rag_context += f"[{i}] Source: {source}"
+                    if section:
+                        rag_context += f", Section: {section}"
+                    rag_context += f"\n{content}\n\n---\n"
+        except Exception as e:
+            print(f"RAG search error: {e}")
+
+    if rag_context:
+        system_prompt += rag_context
 
     try:
         llm_messages = session.get_messages_for_llm()
@@ -3323,6 +3355,13 @@ def admin_embeddings_list():
     from app.embeddings.storage import embedding_storage
     indexes = embedding_storage.list_indexes()
     return jsonify([idx.to_dict() for idx in indexes])
+
+
+@api_bp.route("/embeddings/list", methods=["GET"])
+def api_embeddings_list():
+    from app.embeddings.storage import embedding_storage
+    indexes = embedding_storage.list_indexes()
+    return jsonify([{"id": idx.id, "name": idx.name} for idx in indexes])
 
 
 @api_bp.route("/sessions/<session_id>/events", methods=["GET"])

@@ -1341,3 +1341,17 @@ def session_events(session_id: str):
         return Response(generate(), mimetype="text/event-stream")
     except requests.RequestException as e:
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/embeddings/list", methods=["GET"])
+def embeddings_list():
+    """Get list of embeddings indexes for UI dropdown."""
+    url = f"{ui_config.backend_url}/api/embeddings/list"
+    headers = {"X-API-Key": ui_config.backend_api_key}
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
