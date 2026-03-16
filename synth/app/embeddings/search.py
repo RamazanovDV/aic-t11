@@ -8,6 +8,7 @@ from app.embeddings.embedder import create_embedder, BaseEmbedder
 from app.embeddings.indexer import search_index as index_search
 from app.embeddings.models import Chunk, EmbeddingIndex
 from app.embeddings.storage import embedding_storage
+from app.embeddings.config import embeddings_config
 
 
 class EmbeddingSearch:
@@ -18,11 +19,10 @@ class EmbeddingSearch:
         if self.embedder:
             return self.embedder
 
-        provider_config = config or {}
-        if provider == "ollama":
-            provider_config.setdefault("model", model)
-        elif provider == "openai":
-            provider_config.setdefault("model", model)
+        provider_config = embeddings_config.get_embedder_config(provider)
+        if config:
+            provider_config.update(config)
+        provider_config.setdefault("model", model)
 
         return create_embedder(provider, provider_config)
 

@@ -44,8 +44,10 @@ class EmbeddingIndexer:
                 try:
                     emb = self.embedder.embed(chunk.content)
                     embeddings.append(emb)
+                    print(f"  Chunk {i+1} embedded, len={len(emb)}")
                     break
                 except Exception as e:
+                    print(f"  Chunk {i+1} failed: {e}")
                     if attempt < max_retries - 1:
                         time.sleep(2)
                         continue
