@@ -734,6 +734,19 @@ async def _process_status_block(
             # Execute tool calls
             debug("MCP", f"Detected {len(response.tool_calls)} tool call(s)")
             debug("MCP", f"Tool calls: {json.dumps(response.tool_calls, ensure_ascii=False)[:500]}")
+            
+            # Update last assistant message with tool_use and debug info if tools were called
+            if response.tool_calls and debug_mode:
+                debug_info = debug_collector.get_debug_info()
+                if debug_info is None:
+                    debug_info = {}
+                debug_info["tool_use"] = response.tool_calls
+                # Update the last message
+                if session.messages:
+                    last_msg = session.messages[-1]
+                    last_msg.tool_use = response.tool_calls
+                    last_msg.debug = debug_info
+            
             try:
                 from app.mcp import MCPManager
                 tool_call_results = []
@@ -774,6 +787,14 @@ async def _process_status_block(
                         "tool_call_id": tc.get("id"),
                         "content": tool_result_content,
                     })
+                
+                # Update last assistant message with mcp_calls after tools execution
+                if response.tool_calls and debug_mode and mcp_calls:
+                    if session.messages:
+                        last_msg = session.messages[-1]
+                        if last_msg.debug is None:
+                            last_msg.debug = {}
+                        last_msg.debug["mcp_calls"] = list(mcp_calls)
                 
                 # Build tool messages and call model again
                 tool_messages = list(llm_messages)
@@ -1758,6 +1779,17 @@ def chat_stream():
                         max_tool_iterations = 10
                         tool_iteration = 0
                         
+                        # Update last assistant message with tool_use and debug info if tools were called
+                        if current_tool_calls and debug_mode:
+                            debug_info = debug_collector.get_debug_info()
+                            if debug_info is None:
+                                debug_info = {}
+                            debug_info["tool_use"] = current_tool_calls
+                            if session.messages:
+                                last_msg = session.messages[-1]
+                                last_msg.tool_use = current_tool_calls
+                                last_msg.debug = debug_info
+                        
                         while current_tool_calls and tool_iteration < max_tool_iterations:
                             tool_iteration += 1
                             debug("MCP", f"Tool iteration {tool_iteration}: processing {len(current_tool_calls)} tool call(s)")
@@ -1800,6 +1832,14 @@ def chat_stream():
                                     "tool_call_id": tc.get("id"),
                                     "content": tool_result_content,
                                 })
+                            
+                            # Update last assistant message with mcp_calls after tools execution
+                            if current_tool_calls and debug_mode and mcp_calls:
+                                if session.messages:
+                                    last_msg = session.messages[-1]
+                                    if last_msg.debug is None:
+                                        last_msg.debug = {}
+                                    last_msg.debug["mcp_calls"] = list(mcp_calls)
                             
                             assistant_msg = Message(role="assistant", content=chunk.content or "", usage=chunk.usage, tool_use=current_tool_calls)
                             tool_messages = list(llm_msgs)
