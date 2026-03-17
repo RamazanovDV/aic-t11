@@ -26,6 +26,7 @@
             <button class="debug-tab" data-tab="raw" onclick="switchDebugTab('raw')">Raw</button>
             <button class="debug-tab" data-tab="session" onclick="switchDebugTab('session')">Session</button>
             <button class="debug-tab" data-tab="mcp" onclick="switchDebugTab('mcp')">MCP</button>
+            <button class="debug-tab" data-tab="rag" onclick="switchDebugTab('rag')">RAG</button>
         </div>
         <div class="debug-content">
             <pre id="debug-json"></pre>
@@ -2080,6 +2081,13 @@
             mcpTab.style.display = hasMcpCalls ? '' : 'none';
         }
         
+        // RAG tab
+        const hasRag = debugData && debugData.rag_info;
+        const ragTab = document.querySelector('.debug-tab[data-tab="rag"]');
+        if (ragTab) {
+            ragTab.style.display = hasRag ? '' : 'none';
+        }
+        
         // Show status tab always if there's status data
         const statusTab = document.querySelector('.debug-tab[data-tab="status"]');
         if (statusTab) {
@@ -2103,7 +2111,13 @@
         const hasApiResponse = debugData && debugData.api_response;
         
         if (hasOrchestratorRequest || hasOrchestratorResponse || hasSubagents || hasApiRequest || hasApiResponse) {
-            document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
+            // Show appropriate content and tabs
+            if (hasRag && !hasApiRequest && !hasApiResponse) {
+                // If only RAG data, show just rag_info
+                document.getElementById('debug-json').textContent = JSON.stringify(debugData.rag_info, null, 2);
+            } else {
+                document.getElementById('debug-json').textContent = JSON.stringify(debugData, null, 2);
+            }
             // Show appropriate tabs
             document.querySelectorAll('.debug-tab').forEach(t => {
                 if (t.dataset.tab === 'request' && (hasOrchestratorRequest || hasApiRequest)) {
@@ -2121,6 +2135,8 @@
                 } else if (t.dataset.tab === 'session' && debugData.session) {
                     t.style.display = '';
                 } else if (t.dataset.tab === 'mcp' && hasMcpCalls) {
+                    t.style.display = '';
+                } else if (t.dataset.tab === 'rag' && hasRag) {
                     t.style.display = '';
                 } else {
                     t.style.display = 'none';
@@ -2153,6 +2169,9 @@
             if (hasMcpCalls) {
                 document.querySelector('.debug-tab[data-tab="mcp"]').style.display = '';
             }
+            if (hasRag) {
+                document.querySelector('.debug-tab[data-tab="rag"]').style.display = '';
+            }
         } else if (hasStatus) {
             // Show only status
             document.getElementById('debug-json').textContent = JSON.stringify(debugData.status, null, 2);
@@ -2167,6 +2186,9 @@
             if (hasMcpCalls) {
                 document.querySelector('.debug-tab[data-tab="mcp"]').style.display = '';
             }
+            if (hasRag) {
+                document.querySelector('.debug-tab[data-tab="rag"]').style.display = '';
+            }
         } else if (hasMcpCalls) {
             // Show MCP calls only
             document.getElementById('debug-json').textContent = JSON.stringify(debugData.mcp_calls, null, 2);
@@ -2177,8 +2199,14 @@
             document.getElementById('debug-json').textContent = JSON.stringify({reasoning: debugData.reasoning}, null, 2);
             document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
             document.querySelector('.debug-tab[data-tab="reasoning"]').style.display = '';
+        } else if (hasRag) {
+            // Show RAG info
+            document.getElementById('debug-json').textContent = JSON.stringify(debugData.rag_info, null, 2);
+            document.querySelectorAll('.debug-tab').forEach(t => t.style.display = 'none');
+            document.querySelector('.debug-tab[data-tab="rag"]').style.display = '';
         } else {
             // Standard debug for LLM calls
+            console.log('No RAG data. hasRequest:', hasRequest, 'hasResponse:', hasResponse, 'hasStatus:', hasStatus, 'hasSubagents:', hasSubagents);
             document.querySelectorAll('.debug-tab').forEach(t => {
                 t.style.display = (hasRequest && hasResponse) ? '' : 'none';
             });
@@ -2244,6 +2272,8 @@
                 data = currentDebugData.mcp_calls || [];
             } else if (tab === 'reasoning') {
                 data = currentDebugData.reasoning ? {reasoning: currentDebugData.reasoning} : null;
+            } else if (tab === 'rag') {
+                data = currentDebugData.rag_info || null;
             }
             document.getElementById('debug-json').textContent = JSON.stringify(data, null, 2);
         }

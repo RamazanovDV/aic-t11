@@ -15,6 +15,7 @@ class DebugCollector:
         self._session_info: dict | None = None
         self._subagents: list[dict] = []
         self._mcp_calls: list[dict] = []
+        self._rag_info: dict | None = None
 
     @classmethod
     def from_session(cls, session) -> "DebugCollector":
@@ -129,6 +130,36 @@ class DebugCollector:
             "is_error": is_error,
         })
 
+    def capture_rag_info(
+        self,
+        query: str,
+        index_name: str,
+        version: int | None,
+        top_k: int,
+        results: list[dict],
+        context_added: str,
+    ) -> None:
+        if not self._enabled:
+            return
+        self._rag_info = {
+            "query": query,
+            "index_name": index_name,
+            "version": version,
+            "top_k": top_k,
+            "results_count": len(results),
+            "results": [
+                {
+                    "content": r.get("content", "")[:500],  # Limit content length
+                    "source": r.get("metadata", {}).get("source", "unknown"),
+                    "section": r.get("metadata", {}).get("section", ""),
+                    "distance": r.get("distance"),
+                }
+                for r in results
+            ],
+            "context_added": context_added[:2000] if context_added else "",  # Limit length
+            "context_length": len(context_added) if context_added else 0,
+        }
+
     def get_debug_info(self) -> dict | None:
         if not self._enabled:
             return None
@@ -149,6 +180,8 @@ class DebugCollector:
             result["subagents"] = self._subagents
         if self._mcp_calls:
             result["mcp_calls"] = self._mcp_calls
+        if self._rag_info:
+            result["rag_info"] = self._rag_info
         return result if result else None
 
     def clear(self) -> None:

@@ -1363,6 +1363,17 @@ def chat():
                     if section:
                         rag_context += f", Section: {section}"
                     rag_context += f"\n{content}\n\n---\n"
+            
+            # Capture RAG debug info
+            if debug_collector and debug_collector.enabled:
+                debug_collector.capture_rag_info(
+                    query=user_message,
+                    index_name=rag_index_name,
+                    version=rag_version,
+                    top_k=rag_top_k,
+                    results=results or [],
+                    context_added=rag_context,
+                )
         except Exception as e:
             print(f"RAG search error: {e}")
 
@@ -1632,6 +1643,45 @@ def chat_stream():
         system_prompt += get_status_prompt(session)
         if should_show_interview(session, user_id):
             system_prompt += get_interview_prompt()
+
+        # RAG - Add relevant context from embeddings index
+        rag_context = ""
+        if use_rag and rag_index_name:
+            try:
+                from app.embeddings.search import search
+                results = search(
+                    query=user_message,
+                    index_name=rag_index_name,
+                    version=rag_version,
+                    top_k=rag_top_k,
+                )
+                if results:
+                    rag_context = "\n\n## Relevant Context\n"
+                    for i, result in enumerate(results, 1):
+                        metadata = result.get("metadata", {})
+                        chunk_source = metadata.get("source", "unknown")
+                        section = metadata.get("section", "")
+                        content = result.get("content", "")
+                        rag_context += f"[{i}] Source: {chunk_source}"
+                        if section:
+                            rag_context += f", Section: {section}"
+                        rag_context += f"\n{content}\n\n---\n"
+                
+                # Capture RAG debug info
+                if debug_collector and debug_collector.enabled:
+                    debug_collector.capture_rag_info(
+                        query=user_message,
+                        index_name=rag_index_name,
+                        version=rag_version,
+                        top_k=rag_top_k,
+                        results=results or [],
+                        context_added=rag_context,
+                    )
+            except Exception as e:
+                print(f"RAG search error in stream: {e}")
+
+        if rag_context:
+            system_prompt += rag_context
 
         # Используем get_messages_for_llm() для поддержки скользящего окна
         llm_messages = session.get_messages_for_llm()

@@ -47,6 +47,7 @@ def get_all_groups() -> dict[str, str]:
         "SCHEDULER": "INFO",
         "INIT": "INFO",
         "DEBUG": "DEBUG",
+        "RAG": "INFO",
     }
     return {**default_groups, **groups}
 
