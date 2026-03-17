@@ -1344,6 +1344,7 @@ def chat():
     # RAG - Add relevant context from embeddings index
     rag_context = ""
     if use_rag and rag_index_name:
+        info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}")
         try:
             from app.embeddings.search import search
             results = search(
@@ -1363,6 +1364,8 @@ def chat():
                     if section:
                         rag_context += f", Section: {section}"
                     rag_context += f"\n{content}\n\n---\n"
+                
+                debug("RAG", f"RAG search completed: found {len(results)} results, context added: {len(rag_context)} chars")
             
             # Capture RAG debug info
             if debug_collector and debug_collector.enabled:
@@ -1375,7 +1378,7 @@ def chat():
                     context_added=rag_context,
                 )
         except Exception as e:
-            print(f"RAG search error: {e}")
+            warning(f"RAG search error in chat: {e}")
 
     if rag_context:
         system_prompt += rag_context
@@ -1647,6 +1650,7 @@ def chat_stream():
         # RAG - Add relevant context from embeddings index
         rag_context = ""
         if use_rag and rag_index_name:
+            info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}")
             try:
                 from app.embeddings.search import search
                 results = search(
@@ -1666,6 +1670,8 @@ def chat_stream():
                         if section:
                             rag_context += f", Section: {section}"
                         rag_context += f"\n{content}\n\n---\n"
+                    
+                    debug("RAG", f"RAG search completed: found {len(results)} results, context added: {len(rag_context)} chars")
                 
                 # Capture RAG debug info
                 if debug_collector and debug_collector.enabled:
@@ -1678,7 +1684,7 @@ def chat_stream():
                         context_added=rag_context,
                     )
             except Exception as e:
-                print(f"RAG search error in stream: {e}")
+                warning(f"RAG search error in stream: {e}")
 
         if rag_context:
             system_prompt += rag_context
