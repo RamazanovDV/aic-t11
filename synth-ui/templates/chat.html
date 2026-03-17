@@ -1497,10 +1497,12 @@
                 body: JSON.stringify({ 
                     message, provider, model, debug: debugMode, source: 'web', 
                     tsm_mode: panel.tsmMode || null,
-                    use_rag: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].enabled : false,
-                    rag_index_name: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].indexName : '',
-                    rag_version: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].version : null,
-                    rag_top_k: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].topK : 5
+                    ...(panelRagSettings[panelIndex] ? {
+                        use_rag: panelRagSettings[panelIndex].enabled,
+                        rag_index_name: panelRagSettings[panelIndex].indexName,
+                        rag_version: panelRagSettings[panelIndex].version,
+                        rag_top_k: panelRagSettings[panelIndex].topK
+                    } : {})
                 })
             });
 
@@ -1569,10 +1571,12 @@
                 body: JSON.stringify({ 
                     message, provider, model, debug: debugMode, source: 'web', 
                     tsm_mode: panel.tsmMode || null,
-                    use_rag: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].enabled : false,
-                    rag_index_name: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].indexName : '',
-                    rag_version: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].version : null,
-                    rag_top_k: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].topK : 5
+                    ...(panelRagSettings[panelIndex] ? {
+                        use_rag: panelRagSettings[panelIndex].enabled,
+                        rag_index_name: panelRagSettings[panelIndex].indexName,
+                        rag_version: panelRagSettings[panelIndex].version,
+                        rag_top_k: panelRagSettings[panelIndex].topK
+                    } : {})
                 })
             });
 
@@ -3179,7 +3183,26 @@
     async function openRagModal(panelIndex) {
         currentRagPanelIndex = panelIndex;
         const modal = document.getElementById('rag-modal');
-        currentRagSettings = panelRagSettings[panelIndex] || { enabled: false, indexName: '', version: null, topK: 5 };
+        const sessionId = panels[panelIndex] ? panels[panelIndex].sessionId : 'default';
+        
+        // Load settings from backend first
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}/rag-settings`, { credentials: 'include' });
+            if (response.ok) {
+                const savedSettings = await response.json();
+                currentRagSettings = {
+                    enabled: savedSettings.enabled || false,
+                    indexName: savedSettings.index_name || '',
+                    version: savedSettings.version,
+                    topK: savedSettings.top_k || 5
+                };
+            } else {
+                currentRagSettings = { enabled: false, indexName: '', version: null, topK: 5 };
+            }
+        } catch (err) {
+            console.error('Failed to load rag settings:', err);
+            currentRagSettings = { enabled: false, indexName: '', version: null, topK: 5 };
+        }
         
         document.getElementById('rag-enable').checked = currentRagSettings.enabled;
         document.getElementById('rag-top-k').value = currentRagSettings.topK;
@@ -3261,6 +3284,29 @@
         const version = document.getElementById('rag-version').value ? parseInt(document.getElementById('rag-version').value) : null;
         const topK = parseInt(document.getElementById('rag-top-k').value) || 5;
         
+        const sessionId = panels[currentRagPanelIndex] ? panels[currentRagPanelIndex].sessionId : 'default';
+        
+        // Save to backend
+        fetch(`/api/sessions/${sessionId}/rag-settings`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+                enabled: enabled,
+                index_name: indexName,
+                version: version,
+                top_k: topK
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            console.log('RAG settings saved:', data);
+        })
+        .catch(err => {
+            console.error('Failed to save rag settings:', err);
+        });
+        
+        // Also update local variable
         panelRagSettings[currentRagPanelIndex] = {
             enabled: enabled,
             indexName: indexName,

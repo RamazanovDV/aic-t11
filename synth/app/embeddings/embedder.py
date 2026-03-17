@@ -5,11 +5,12 @@ from app.llm.base import BaseProvider
 
 
 class EmbedderWrapper:
-    def __init__(self, provider: BaseProvider, max_retries: int = 3, retry_delay: float = 1.0):
+    def __init__(self, provider: BaseProvider, max_retries: int = 3, retry_delay: float = 1.0, timeout: float = 30.0):
         self.provider = provider
         self._dimension: int | None = None
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.timeout = timeout
 
     def embed(self, text: str) -> list[float]:
         last_error: Exception | None = None
@@ -56,6 +57,7 @@ def create_embedder(provider: str, config: dict[str, Any] | None = None) -> Embe
         llm_provider,
         max_retries=config.get("max_retries", 3),
         retry_delay=config.get("retry_delay", 1.0),
+        timeout=config.get("timeout", 30.0),
     )
 
 

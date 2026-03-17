@@ -408,6 +408,48 @@ def set_context_settings(session_id: str):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/sessions/<session_id>/rag-settings", methods=["GET"])
+def get_rag_settings(session_id: str):
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/rag-settings"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        if response.status_code == 404:
+            return jsonify({
+                "enabled": False,
+                "index_name": "",
+                "version": None,
+                "top_k": 5
+            })
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/rag-settings", methods=["PUT"])
+def set_rag_settings(session_id: str):
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/rag-settings"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.put(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/sessions/<session_id>/tsm-settings", methods=["GET"])
 def get_tsm_settings(session_id: str):
     url = f"{ui_config.backend_url}/api/sessions/{session_id}/tsm-settings"

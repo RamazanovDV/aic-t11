@@ -1554,6 +1554,13 @@ def chat_stream():
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
 
+    # RAG parameters - use request params or fall back to session settings
+    saved_rag = session.session_settings.get("rag_settings", {})
+    use_rag = data.get("use_rag") if "use_rag" in data else saved_rag.get("enabled", False)
+    rag_index_name = data.get("rag_index_name") if data.get("rag_index_name") else saved_rag.get("index_name")
+    rag_version = data.get("rag_version") if data.get("rag_version") is not None else saved_rag.get("version")
+    rag_top_k = data.get("rag_top_k") if data.get("rag_top_k") is not None else saved_rag.get("top_k", 5)
+
     debug_collector = DebugCollector.from_session(session)
 
     if data.get("tsm_mode"):
@@ -2581,6 +2588,61 @@ def set_context_settings(session_id: str):
 
     if "stream_enabled" in data:
         session.session_settings["stream_enabled"] = bool(data["stream_enabled"])
+
+    session_manager.save_session(session_id)
+
+    return jsonify({"status": "saved"})
+
+
+@api_bp.route("/sessions/<session_id>/rag-settings", methods=["GET"])
+@require_user
+def get_rag_settings(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    rag_settings = session.session_settings.get("rag_settings", {
+        "enabled": False,
+        "index_name": "",
+        "version": None,
+        "top_k": 5
+    })
+
+    return jsonify(rag_settings)
+
+
+@api_bp.route("/sessions/<session_id>/rag-settings", methods=["PUT"])
+@require_user
+def set_rag_settings(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    if "rag_settings" not in session.session_settings:
+        session.session_settings["rag_settings"] = {
+            "enabled": False,
+            "index_name": "",
+            "version": None,
+            "top_k": 5
+        }
+
+    if "enabled" in data:
+        session.session_settings["rag_settings"]["enabled"] = bool(data["enabled"])
+    if "index_name" in data:
+        session.session_settings["rag_settings"]["index_name"] = str(data["index_name"] or "")
+    if "version" in data:
+        session.session_settings["rag_settings"]["version"] = data["version"]
+    if "top_k" in data:
+        top_k = int(data["top_k"])
+        if top_k < 1:
+            top_k = 1
+        if top_k > 20:
+            top_k = 20
+        session.session_settings["rag_settings"]["top_k"] = top_k
 
     session_manager.save_session(session_id)
 
