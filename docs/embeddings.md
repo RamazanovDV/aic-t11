@@ -123,6 +123,8 @@ curl -X POST http://localhost:5000/api/embeddings/search \
 4. Настройте top_k
 5. Сохраните
 
+Настройки сохраняются в сессию и автоматически применяются к каждому следующему сообщению.
+
 ### API
 
 ```bash
@@ -158,6 +160,44 @@ curl -X POST http://localhost:5000/api/chat \
 curl http://localhost:5000/api/embeddings/by-name/My%20Knowledge \
     -H "X-API-Key: your-secret-api-key"
 ```
+
+## Сохранение настроек RAG
+
+Настройки RAG сохраняются в сессию и автоматически применяются ко всем сообщениям.
+
+### API для настроек
+
+```bash
+# Получить настройки RAG
+curl http://localhost:5000/api/sessions/<session_id>/rag-settings \
+    -H "X-API-Key: your-secret-api-key"
+
+# Сохранить настройки RAG
+curl -X PUT http://localhost:5000/api/sessions/<session_id>/rag-settings \
+    -H "Content-Type: application/json" \
+    -H "X-API-Key: your-secret-api-key" \
+    -d '{
+        "enabled": true,
+        "index_name": "My Knowledge",
+        "version": 1,
+        "top_k": 5
+    }'
+```
+
+При отправке сообщения без явного указания RAG-параметров используются сохранённые настройки.
+
+## Отладка RAG
+
+В debug info (🔍 на сообщении) доступна вкладка "RAG" с информацией:
+
+- **query** - запрос пользователя
+- **index_name** - какой индекс использовался
+- **version** - версия индекса
+- **top_k** - параметр top_k
+- **results** - найденные чанки (content, source, distance)
+- **context_added** - текст, добавленный в system prompt
+
+В админке (вкладка "Отладка") можно настроить уровень логирования для RAG (группа "RAG").
 
 ## Стратегии чанкинга
 
@@ -257,6 +297,8 @@ python main.py embeddings rate <index_id> --thumbs-down
 | POST | `/api/embeddings/search` | Семантический поиск |
 | POST | `/api/embeddings/<id>/rate` | Оценить (thumbs_up/thumbs_down) |
 | GET | `/api/embeddings/config` | Настройки провайдеров и моделей |
+| GET | `/api/sessions/<id>/rag-settings` | Получить настройки RAG сессии |
+| PUT | `/api/sessions/<id>/rag-settings` | Сохранить настройки RAG сессии |
 
 ## Структура хранения
 

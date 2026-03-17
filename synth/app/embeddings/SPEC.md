@@ -192,3 +192,53 @@ faiss-cpu>=1.7.0
 - Ollama embedding API is unstable with large texts (>~1500 chars)
 - StructureChunker has bug with some files: 'list' object has no attribute 'metadata'
 - Chunk size must be kept small (≤50) for Ollama to work reliably
+
+## 12. Session Settings Persistence
+
+RAG settings are stored in session.session_settings:
+
+```python
+session_settings = {
+    "debug_enabled": True,
+    "stream_enabled": True,
+    "rag_settings": {
+        "enabled": False,
+        "index_name": "",
+        "version": None,
+        "top_k": 5
+    }
+}
+```
+
+### API Endpoints
+
+```
+GET  /api/sessions/<session_id>/rag-settings   # Get RAG settings
+PUT  /api/sessions/<session_id>/rag-settings   # Update RAG settings
+```
+
+When sending chat message without explicit RAG params, settings are loaded from session.
+
+## 13. Debug Info
+
+DebugCollector captures RAG information:
+
+```python
+debug_collector.capture_rag_info(
+    query="user message",
+    index_name="My Index",
+    version=1,
+    top_k=5,
+    results=[{"content": "...", "metadata": {...}, "distance": 0.5}],
+    context_added="\n\n## Relevant Context\n[1] Source: file.md\n..."
+)
+```
+
+Debug info includes:
+- Query that was searched
+- Index name and version used
+- Top-K parameter
+- Results found (content, source, distance)
+- Context that was added to system prompt
+
+In admin panel debug settings, "RAG" group is available (INFO by default).
