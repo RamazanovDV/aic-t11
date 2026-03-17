@@ -150,7 +150,7 @@ python run.py
 | POST | `/api/embeddings/search` | Семантический поиск |
 | POST | `/api/embeddings/<id>/rate` | Оценить индекс |
 
-Подробнее в [руководстве по индексам](./docs/EMBEDDINGS.md).
+Подробнее в [руководстве по индексам](../docs/embeddings.md).
 
 ## Аутентификация
 
