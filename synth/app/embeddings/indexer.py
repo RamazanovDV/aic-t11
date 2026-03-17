@@ -82,7 +82,7 @@ class EmbeddingIndexer:
         embeddings = []
         
         for i, chunk in enumerate(chunks):
-            max_retries = 3
+            max_retries = 5
             for attempt in range(max_retries):
                 try:
                     emb = self.embedder.embed(chunk.content)
@@ -90,7 +90,10 @@ class EmbeddingIndexer:
                     break
                 except Exception as e:
                     if attempt < max_retries - 1:
+                        import time
+                        time.sleep(2 ** attempt)
                         continue
+                    print(f"[EMBEDDING ERROR] Chunk {i} failed after {max_retries} retries: {chunk.content[:100]}... Error: {e}", flush=True)
                     raise e
 
         embeddings_array = np.array(embeddings).astype("float32")

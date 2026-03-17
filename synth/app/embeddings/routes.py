@@ -104,19 +104,27 @@ def create_embedding_index():
             if not store_key or store_key not in _embedding_index_store:
                 return jsonify({"error": "Invalid or expired store_key. Start a new index creation."}), 400
             
-            store = _embedding_index_store[store_key]
-            new_chunks = [Chunk(
-                id=c["id"],
-                content=c["content"],
-                metadata=c.get("metadata", {})
-            ) for c in chunks_data]
-            store["chunks"].extend(new_chunks)
-            
-            return jsonify({
-                "status": "continued",
-                "chunks_received": len(chunks_data),
-                "total_chunks": len(store["chunks"]),
-            })
+            try:
+                store = _embedding_index_store[store_key]
+                new_chunks = [Chunk(
+                    id=c["id"],
+                    content=c["content"],
+                    metadata=c.get("metadata", {})
+                ) for c in chunks_data]
+                store["chunks"].extend(new_chunks)
+                
+                print(f"[EMBEDDINGS] Continue: received {len(chunks_data)} chunks, total: {len(store['chunks'])}", flush=True)
+                
+                return jsonify({
+                    "status": "continued",
+                    "chunks_received": len(chunks_data),
+                    "total_chunks": len(store["chunks"]),
+                })
+            except Exception as e:
+                import traceback
+                print(f"[EMBEDDINGS] Continue error: {e}", flush=True)
+                print(traceback.format_exc(), flush=True)
+                return jsonify({"error": str(e)}), 500
         
         elif action == "finish":
             store_key = data.get("store_key")
@@ -136,11 +144,22 @@ def create_embedding_index():
             embedder = store["embedder"]
             version = store.get("version", 1)
             
+            # Log chunk sizes to debug
+            sizes = [len(c.content) for c in chunks]
+            print(f"[EMBEDDINGS] Finish: {len(chunks)} chunks, size range: {min(sizes)}-{max(sizes)}", flush=True)
+            
             indexer = EmbeddingIndexer(embedder)
+            
+            import sys
+            print(f"[EMBEDDINGS] Creating index from {len(chunks)} chunks...", flush=True)
             
             try:
                 index_meta, faiss_index = indexer.create_index_from_chunks(chunks)
+                print(f"[EMBEDDINGS] Index created, dimension={index_meta.dimension}", flush=True)
             except Exception as e:
+                import traceback
+                print(f"[EMBEDDINGS] Failed to create index: {e}", flush=True)
+                print(traceback.format_exc(), flush=True)
                 return jsonify({"error": f"Failed to create index: {str(e)}"}), 500
             
             index_meta.id = EmbeddingIndex().id
@@ -153,7 +172,15 @@ def create_embedding_index():
             index_meta.chunking_params = store["chunking_params"]
             index_meta.source_dir = ""
             
-            saved_index = embedding_storage.save_index(index_meta, chunks, faiss_index)
+            try:
+                print(f"[EMBEDDINGS] Saving index to disk...", flush=True)
+                saved_index = embedding_storage.save_index(index_meta, chunks, faiss_index)
+                print(f"[EMBEDDINGS] Index saved successfully", flush=True)
+            except Exception as e:
+                import traceback
+                print(f"[EMBEDDINGS] Failed to save index: {e}", flush=True)
+                print(traceback.format_exc(), flush=True)
+                return jsonify({"error": f"Failed to save index: {str(e)}"}), 500
             
             del _embedding_index_store[store_key]
             

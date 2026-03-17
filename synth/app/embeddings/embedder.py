@@ -5,7 +5,7 @@ from app.llm.base import BaseProvider
 
 
 class EmbedderWrapper:
-    def __init__(self, provider: BaseProvider, max_retries: int = 3, retry_delay: float = 1.0, timeout: float = 30.0):
+    def __init__(self, provider: BaseProvider, max_retries: int = 5, retry_delay: float = 2.0, timeout: float = 30.0):
         self.provider = provider
         self._dimension: int | None = None
         self.max_retries = max_retries
@@ -19,8 +19,14 @@ class EmbedderWrapper:
                 return self.provider.embed(text)
             except Exception as e:
                 last_error = e
-                if attempt < self.max_retries - 1:
-                    time.sleep(self.retry_delay * (attempt + 1))
+                error_str = str(e).lower()
+                # Retry on server errors (500, 502, 503)
+                if "500" in error_str or "502" in error_str or "503" in error_str or "server error" in error_str:
+                    if attempt < self.max_retries - 1:
+                        delay = self.retry_delay * (2 ** attempt)  # Exponential backoff
+                        time.sleep(delay)
+                        continue
+                break
         if last_error:
             raise last_error
         raise Exception("Unknown error during embedding")
