@@ -1,14 +1,19 @@
 from pathlib import Path
+from typing import Any
+import uuid
 
 from flask import Blueprint, jsonify, request
 
 from app.embeddings.config import embeddings_config
 from app.embeddings.embedder import create_embedder
 from app.embeddings.indexer import EmbeddingIndexer
-from app.embeddings.models import EmbeddingIndex
+from app.embeddings.models import Chunk, EmbeddingIndex
 from app.embeddings.search import EmbeddingSearch
 from app.embeddings.storage import embedding_storage
 from app.config import config
+
+
+_embedding_index_store: dict[str, dict[str, Any]] = {}
 
 
 def require_auth(f):
@@ -25,13 +30,148 @@ def require_auth(f):
 embeddings_bp = Blueprint("embeddings", __name__)
 
 
+@embeddings_bp.route("/embeddings/config", methods=["GET"])
+def get_embeddings_config():
+    return jsonify({
+        "default_provider": embeddings_config.default_provider,
+        "default_model": embeddings_config.default_model,
+        "supported_providers": embeddings_config.supported_providers,
+    })
+
+
 @embeddings_bp.route("/embeddings", methods=["POST"])
 @require_auth
 def create_embedding_index():
+    global _embedding_index_store
+    
     data = request.get_json()
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
+    action = data.get("action", "create")
+    name = data.get("name", "")
+    chunks_data = data.get("chunks", [])
+    
+    if action in ("start", "continue", "finish"):
+        if not name:
+            return jsonify({"error": "Missing required field: name"}), 400
+        
+        if action == "start":
+            provider = data.get("provider", embeddings_config.default_provider)
+            model = data.get("model", embeddings_config.default_model)
+            chunking_strategy = data.get("chunking_strategy", "fixed")
+            chunking_params = data.get("chunking_params", {})
+            description = data.get("description", "")
+            
+            existing_index = embedding_storage.get_index_by_name(name)
+            version = 1
+            if existing_index:
+                version = existing_index.version + 1
+            
+            store_key = f"{name}_{uuid.uuid4().hex[:8]}"
+            
+            embedder_config = embeddings_config.get_embedder_config(provider)
+            embedder = create_embedder(provider, {**embedder_config, "model": model})
+            
+            all_chunks = [Chunk(
+                id=c["id"],
+                content=c["content"],
+                metadata=c.get("metadata", {})
+            ) for c in chunks_data]
+            
+            _embedding_index_store[store_key] = {
+                "name": name,
+                "description": description,
+                "provider": provider,
+                "model": model,
+                "chunking_strategy": chunking_strategy,
+                "chunking_params": chunking_params,
+                "chunks": all_chunks,
+                "embedder": embedder,
+                "created_at": EmbeddingIndex().created_at,
+                "version": version,
+            }
+            
+            return jsonify({
+                "status": "started",
+                "store_key": store_key,
+                "version": version,
+                "chunks_received": len(chunks_data),
+            })
+        
+        elif action == "continue":
+            store_key = data.get("store_key")
+            if not store_key or store_key not in _embedding_index_store:
+                return jsonify({"error": "Invalid or expired store_key. Start a new index creation."}), 400
+            
+            store = _embedding_index_store[store_key]
+            new_chunks = [Chunk(
+                id=c["id"],
+                content=c["content"],
+                metadata=c.get("metadata", {})
+            ) for c in chunks_data]
+            store["chunks"].extend(new_chunks)
+            
+            return jsonify({
+                "status": "continued",
+                "chunks_received": len(chunks_data),
+                "total_chunks": len(store["chunks"]),
+            })
+        
+        elif action == "finish":
+            store_key = data.get("store_key")
+            if not store_key or store_key not in _embedding_index_store:
+                return jsonify({"error": "Invalid or expired store_key. Start a new index creation."}), 400
+            
+            store = _embedding_index_store[store_key]
+            
+            new_chunks = [Chunk(
+                id=c["id"],
+                content=c["content"],
+                metadata=c.get("metadata", {})
+            ) for c in chunks_data]
+            store["chunks"].extend(new_chunks)
+            
+            chunks = store["chunks"]
+            embedder = store["embedder"]
+            version = store.get("version", 1)
+            
+            indexer = EmbeddingIndexer(embedder)
+            
+            try:
+                index_meta, faiss_index = indexer.create_index_from_chunks(chunks)
+            except Exception as e:
+                return jsonify({"error": f"Failed to create index: {str(e)}"}), 500
+            
+            index_meta.id = EmbeddingIndex().id
+            index_meta.name = store["name"]
+            index_meta.description = store["description"]
+            index_meta.version = version
+            index_meta.provider = store["provider"]
+            index_meta.model = store["model"]
+            index_meta.chunking_strategy = store["chunking_strategy"]
+            index_meta.chunking_params = store["chunking_params"]
+            index_meta.source_dir = ""
+            
+            saved_index = embedding_storage.save_index(index_meta, chunks, faiss_index)
+            
+            del _embedding_index_store[store_key]
+            
+            return jsonify(saved_index.to_dict()), 201
+    
+    if "source_dir" in data:
+        return _create_index_from_directory(data)
+    
+    if not name:
+        return jsonify({"error": "Missing required field: name"}), 400
+    
+    if not chunks_data:
+        return jsonify({"error": "Missing chunks data. Provide source_dir or chunks."}), 400
+    
+    return _create_index_from_chunks(data)
+
+
+def _create_index_from_directory(data: dict) -> tuple:
     required_fields = ["name", "source_dir"]
     for field in required_fields:
         if field not in data:
@@ -82,11 +222,70 @@ def create_embedding_index():
     return jsonify(saved_index.to_dict()), 201
 
 
+def _create_index_from_chunks(data: dict) -> tuple:
+    from app.embeddings.indexer import EmbeddingIndexer
+    from app.embeddings.models import Chunk
+    
+    name = data.get("name", "Unnamed")
+    description = data.get("description", "")
+    provider = data.get("provider", embeddings_config.default_provider)
+    model = data.get("model", embeddings_config.default_model)
+    chunking_strategy = data.get("chunking_strategy", "fixed")
+    chunking_params = data.get("chunking_params", {})
+    chunks_data = data.get("chunks", [])
+    
+    chunks = [Chunk(
+        id=c["id"],
+        content=c["content"],
+        metadata=c.get("metadata", {})
+    ) for c in chunks_data]
+    
+    if not chunks:
+        return jsonify({"error": "No chunks provided"}), 400
+    
+    existing_index = embedding_storage.get_index_by_name(name)
+    version = 1
+    if existing_index:
+        version = existing_index.version + 1
+    
+    embedder_config = embeddings_config.get_embedder_config(provider)
+    embedder = create_embedder(provider, {**embedder_config, "model": model})
+    
+    indexer = EmbeddingIndexer(embedder)
+    
+    try:
+        index_meta, faiss_index = indexer.create_index_from_chunks(chunks)
+    except Exception as e:
+        return jsonify({"error": f"Failed to create index: {str(e)}"}), 500
+    
+    index_meta.id = EmbeddingIndex().id
+    index_meta.name = name
+    index_meta.description = description
+    index_meta.version = version
+    index_meta.provider = provider
+    index_meta.model = model
+    index_meta.chunking_strategy = chunking_strategy
+    index_meta.chunking_params = chunking_params
+    index_meta.source_dir = ""
+    
+    saved_index = embedding_storage.save_index(index_meta, chunks, faiss_index)
+    
+    return jsonify(saved_index.to_dict()), 201
+
+
 @embeddings_bp.route("/embeddings", methods=["GET"])
 @require_auth
 def list_embedding_indexes():
     indexes = embedding_storage.list_indexes()
     return jsonify([idx.to_dict() for idx in indexes])
+
+
+@embeddings_bp.route("/embeddings/by-name/<name>", methods=["GET"])
+@require_auth
+def get_indexes_by_name(name: str):
+    all_indexes = embedding_storage.list_indexes()
+    matching = [idx.to_dict() for idx in all_indexes if idx.name == name]
+    return jsonify(sorted(matching, key=lambda x: x.get("version", 1), reverse=True))
 
 
 @embeddings_bp.route("/embeddings/<index_id>", methods=["GET"])

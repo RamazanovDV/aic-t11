@@ -1259,6 +1259,7 @@ def chat():
     # RAG parameters
     use_rag = data.get("use_rag", False)
     rag_index_name = data.get("rag_index_name")
+    rag_version = data.get("rag_version")
     rag_top_k = data.get("rag_top_k", 5)
 
     current_user = get_current_user()
@@ -1348,6 +1349,7 @@ def chat():
             results = search(
                 query=user_message,
                 index_name=rag_index_name,
+                version=rag_version,
                 top_k=rag_top_k,
             )
             if results:
@@ -2901,6 +2903,7 @@ def get_config():
         "summarizer": config.summarizer_config,
         "summarization": config.summarization_config,
         "mcp": config._config.get("mcp", {}),
+        "embeddings": config._config.get("embeddings", {}),
     })
 
 
@@ -2928,6 +2931,10 @@ def save_config():
             if "mcp" not in config._config:
                 config._config["mcp"] = {}
             config._config["mcp"] = data["mcp"]
+        if "embeddings" in data:
+            if "embeddings" not in config._config:
+                config._config["embeddings"] = {}
+            config._config["embeddings"].update(data["embeddings"])
         
         # Add new models from provider API to model catalog
         if "new_models" in data:

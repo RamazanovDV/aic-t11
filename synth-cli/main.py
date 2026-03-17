@@ -1,4 +1,5 @@
 import json
+from chunker import create_chunker
 import os
 from pathlib import Path
 
@@ -415,16 +416,17 @@ def embeddings():
 @click.option("--name", required=True, help="Index name")
 @click.option("--description", default="", help="Index description")
 @click.option("--source", "source_dir", required=True, help="Source directory to index")
-@click.option("--provider", default="ollama", help="Embedding provider (ollama/openai)")
-@click.option("--model", default="nomic-embed-text-v2-moe:latest", help="Embedding model")
-@click.option("--strategy", default="structure", help="Chunking strategy (fixed/structure)")
-@click.option("--chunk-size", default=512, help="Chunk size (for fixed strategy)")
-@click.option("--overlap", default=50, help="Chunk overlap (for fixed strategy)")
-@click.option("--min-chunk", default=100, help="Min chunk size (for structure strategy)")
-@click.option("--max-chunk", default=1000, help="Max chunk size (for structure strategy)")
+@click.option("--provider", default=None, help="Embedding provider (default: from config)")
+@click.option("--model", default=None, help="Embedding model (default: from config)")
+@click.option("--strategy", default="fixed", help="Chunking strategy (fixed/structure)")
+@click.option("--chunk-size", default=50, help="Chunk size (for fixed strategy)")
+@click.option("--overlap", default=5, help="Chunk overlap (for fixed strategy)")
+@click.option("--min-chunk", default=20, help="Min chunk size (for structure strategy)")
+@click.option("--max-chunk", default=150, help="Max chunk size (for structure strategy)")
+@click.option("--batch-size", default=50, help="Number of chunks per batch")
 @click.option("--username", prompt=True, help="Username for authentication")
 @click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
-def embeddings_create(name, description, source_dir, provider, model, strategy, chunk_size, overlap, min_chunk, max_chunk, username, password):
+def embeddings_create(name, description, source_dir, provider, model, strategy, chunk_size, overlap, min_chunk, max_chunk, batch_size, username, password):
     """Create a new embedding index"""
     login_result = login(username, password)
     if not login_result.get("success"):
@@ -432,36 +434,108 @@ def embeddings_create(name, description, source_dir, provider, model, strategy, 
         return
 
     cookies = login_result.get("cookies", {})
+    headers = get_auth_headers()
+    
+    try:
+        config_response = requests.get(
+            f"{config.backend_url}/api/embeddings/config",
+            headers=headers,
+            cookies=cookies,
+            timeout=30
+        )
+        if config_response.ok:
+            embed_config = config_response.json()
+            default_provider = embed_config.get("default_provider", "ollama")
+            default_model = embed_config.get("default_model", "nomic-embed-text-v2-moe:latest")
+        else:
+            default_provider = "ollama"
+            default_model = "nomic-embed-text-v2-moe:latest"
+    except Exception:
+        default_provider = "ollama"
+        default_model = "nomic-embed-text-v2-moe:latest"
+    
+    effective_provider = provider or default_provider
+    effective_model = model or default_model
+    
+    if not provider or not model:
+        click.echo(f"Using default settings: provider={effective_provider}, model={effective_model}")
+    
+    source_path = Path(source_dir)
+    if not source_path.exists():
+        click.echo(click.style(f"Source directory not found: {source_dir}", fg="red"), err=True)
+        return
 
     chunking_params = {}
     if strategy == "fixed":
         chunking_params = {"chunk_size": chunk_size, "overlap": overlap}
     else:
-        chunking_params = {"min_chunk_size": min_chunk, "max_chunk_size": max_chunk}
+        chunking_params = {"min_chunk_size": min_chunk, "max_chunk_size": max_chunk, "preserve_headers": True}
 
-    url = f"{config.backend_url}/api/embeddings"
-    headers = get_auth_headers()
+    click.echo(f"Reading files from {source_dir}...")
+    chunker = create_chunker(strategy, chunking_params)
+    chunks = chunker.chunk_directory(source_path)
+    
+    if not chunks:
+        click.echo(click.style("No chunks created", fg="red"), err=True)
+        return
+
+    click.echo(f"Created {len(chunks)} chunks, sending in batches of {batch_size}...")
+
     headers["Content-Type"] = "application/json"
 
-    payload = {
-        "name": name,
-        "description": description,
-        "source_dir": source_dir,
-        "provider": provider,
-        "model": model,
-        "chunking_strategy": strategy,
-        "chunking_params": chunking_params,
-    }
+    url = f"{config.backend_url}/api/embeddings"
 
-    try:
-        response = requests.post(url, headers=headers, json=payload, cookies=cookies, timeout=300)
-        response.raise_for_status()
-        result = response.json()
-        click.echo(click.style(f"Index created: {result.get('id')}", fg="green"))
-        click.echo(f"Version: {result.get('version')}")
-        click.echo(f"Chunks: {result.get('chunk_count')}")
-    except requests.RequestException as e:
-        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+    total_batches = (len(chunks) + batch_size - 1) // batch_size
+    
+    store_key = None
+    
+    for batch_idx in range(total_batches):
+        start = batch_idx * batch_size
+        end = min(start + batch_size, len(chunks))
+        batch_chunks = chunks[start:end]
+        
+        is_first = batch_idx == 0
+        is_last = batch_idx == total_batches - 1
+        
+        payload = {
+            "name": name,
+            "description": description if is_first else "",
+            "provider": effective_provider,
+            "model": effective_model,
+            "chunking_strategy": strategy,
+            "chunking_params": chunking_params if is_first else {},
+            "action": "start" if is_first else ("finish" if is_last else "continue"),
+            "store_key": store_key,
+            "batch_index": batch_idx,
+            "total_batches": total_batches,
+            "chunks": [
+                {
+                    "id": c.id,
+                    "content": c.content,
+                    "metadata": c.metadata
+                }
+                for c in batch_chunks
+            ]
+        }
+
+        try:
+            response = requests.post(url, headers=headers, json=payload, cookies=cookies, timeout=300)
+            response.raise_for_status()
+            result = response.json()
+            
+            if is_first and store_key is None:
+                store_key = result.get("store_key")
+            
+            if is_last:
+                click.echo(click.style(f"Index created: {result.get('id')}", fg="green"))
+                click.echo(f"Version: {result.get('version')}")
+                click.echo(f"Chunks: {result.get('chunk_count')}")
+            else:
+                click.echo(f"Batch {batch_idx + 1}/{total_batches} sent...")
+                
+        except requests.RequestException as e:
+            click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+            return
 
 
 @embeddings.command("list")

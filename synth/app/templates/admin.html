@@ -186,10 +186,89 @@
     <div class="tab-content" id="tab-embeddings">
         <div class="settings-section">
             <h3>Эмбединги</h3>
-            <p class="help-text">Управление индексами для семантического поиска. Индексы создаются через CLI.</p>
+            <p class="help-text">Создание и управление индексами для семантического поиска.</p>
             
-            <div id="embeddings-list">
-                <div class="loading">Загрузка индексов...</div>
+            <div class="settings-subsection">
+                <h4>Настройки</h4>
+                <form id="embed-settings-form" onsubmit="saveEmbedSettings(event)">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="embed-provider">Провайдер</label>
+                            <select id="embed-provider" class="form-input" onchange="updateEmbedModels()">
+                                <option value="">-- Выберите провайдер --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="embed-model">Модель</label>
+                            <input type="text" id="embed-model" class="form-input" list="embed-model-list" placeholder="nomic-embed-text-v2-moe:latest">
+                            <datalist id="embed-model-list"></datalist>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                    <span id="embed-settings-status" style="margin-left: 10px;"></span>
+                </form>
+            </div>
+            
+            <div class="settings-subsection">
+                <h4>Создать индекс</h4>
+                <form id="create-embedding-form" onsubmit="createEmbedding(event)">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="embed-name">Название</label>
+                            <input type="text" id="embed-name" class="form-input" required placeholder="My Index">
+                        </div>
+                        <div class="form-group">
+                            <label for="embed-description">Описание</label>
+                            <input type="text" id="embed-description" class="form-input" placeholder="Описание индекса">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="embed-source-dir">Директория с файлами</label>
+                            <input type="text" id="embed-source-dir" class="form-input" required placeholder="/path/to/markdown/files">
+                        </div>
+                        <div class="form-group">
+                            <label for="embed-strategy">Стратегия чанкинга</label>
+                            <select id="embed-strategy" class="form-input" onchange="toggleChunkingParams()">
+                                <option value="fixed">Fixed (фиксированный размер)</option>
+                                <option value="structure">Structure (по заголовкам)</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row" id="fixed-params">
+                        <div class="form-group">
+                            <label for="embed-chunk-size">Размер чанка</label>
+                            <input type="number" id="embed-chunk-size" class="form-input" value="50" min="10" max="500">
+                        </div>
+                        <div class="form-group">
+                            <label for="embed-overlap">Перекрытие</label>
+                            <input type="number" id="embed-overlap" class="form-input" value="5" min="0" max="100">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row" id="structure-params" style="display: none;">
+                        <div class="form-group">
+                            <label for="embed-min-chunk">Мин. размер чанка</label>
+                            <input type="number" id="embed-min-chunk" class="form-input" value="20" min="10" max="200">
+                        </div>
+                        <div class="form-group">
+                            <label for="embed-max-chunk">Макс. размер чанка</label>
+                            <input type="number" id="embed-max-chunk" class="form-input" value="150" min="20" max="500">
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Создать индекс</button>
+                    <span id="embed-status" style="margin-left: 10px;"></span>
+                </form>
+            </div>
+            
+            <div class="settings-subsection">
+                <h4>Существующие индексы</h4>
+                <div id="embeddings-list">
+                    <div class="loading">Загрузка индексов...</div>
+                </div>
             </div>
         </div>
     </div>
@@ -532,6 +611,7 @@
         loadModelList();
         loadMCPServers();
         loadEmbeddings();
+        loadEmbeddingsConfig();
         loadUsers();
         loadDebugConfig();
     }
@@ -638,6 +718,163 @@
         } catch (e) {
             console.error('Failed to delete embedding:', e);
             alert('Ошибка удаления индекса');
+        }
+    }
+
+    let embeddingsModels = [];
+
+    async function loadEmbeddingsConfig() {
+        const providerSelect = document.getElementById('embed-provider');
+        const providers = config.providers || {};
+        
+        providerSelect.innerHTML = '<option value="">-- Выберите провайдер --</option>';
+        for (const name of Object.keys(providers)) {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            providerSelect.appendChild(option);
+        }
+        
+        const embedSettings = config.embeddings || {};
+        if (embedSettings.default_provider) {
+            providerSelect.value = embedSettings.default_provider;
+        }
+        if (embedSettings.default_model) {
+            document.getElementById('embed-model').value = embedSettings.default_model;
+        }
+        
+        try {
+            const response = await fetch('/api/embeddings/config', { headers: getAuthHeaders() });
+            if (response.ok) {
+                const data = await response.json();
+                embeddingsModels = data.supported_providers || {};
+                updateEmbedModels();
+            }
+        } catch (e) {
+            console.error('Failed to load embeddings config:', e);
+        }
+    }
+
+    async function saveEmbedSettings(event) {
+        event.preventDefault();
+        
+        const status = document.getElementById('embed-settings-status');
+        status.textContent = 'Сохранение...';
+        status.style.color = 'var(--text-primary)';
+        
+        const provider = document.getElementById('embed-provider').value;
+        const model = document.getElementById('embed-model').value;
+        
+        try {
+            const response = await fetch('/admin/config', {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    embeddings: {
+                        default_provider: provider,
+                        default_model: model
+                    }
+                })
+            });
+            
+            if (response.ok) {
+                status.textContent = 'Сохранено!';
+                status.style.color = '#4CAF50';
+                config.embeddings = { default_provider: provider, default_model: model };
+                setTimeout(() => status.textContent = '', 3000);
+            } else {
+                const data = await response.json();
+                status.textContent = 'Ошибка: ' + (data.error || 'Unknown error');
+                status.style.color = '#f44336';
+            }
+        } catch (e) {
+            console.error('Failed to save embeddings config:', e);
+            status.textContent = 'Ошибка: ' + e.message;
+            status.style.color = '#f44336';
+        }
+    }
+
+    function updateEmbedModels() {
+        const provider = document.getElementById('embed-provider').value;
+        const modelInput = document.getElementById('embed-model');
+        const modelList = document.getElementById('embed-model-list');
+        
+        const models = embeddingsModels[provider] || [];
+        modelList.innerHTML = models.map(m => `<option value="${m}">`).join('');
+        
+        if (models.length > 0 && !modelInput.value) {
+            modelInput.value = models[0];
+        }
+    }
+
+    function toggleChunkingParams() {
+        const strategy = document.getElementById('embed-strategy').value;
+        document.getElementById('fixed-params').style.display = strategy === 'fixed' ? 'flex' : 'none';
+        document.getElementById('structure-params').style.display = strategy === 'structure' ? 'flex' : 'none';
+    }
+
+    async function createEmbedding(event) {
+        event.preventDefault();
+        
+        const status = document.getElementById('embed-status');
+        status.textContent = 'Создание...';
+        status.style.color = 'var(--text-primary)';
+        
+        const name = document.getElementById('embed-name').value;
+        const description = document.getElementById('embed-description').value;
+        const sourceDir = document.getElementById('embed-source-dir').value;
+        
+        const embedSettings = config.embeddings || {};
+        const provider = document.getElementById('embed-provider').value || embedSettings.default_provider;
+        const model = document.getElementById('embed-model').value || embedSettings.default_model;
+        
+        const strategy = document.getElementById('embed-strategy').value;
+        
+        let chunkingParams = {};
+        if (strategy === 'fixed') {
+            chunkingParams = {
+                chunk_size: parseInt(document.getElementById('embed-chunk-size').value),
+                overlap: parseInt(document.getElementById('embed-overlap').value)
+            };
+        } else {
+            chunkingParams = {
+                min_chunk_size: parseInt(document.getElementById('embed-min-chunk').value),
+                max_chunk_size: parseInt(document.getElementById('embed-max-chunk').value),
+                preserve_headers: true
+            };
+        }
+        
+        try {
+            const response = await fetch('/api/embeddings', {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name,
+                    description,
+                    source_dir: sourceDir,
+                    provider,
+                    model,
+                    chunking_strategy: strategy,
+                    chunking_params: chunkingParams
+                })
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                status.textContent = 'Создан!';
+                status.style.color = '#4CAF50';
+                document.getElementById('create-embedding-form').reset();
+                loadEmbeddings();
+                setTimeout(() => status.textContent = '', 3000);
+            } else {
+                const data = await response.json();
+                status.textContent = 'Ошибка: ' + (data.error || 'Unknown error');
+                status.style.color = '#f44336';
+            }
+        } catch (e) {
+            console.error('Failed to create embedding:', e);
+            status.textContent = 'Ошибка: ' + e.message;
+            status.style.color = '#f44336';
         }
     }
 

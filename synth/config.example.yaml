@@ -49,6 +49,10 @@ mcp:
 storage:
   data_dir: "/home/eof/dev/aic/synth/data"
 
+embeddings:
+  default_provider: "ollama"
+  default_model: "nomic-embed-text-v2-moe:latest"
+
 debug:
   groups:
     ANTHROPIC: INFO

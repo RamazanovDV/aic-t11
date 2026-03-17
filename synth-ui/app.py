@@ -1355,3 +1355,17 @@ def embeddings_list():
         return jsonify(response.json())
     except requests.RequestException as e:
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/embeddings/by-name/<name>", methods=["GET"])
+def embeddings_by_name(name: str):
+    """Get all versions of an embedding index."""
+    url = f"{ui_config.backend_url}/api/embeddings/by-name/{name}"
+    headers = {"X-API-Key": ui_config.backend_api_key}
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500

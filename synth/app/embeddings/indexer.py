@@ -72,6 +72,44 @@ class EmbeddingIndexer:
 
         return index_meta, chunks, index
 
+    def create_index_from_chunks(
+        self,
+        chunks: list[Chunk],
+    ) -> tuple[EmbeddingIndex, faiss.Index]:
+        if not chunks:
+            raise ValueError("No chunks provided")
+
+        embeddings = []
+        
+        for i, chunk in enumerate(chunks):
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    emb = self.embedder.embed(chunk.content)
+                    embeddings.append(emb)
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        continue
+                    raise e
+
+        embeddings_array = np.array(embeddings).astype("float32")
+
+        dimension = embeddings_array.shape[1]
+        index = faiss.IndexFlatL2(dimension)
+        index.add(embeddings_array)
+
+        index_meta = EmbeddingIndex(
+            source_dir="",
+            chunking_strategy="fixed",
+            chunking_params={},
+            file_count=0,
+            chunk_count=len(chunks),
+            dimension=dimension,
+        )
+
+        return index_meta, index
+
     def update_index(self, index: faiss.Index, chunks: list[Chunk], new_chunks: list[Chunk]) -> faiss.Index:
         if not new_chunks:
             return index

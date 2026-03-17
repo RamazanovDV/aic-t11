@@ -110,11 +110,17 @@ class EmbeddingStorage:
                 return EmbeddingIndex.from_dict(data)
         return None
 
-    def get_index_by_name(self, name: str) -> EmbeddingIndex | None:
+    def get_index_by_name(self, name: str, version: int | None = None) -> EmbeddingIndex | None:
         indexes_data = self._load_index_list()
         matching = [EmbeddingIndex.from_dict(data) for data in indexes_data if data.get("name") == name]
 
         if not matching:
+            return None
+
+        if version is not None:
+            for idx in matching:
+                if idx.version == version:
+                    return idx
             return None
 
         return max(matching, key=lambda idx: idx.version)

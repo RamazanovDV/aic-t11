@@ -233,8 +233,15 @@
             <div id="rag-options" style="display: none; margin-top: 1rem;">
                 <div class="form-group">
                     <label for="rag-index">Индекс:</label>
-                    <select id="rag-index" class="form-input">
+                    <select id="rag-index" class="form-input" onchange="loadIndexVersions()">
                         <option value="">Выберите индекс</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="rag-version">Версия:</label>
+                    <select id="rag-version" class="form-input">
+                        <option value="">Загрузка...</option>
                     </select>
                 </div>
                 
@@ -1492,6 +1499,7 @@
                     tsm_mode: panel.tsmMode || null,
                     use_rag: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].enabled : false,
                     rag_index_name: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].indexName : '',
+                    rag_version: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].version : null,
                     rag_top_k: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].topK : 5
                 })
             });
@@ -1563,6 +1571,7 @@
                     tsm_mode: panel.tsmMode || null,
                     use_rag: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].enabled : false,
                     rag_index_name: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].indexName : '',
+                    rag_version: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].version : null,
                     rag_top_k: panelRagSettings[panelIndex] ? panelRagSettings[panelIndex].topK : 5
                 })
             });
@@ -3165,14 +3174,15 @@
     // RAG Modal Functions
     let currentRagPanelIndex = 0;
     let panelRagSettings = {};
+    let currentRagSettings = {};
 
     async function openRagModal(panelIndex) {
         currentRagPanelIndex = panelIndex;
         const modal = document.getElementById('rag-modal');
-        const settings = panelRagSettings[panelIndex] || { enabled: false, indexName: '', topK: 5 };
+        currentRagSettings = panelRagSettings[panelIndex] || { enabled: false, indexName: '', version: null, topK: 5 };
         
-        document.getElementById('rag-enable').checked = settings.enabled;
-        document.getElementById('rag-top-k').value = settings.topK;
+        document.getElementById('rag-enable').checked = currentRagSettings.enabled;
+        document.getElementById('rag-top-k').value = currentRagSettings.topK;
         
         toggleRagOptions();
         
@@ -3184,9 +3194,15 @@
             if (response.ok) {
                 const indexes = await response.json();
                 indexSelect.innerHTML = '<option value="">Выберите индекс</option>';
-                for (const idx of indexes) {
-                    const selected = idx.name === settings.indexName ? ' selected' : '';
-                    indexSelect.innerHTML += `<option value="${idx.name}"${selected}>${idx.name}</option>`;
+                
+                const uniqueNames = [...new Set(indexes.map(idx => idx.name))];
+                for (const name of uniqueNames) {
+                    const selected = name === currentRagSettings.indexName ? ' selected' : '';
+                    indexSelect.innerHTML += `<option value="${name}"${selected}>${name}</option>`;
+                }
+                
+                if (currentRagSettings.indexName) {
+                    await loadIndexVersions();
                 }
             } else {
                 indexSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
@@ -3197,6 +3213,37 @@
         }
         
         modal.style.display = 'flex';
+    }
+
+    async function loadIndexVersions() {
+        const indexName = document.getElementById('rag-index').value;
+        const versionSelect = document.getElementById('rag-version');
+        
+        if (!indexName) {
+            versionSelect.innerHTML = '<option value="">Сначала выберите индекс</option>';
+            return;
+        }
+        
+        versionSelect.innerHTML = '<option value="">Загрузка...</option>';
+        
+        try {
+            const response = await fetch(`/api/embeddings/by-name/${encodeURIComponent(indexName)}`, { credentials: 'include' });
+            if (response.ok) {
+                const versions = await response.json();
+                versionSelect.innerHTML = '';
+                
+                for (const idx of versions) {
+                    const v = idx.version || 1;
+                    const selected = v === currentRagSettings.version ? ' selected' : '';
+                    versionSelect.innerHTML += `<option value="${v}"${selected}>Версия ${v} (${idx.chunk_count} чанков)</option>`;
+                }
+            } else {
+                versionSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+            }
+        } catch (err) {
+            console.error('Failed to load versions:', err);
+            versionSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+        }
     }
 
     function toggleRagOptions() {
@@ -3211,11 +3258,13 @@
     function saveRagSettings() {
         const enabled = document.getElementById('rag-enable').checked;
         const indexName = document.getElementById('rag-index').value;
+        const version = document.getElementById('rag-version').value ? parseInt(document.getElementById('rag-version').value) : null;
         const topK = parseInt(document.getElementById('rag-top-k').value) || 5;
         
         panelRagSettings[currentRagPanelIndex] = {
             enabled: enabled,
             indexName: indexName,
+            version: version,
             topK: topK
         };
         

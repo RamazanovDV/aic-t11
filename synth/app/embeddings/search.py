@@ -27,14 +27,15 @@ class EmbeddingSearch:
         query: str,
         index_name: str | None = None,
         index_id: str | None = None,
+        version: int | None = None,
         top_k: int = 5,
     ) -> list[dict[str, Any]]:
         if index_id:
             index_data = embedding_storage.load_index(index_id)
         elif index_name:
-            index_meta = embedding_storage.get_index_by_name(index_name)
+            index_meta = embedding_storage.get_index_by_name(index_name, version=version)
             if not index_meta:
-                raise ValueError(f"Index not found: {index_name}")
+                raise ValueError(f"Index not found: {index_name}" + (f" v{version}" if version else ""))
             index_data = embedding_storage.load_index(index_meta.id)
         else:
             raise ValueError("Must provide either index_id or index_name")
@@ -72,8 +73,9 @@ def search(
     query: str,
     index_name: str | None = None,
     index_id: str | None = None,
+    version: int | None = None,
     top_k: int = 5,
     embedder: BaseEmbedder | None = None,
 ) -> list[dict[str, Any]]:
     search_engine = EmbeddingSearch(embedder)
-    return search_engine.search(query, index_name, index_id, top_k)
+    return search_engine.search(query, index_name, index_id, version, top_k)
