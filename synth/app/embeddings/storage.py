@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Any
 
 import faiss
-import numpy as np
 
 from app.embeddings.models import Chunk, EmbeddingIndex
 

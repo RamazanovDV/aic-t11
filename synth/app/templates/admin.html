@@ -587,7 +587,7 @@
             const thumbsUp = ratings.thumbs_up || 0;
             const thumbsDown = ratings.thumbs_down || 0;
             const created = idx.created_at ? new Date(idx.created_at).toLocaleDateString('ru-RU') : '-';
-            const chunkingParams = JSON.stringify(idx.chunking_params || {});
+            const chunkingParams = JSON.stringify(idx.chunking_params || {}).replace(/,/g, ', ');
 
             html += `
                 <tr>
@@ -597,9 +597,9 @@
                     </td>
                     <td style="padding: 8px;">v${idx.version}</td>
                     <td style="padding: 8px;">${escapeHtml(idx.provider)}/${escapeHtml(idx.model)}</td>
-                    <td style="padding: 8px;">
+                    <td style="padding: 8px; max-width: 200px;">
                         ${escapeHtml(idx.chunking_strategy)}
-                        <br><small style="color: var(--text-secondary);">${escapeHtml(chunkingParams)}</small>
+                        <br><small style="color: var(--text-secondary); word-break: break-all;">${escapeHtml(chunkingParams)}</small>
                     </td>
                     <td style="padding: 8px;">${idx.chunk_count}</td>
                     <td style="padding: 8px;">${idx.file_count}</td>

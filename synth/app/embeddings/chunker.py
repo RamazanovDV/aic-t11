@@ -95,7 +95,6 @@ class StructureChunker(BaseChunker):
 
         sections = self._split_by_headers(content)
 
-        current_section = ""
         current_section_title = ""
         current_words = []
 

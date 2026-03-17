@@ -16,6 +16,7 @@ Flask API сервер для Synth AI Agent.
 - Ветки и чекпоинты
 - Админ-панель
 - Debug режим - сбор отладочной информации для каждого сообщения
+- **Embeddings** - семантический поиск и RAG
 
 ## Установка
 
@@ -138,6 +139,18 @@ python run.py
 | GET | `/admin/models/available` | Доступные модели |
 | POST | `/admin/models` | Добавить модель |
 | DELETE | `/admin/models/<name>` | Удалить модель |
+
+### Embeddings (Semantic Search)
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/embeddings` | Список индексов |
+| POST | `/api/embeddings` | Создать индекс |
+| GET | `/api/embeddings/<id>` | Информация об индексе |
+| DELETE | `/api/embeddings/<id>` | Удалить индекс |
+| POST | `/api/embeddings/search` | Семантический поиск |
+| POST | `/api/embeddings/<id>/rate` | Оценить индекс |
+
+Подробнее в [руководстве по индексам](./docs/EMBEDDINGS.md).
 
 ## Аутентификация
 

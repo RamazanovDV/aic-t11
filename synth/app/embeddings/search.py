@@ -1,12 +1,8 @@
-from pathlib import Path
 from typing import Any
 
-import faiss
-import numpy as np
 
 from app.embeddings.embedder import create_embedder, BaseEmbedder
 from app.embeddings.indexer import search_index as index_search
-from app.embeddings.models import Chunk, EmbeddingIndex
 from app.embeddings.storage import embedding_storage
 from app.embeddings.config import embeddings_config
 
