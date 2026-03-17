@@ -13,7 +13,7 @@ class BaseChunker(ABC):
         pass
 
     @abstractmethod
-    def chunk_directory(self, directory: Path, extensions: list[str] = None) -> list[Chunk]:
+    def chunk_directory(self, directory: Path, extensions: list[str] | None = None) -> list[Chunk]:
         pass
 
 
@@ -55,7 +55,7 @@ class FixedChunker(BaseChunker):
 
         return chunks
 
-    def chunk_directory(self, directory: Path, extensions: list[str] = None) -> list[Chunk]:
+    def chunk_directory(self, directory: Path, extensions: list[str] | None = None) -> list[Chunk]:
         if extensions is None:
             extensions = [".md"]
 
@@ -123,8 +123,8 @@ class StructureChunker(BaseChunker):
 
                 if len(words) > self.max_chunk_size:
                     subchunks = self._split_large_section(file_path, words, current_section_title, source, title)
-                    chunks.extend(subchunks[:-1])
-                    current_words = subchunks[-1] if subchunks else []
+                    chunks.extend(subchunks)
+                    current_words = []
                     current_section_title = header if header else current_section_title
                 else:
                     current_words = words
@@ -157,7 +157,7 @@ class StructureChunker(BaseChunker):
 
         return chunks
 
-    def chunk_directory(self, directory: Path, extensions: list[str] = None) -> list[Chunk]:
+    def chunk_directory(self, directory: Path, extensions: list[str] | None = None) -> list[Chunk]:
         if extensions is None:
             extensions = [".md"]
 
@@ -198,24 +198,54 @@ class StructureChunker(BaseChunker):
         section_title: str,
         source: str,
         title: str,
-    ) -> list[list[str]]:
+    ) -> list[Chunk]:
         subchunks = []
         current_words = []
+        chunk_index = 0
 
         for word in words:
             current_words.append(word)
 
             if len(current_words) >= self.max_chunk_size:
-                subchunks.append(current_words)
+                chunk_content = " ".join(current_words)
+                if self.preserve_headers and section_title:
+                    chunk_content = f"{section_title}\n\n{chunk_content}"
+
+                subchunks.append(Chunk(
+                    id=str(uuid.uuid4()),
+                    content=chunk_content,
+                    metadata={
+                        "source": source,
+                        "title": title,
+                        "section": section_title,
+                        "chunk_index": chunk_index,
+                        "total_chunks": 0,
+                    },
+                ))
+                chunk_index += 1
                 current_words = current_words[-self.min_chunk_size:]
 
         if current_words:
-            subchunks.append(current_words)
+            chunk_content = " ".join(current_words)
+            if self.preserve_headers and section_title:
+                chunk_content = f"{section_title}\n\n{chunk_content}"
+
+            subchunks.append(Chunk(
+                id=str(uuid.uuid4()),
+                content=chunk_content,
+                metadata={
+                    "source": source,
+                    "title": title,
+                    "section": section_title,
+                    "chunk_index": chunk_index,
+                    "total_chunks": 0,
+                },
+            ))
 
         return subchunks
 
 
-def create_chunker(strategy: str, params: dict[str, Any] = None) -> BaseChunker:
+def create_chunker(strategy: str, params: dict[str, Any] | None = None) -> BaseChunker:
     if params is None:
         params = {}
 
