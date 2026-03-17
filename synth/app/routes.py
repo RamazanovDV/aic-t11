@@ -1378,7 +1378,7 @@ def chat():
                     context_added=rag_context,
                 )
         except Exception as e:
-            warning(f"RAG search error in chat: {e}")
+            warning("RAG", f"RAG search error in chat: {e}")
 
     if rag_context:
         system_prompt += rag_context
@@ -1684,7 +1684,7 @@ def chat_stream():
                         context_added=rag_context,
                     )
             except Exception as e:
-                warning(f"RAG search error in stream: {e}")
+                warning("RAG", f"RAG search error in stream: {e}")
 
         if rag_context:
             system_prompt += rag_context

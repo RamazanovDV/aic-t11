@@ -11,7 +11,7 @@ class EmbeddingSearch:
     def __init__(self, embedder: BaseEmbedder | None = None):
         self.embedder = embedder
 
-    def _get_embedder(self, provider: str, model: str, config: dict[str, Any] = None) -> BaseEmbedder:
+    def _get_embedder(self, provider: str, model: str, config: dict[str, Any] | None = None) -> BaseEmbedder:
         if self.embedder:
             return self.embedder
 
@@ -45,7 +45,7 @@ class EmbeddingSearch:
 
         index_meta, chunks, faiss_index = index_data
 
-        embedder = self._get_embedder(index_meta.provider, index_meta.model)
+        embedder = self._get_embedder(index_meta.provider, index_meta.model, {"model": index_meta.model})
 
         query_embedding = embedder.embed(query)
 

@@ -50,7 +50,7 @@ class EmbeddingsConfig:
             return providers[provider]
         return {}
 
-    def get_embedder_config(self, provider: str) -> dict[str, Any]:
+    def get_embedder_config(self, provider: str, model: str | None = None) -> dict[str, Any]:
         if provider == "ollama":
             provider = "ollama-embed"
         
@@ -60,12 +60,12 @@ class EmbeddingsConfig:
             return {
                 "url": pc.get("url", ""),
                 "api_key": pc.get("api_key", ""),
-                "model": pc.get("default_model", self.default_model),
+                "model": model or pc.get("default_model", self.default_model),
             }
         return {
             "url": "",
             "api_key": "",
-            "model": self.default_model,
+            "model": model or self.default_model,
         }
 
 
