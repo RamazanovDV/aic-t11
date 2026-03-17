@@ -53,8 +53,10 @@ def create_embedding_index():
     chunks_data = data.get("chunks", [])
     
     if action in ("start", "continue", "finish"):
-        if not name:
-            return jsonify({"error": "Missing required field: name"}), 400
+        # Only start requires name
+        if action == "start":
+            if not name:
+                return jsonify({"error": "Missing required field: name"}), 400
         
         if action == "start":
             provider = data.get("provider", embeddings_config.default_provider)
@@ -73,11 +75,20 @@ def create_embedding_index():
             embedder_config = embeddings_config.get_embedder_config(provider)
             embedder = create_embedder(provider, {**embedder_config, "model": model})
             
+            # Create Chunk objects
             all_chunks = [Chunk(
                 id=c["id"],
                 content=c["content"],
                 metadata=c.get("metadata", {})
             ) for c in chunks_data]
+            
+            # Generate embeddings immediately for start batch
+            all_embeddings = []
+            if all_chunks:
+                try:
+                    all_embeddings = embedder.embed_batch([c.content for c in all_chunks])
+                except Exception as e:
+                    return jsonify({"error": f"Failed to create initial embeddings: {str(e)}"}), 500
             
             _embedding_index_store[store_key] = {
                 "name": name,
@@ -87,6 +98,7 @@ def create_embedding_index():
                 "chunking_strategy": chunking_strategy,
                 "chunking_params": chunking_params,
                 "chunks": all_chunks,
+                "embeddings": all_embeddings,
                 "embedder": embedder,
                 "created_at": EmbeddingIndex().created_at,
                 "version": version,
@@ -106,12 +118,25 @@ def create_embedding_index():
             
             try:
                 store = _embedding_index_store[store_key]
+                embedder = store["embedder"]
+                
+                # Create Chunk objects
                 new_chunks = [Chunk(
                     id=c["id"],
                     content=c["content"],
                     metadata=c.get("metadata", {})
                 ) for c in chunks_data]
+                
+                # Generate embeddings for new chunks immediately
+                new_embeddings = []
+                if new_chunks:
+                    try:
+                        new_embeddings = embedder.embed_batch([c.content for c in new_chunks])
+                    except Exception as e:
+                        return jsonify({"error": f"Failed to create embeddings: {str(e)}"}), 500
+                
                 store["chunks"].extend(new_chunks)
+                store["embeddings"].extend(new_embeddings)
                 
                 print(f"[EMBEDDINGS] Continue: received {len(chunks_data)} chunks, total: {len(store['chunks'])}", flush=True)
                 
@@ -133,37 +158,51 @@ def create_embedding_index():
             
             store = _embedding_index_store[store_key]
             
-            new_chunks = [Chunk(
-                id=c["id"],
-                content=c["content"],
-                metadata=c.get("metadata", {})
-            ) for c in chunks_data]
-            store["chunks"].extend(new_chunks)
+            # Add any remaining chunks from finish request (should be empty usually)
+            if chunks_data:
+                new_chunks = [Chunk(
+                    id=c["id"],
+                    content=c["content"],
+                    metadata=c.get("metadata", {})
+                ) for c in chunks_data]
+                store["chunks"].extend(new_chunks)
+                
+                # Generate embeddings for remaining chunks
+                embedder = store["embedder"]
+                try:
+                    new_embeddings = embedder.embed_batch([c.content for c in new_chunks])
+                    store["embeddings"].extend(new_embeddings)
+                except Exception as e:
+                    return jsonify({"error": f"Failed to create final embeddings: {str(e)}"}), 500
             
             chunks = store["chunks"]
-            embedder = store["embedder"]
+            embeddings = store["embeddings"]
             version = store.get("version", 1)
             
-            # Log chunk sizes to debug
-            sizes = [len(c.content) for c in chunks]
-            print(f"[EMBEDDINGS] Finish: {len(chunks)} chunks, size range: {min(sizes)}-{max(sizes)}", flush=True)
+            print(f"[EMBEDDINGS] Finish: {len(chunks)} chunks, {len(embeddings)} embeddings", flush=True)
             
-            indexer = EmbeddingIndexer(embedder)
+            # Create FAISS index from stored embeddings
+            import numpy as np
+            embeddings_array = np.array(embeddings).astype("float32")
+            dimension = embeddings_array.shape[1]
             
-            import sys
-            print(f"[EMBEDDINGS] Creating index from {len(chunks)} chunks...", flush=True)
+            import faiss
+            faiss_index = faiss.IndexFlatL2(dimension)
+            faiss_index.add(embeddings_array)
             
-            try:
-                index_meta, faiss_index = indexer.create_index_from_chunks(chunks)
-                print(f"[EMBEDDINGS] Index created, dimension={index_meta.dimension}", flush=True)
-            except Exception as e:
-                import traceback
-                print(f"[EMBEDDINGS] Failed to create index: {e}", flush=True)
-                print(traceback.format_exc(), flush=True)
-                return jsonify({"error": f"Failed to create index: {str(e)}"}), 500
+            from app.embeddings.indexer import EmbeddingIndexer
+            indexer = EmbeddingIndexer(store["embedder"])
             
-            index_meta.id = EmbeddingIndex().id
-            index_meta.name = store["name"]
+            index_meta = EmbeddingIndex(
+                name=store["name"],
+                description=store["description"],
+                provider=store["provider"],
+                model=store["model"],
+                chunking_strategy=store["chunking_strategy"],
+                chunking_params=store["chunking_params"],
+                chunk_count=len(chunks),
+                dimension=dimension,
+            )
             index_meta.description = store["description"]
             index_meta.version = version
             index_meta.provider = store["provider"]
