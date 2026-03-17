@@ -5,6 +5,5 @@ ProviderFactory.register("openai", OpenAIProvider)
 ProviderFactory.register("anthropic", AnthropicProvider)
 ProviderFactory.register("ollama", OllamaProvider)
 ProviderFactory.register("generic", GenericOpenAIProvider)
-ProviderFactory.register("itphx", GenericOpenAIProvider)
 
 __all__ = ["BaseProvider", "ProviderFactory", "LLMResponse", "Message"]

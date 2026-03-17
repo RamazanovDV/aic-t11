@@ -1565,8 +1565,7 @@ def chat_stream():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
-    # Get session_id from JSON body first, then fall back to header/cookie
-    session_id = data.get("session_id") or get_session_id()
+    session_id = get_session_id()
     session = session_manager.get_session(session_id)
 
     # RAG parameters - use request params or fall back to session settings
@@ -1651,7 +1650,6 @@ def chat_stream():
         # RAG - Add relevant context from embeddings index
         rag_context = ""
         if use_rag and rag_index_name:
-            print(f"[DEBUG] RAG enabled: use_rag={use_rag}, index_name={rag_index_name}, top_k={rag_top_k}", flush=True)
             info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}")
             try:
                 from app.embeddings.search import search
@@ -1661,7 +1659,6 @@ def chat_stream():
                     version=rag_version,
                     top_k=rag_top_k,
                 )
-                print(f"[DEBUG] RAG search returned {len(results) if results else 0} results", flush=True)
                 if results:
                     rag_context = "\n\n## Relevant Context\n"
                     for i, result in enumerate(results, 1):
@@ -1687,9 +1684,6 @@ def chat_stream():
                         context_added=rag_context,
                     )
             except Exception as e:
-                import traceback
-                print(f"[DEBUG] RAG ERROR: {e}", flush=True)
-                print(traceback.format_exc(), flush=True)
                 warning("RAG", f"RAG search error in stream: {e}")
 
         if rag_context:
