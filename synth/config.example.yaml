@@ -65,3 +65,16 @@ debug:
     SCHEDULER: INFO
     INIT: INFO
     DEBUG: DEBUG
+
+rag:
+  enabled: false                 # RAG включён по умолчанию для новых сессий
+  default_index: ""              # Индекс по умолчанию
+  top_k: 5                      # Количество результатов для контекста
+
+  reranker:
+    enabled: false
+    type: "relative"           # relative | fixed | statistical
+    threshold: 0.3             # similarity threshold (0-1) для fixed
+    multiplier: 1.5            # для relative: best_distance * multiplier
+    std_multiplier: 2.0        # для statistical: mean + n*std
+    top_k_before: 20           # fetch больше чем нужно до фильтрации

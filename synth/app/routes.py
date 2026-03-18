@@ -1255,12 +1255,6 @@ def chat():
     source_type = data.get("source", "web")
     mcp_servers = data.get("mcp_servers", [])
     mcp_calls = []
-    
-    # RAG parameters
-    use_rag = data.get("use_rag", False)
-    rag_index_name = data.get("rag_index_name")
-    rag_version = data.get("rag_version")
-    rag_top_k = data.get("rag_top_k", 5)
 
     current_user = get_current_user()
     if current_user:
@@ -1275,18 +1269,15 @@ def chat():
     provider_config = config.get_provider_config(provider_name)
     if not provider_config:
         return jsonify({"error": f"Unknown provider: {provider_name}"}), 400
-    
+
     provider_config = provider_config.copy()
-    
     if model:
         provider_config["model"] = model
     else:
         default_model = config.get_default_model(provider_name)
         if default_model:
             provider_config["model"] = default_model
-        else:
-            return jsonify({"error": f"No model specified and no default model for provider: {provider_name}"}), 400
-    
+
     if "timeout" not in provider_config:
         provider_config["timeout"] = config.timeout
 
@@ -1297,6 +1288,14 @@ def chat():
 
     session_id = get_session_id()
     session = session_manager.get_session(session_id)
+
+    # RAG parameters - use request params or fall back to session settings
+    saved_rag = session.session_settings.get("rag_settings", {})
+    use_rag = data.get("use_rag") if "use_rag" in data else saved_rag.get("enabled", False)
+    rag_index_name = data.get("rag_index_name") if data.get("rag_index_name") else saved_rag.get("index_name")
+    rag_version = data.get("rag_version") if data.get("rag_version") is not None else saved_rag.get("version")
+    rag_top_k = data.get("rag_top_k") if data.get("rag_top_k") is not None else saved_rag.get("top_k", 5)
+    rag_reranker = data.get("rag_reranker") if data.get("rag_reranker") else saved_rag.get("reranker", {})
 
     debug_collector = DebugCollector.from_session(session)
 
@@ -1344,14 +1343,21 @@ def chat():
     # RAG - Add relevant context from embeddings index
     rag_context = ""
     if use_rag and rag_index_name:
-        info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}")
+        reranker_config = None
+        if rag_reranker and rag_reranker.get("enabled"):
+            reranker_config = rag_reranker
+            info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}, reranker: {rag_reranker.get('type')}")
+        else:
+            info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}")
         try:
-            from app.embeddings.search import search
-            results = search(
+            from app.embeddings.search import EmbeddingSearch
+            search_engine = EmbeddingSearch()
+            results, reranker_meta = search_engine.search(
                 query=user_message,
                 index_name=rag_index_name,
                 version=rag_version,
                 top_k=rag_top_k,
+                reranker_config=reranker_config,
             )
             if results:
                 rag_context = "\n\n## Relevant Context\n"
@@ -1376,6 +1382,8 @@ def chat():
                     top_k=rag_top_k,
                     results=results or [],
                     context_added=rag_context,
+                    reranker_config=reranker_config,
+                    reranker_meta=reranker_meta,
                 )
         except Exception as e:
             warning("RAG", f"RAG search error in chat: {e}")
@@ -1574,6 +1582,7 @@ def chat_stream():
     rag_index_name = data.get("rag_index_name") if data.get("rag_index_name") else saved_rag.get("index_name")
     rag_version = data.get("rag_version") if data.get("rag_version") is not None else saved_rag.get("version")
     rag_top_k = data.get("rag_top_k") if data.get("rag_top_k") is not None else saved_rag.get("top_k", 5)
+    rag_reranker = data.get("rag_reranker") if data.get("rag_reranker") else saved_rag.get("reranker", {})
 
     debug_collector = DebugCollector.from_session(session)
 
@@ -1650,14 +1659,21 @@ def chat_stream():
         # RAG - Add relevant context from embeddings index
         rag_context = ""
         if use_rag and rag_index_name:
-            info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}")
+            reranker_config = None
+            if rag_reranker and rag_reranker.get("enabled"):
+                reranker_config = rag_reranker
+                info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}, reranker: {rag_reranker.get('type')}")
+            else:
+                info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}")
             try:
-                from app.embeddings.search import search
-                results = search(
+                from app.embeddings.search import EmbeddingSearch
+                search_engine = EmbeddingSearch()
+                results, reranker_meta = search_engine.search(
                     query=user_message,
                     index_name=rag_index_name,
                     version=rag_version,
                     top_k=rag_top_k,
+                    reranker_config=reranker_config,
                 )
                 if results:
                     rag_context = "\n\n## Relevant Context\n"
@@ -1682,6 +1698,8 @@ def chat_stream():
                         top_k=rag_top_k,
                         results=results or [],
                         context_added=rag_context,
+                        reranker_config=reranker_config,
+                        reranker_meta=reranker_meta,
                     )
             except Exception as e:
                 warning("RAG", f"RAG search error in stream: {e}")
@@ -2661,10 +2679,37 @@ def get_rag_settings(session_id: str):
         "enabled": False,
         "index_name": "",
         "version": None,
-        "top_k": 5
+        "top_k": 5,
+        "reranker": {
+            "enabled": False,
+            "type": "relative",
+            "threshold": 0.3,
+            "multiplier": 1.5,
+            "std_multiplier": 2.0,
+            "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
+            "top_k_before": 20,
+        }
     })
 
-    return jsonify(rag_settings)
+    reranker = rag_settings.get("reranker", {})
+    if not reranker:
+        reranker = {
+            "enabled": False,
+            "type": "relative",
+            "threshold": 0.3,
+            "multiplier": 1.5,
+            "std_multiplier": 2.0,
+            "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
+            "top_k_before": 20,
+        }
+
+    return jsonify({
+        "enabled": rag_settings.get("enabled", False),
+        "index_name": rag_settings.get("index_name", ""),
+        "version": rag_settings.get("version"),
+        "top_k": rag_settings.get("top_k", 5),
+        "reranker": reranker,
+    })
 
 
 @api_bp.route("/sessions/<session_id>/rag-settings", methods=["PUT"])
@@ -2683,7 +2728,16 @@ def set_rag_settings(session_id: str):
             "enabled": False,
             "index_name": "",
             "version": None,
-            "top_k": 5
+            "top_k": 5,
+            "reranker": {
+                "enabled": False,
+                "type": "relative",
+                "threshold": 0.3,
+                "multiplier": 1.5,
+                "std_multiplier": 2.0,
+                "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
+                "top_k_before": 20,
+            }
         }
 
     if "enabled" in data:
@@ -2699,6 +2753,35 @@ def set_rag_settings(session_id: str):
         if top_k > 20:
             top_k = 20
         session.session_settings["rag_settings"]["top_k"] = top_k
+
+    reranker_data = data.get("reranker", {})
+    if reranker_data:
+        if "reranker" not in session.session_settings["rag_settings"]:
+            session.session_settings["rag_settings"]["reranker"] = {
+                "enabled": False,
+                "type": "relative",
+                "threshold": 0.3,
+                "multiplier": 1.5,
+                "std_multiplier": 2.0,
+                "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
+                "top_k_before": 20,
+            }
+        
+        r = session.session_settings["rag_settings"]["reranker"]
+        if "enabled" in reranker_data:
+            r["enabled"] = bool(reranker_data["enabled"])
+        if "type" in reranker_data:
+            r["type"] = reranker_data["type"]
+        if "threshold" in reranker_data:
+            r["threshold"] = float(reranker_data["threshold"])
+        if "multiplier" in reranker_data:
+            r["multiplier"] = float(reranker_data["multiplier"])
+        if "std_multiplier" in reranker_data:
+            r["std_multiplier"] = float(reranker_data["std_multiplier"])
+        if "model" in reranker_data:
+            r["model"] = reranker_data["model"]
+        if "top_k_before" in reranker_data:
+            r["top_k_before"] = int(reranker_data["top_k_before"])
 
     session_manager.save_session(session_id)
 
@@ -3022,6 +3105,7 @@ def get_config():
         "summarization": config.summarization_config,
         "mcp": config._config.get("mcp", {}),
         "embeddings": config._config.get("embeddings", {}),
+        "rag": config.get_rag_config(),
     })
 
 
@@ -3053,6 +3137,9 @@ def save_config():
             if "embeddings" not in config._config:
                 config._config["embeddings"] = {}
             config._config["embeddings"].update(data["embeddings"])
+        
+        if "rag" in data:
+            config.save_rag_config(data["rag"])
         
         # Add new models from provider API to model catalog
         if "new_models" in data:

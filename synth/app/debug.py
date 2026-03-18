@@ -138,6 +138,8 @@ class DebugCollector:
         top_k: int,
         results: list[dict],
         context_added: str,
+        reranker_config: dict | None = None,
+        reranker_meta: dict | None = None,
     ) -> None:
         if not self._enabled:
             return
@@ -153,11 +155,17 @@ class DebugCollector:
                     "source": r.get("metadata", {}).get("source", "unknown"),
                     "section": r.get("metadata", {}).get("section", ""),
                     "distance": r.get("distance"),
+                    "similarity": r.get("similarity"),
                 }
                 for r in results
             ],
             "context_added": context_added[:2000] if context_added else "",  # Limit length
             "context_length": len(context_added) if context_added else 0,
+            "reranker": {
+                "enabled": reranker_config.get("enabled") if reranker_config else False,
+                "type": reranker_config.get("type") if reranker_config else None,
+                "meta": reranker_meta,
+            } if reranker_config or reranker_meta else None,
         }
 
     def get_debug_info(self) -> dict | None:

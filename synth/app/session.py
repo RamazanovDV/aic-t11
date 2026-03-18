@@ -61,7 +61,21 @@ class Session:
     session_settings: dict[str, Any] = field(default_factory=lambda: {
         "debug_enabled": True,
         "stream_enabled": True,
-        "rag_settings": {"enabled": False, "index_name": "", "version": None, "top_k": 5}
+        "rag_settings": {
+            "enabled": False,
+            "index_name": "",
+            "version": None,
+            "top_k": 5,
+            "reranker": {
+                "enabled": False,
+                "type": "relative",
+                "threshold": 0.3,
+                "multiplier": 1.5,
+                "std_multiplier": 2.0,
+                "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
+                "top_k_before": 20,
+            }
+        }
     })
     branches: list[Branch] = field(default_factory=list)
     checkpoints: list[Checkpoint] = field(default_factory=list)

@@ -5,6 +5,7 @@ from app.embeddings.embedder import create_embedder, BaseEmbedder
 from app.embeddings.indexer import search_index as index_search
 from app.embeddings.storage import embedding_storage
 from app.embeddings.config import embeddings_config
+from app.embeddings.reranker import apply_reranker
 
 
 class EmbeddingSearch:
@@ -29,7 +30,8 @@ class EmbeddingSearch:
         index_id: str | None = None,
         version: int | None = None,
         top_k: int = 5,
-    ) -> list[dict[str, Any]]:
+        reranker_config: dict[str, Any] | None = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         if index_id:
             index_data = embedding_storage.load_index(index_id)
         elif index_name:
@@ -49,24 +51,36 @@ class EmbeddingSearch:
 
         query_embedding = embedder.embed(query)
 
-        results = index_search(faiss_index, chunks, query_embedding, top_k)
+        actual_top_k = top_k
+        if reranker_config and reranker_config.get("enabled"):
+            actual_top_k = reranker_config.get("top_k_before", top_k * 4)
 
-        return [
+        results_raw = index_search(faiss_index, chunks, query_embedding, actual_top_k)
+
+        results = [
             {
                 "content": chunk.content,
                 "metadata": chunk.metadata,
                 "distance": distance,
+                "similarity": 1 / (1 + distance) if distance is not None else 0,
             }
-            for chunk, distance in results
+            for chunk, distance in results_raw
         ]
+
+        meta = None
+        if reranker_config and reranker_config.get("enabled"):
+            results, meta = apply_reranker(results, reranker_config, top_k, query=query)
+
+        return results, meta
 
     def search_by_id(
         self,
         query: str,
         index_id: str,
         top_k: int = 5,
-    ) -> list[dict[str, Any]]:
-        return self.search(query, index_id=index_id, top_k=top_k)
+        reranker_config: dict[str, Any] | None = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        return self.search(query, index_id=index_id, top_k=top_k, reranker_config=reranker_config)
 
 
 def search(
@@ -76,6 +90,8 @@ def search(
     version: int | None = None,
     top_k: int = 5,
     embedder: BaseEmbedder | None = None,
+    reranker_config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     search_engine = EmbeddingSearch(embedder)
-    return search_engine.search(query, index_name, index_id, version, top_k)
+    results, _ = search_engine.search(query, index_name, index_id, version, top_k, reranker_config)
+    return results

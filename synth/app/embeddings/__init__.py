@@ -6,6 +6,15 @@ from app.embeddings.models import Chunk, EmbeddingIndex
 from app.embeddings.routes import embeddings_bp
 from app.embeddings.search import EmbeddingSearch, search
 from app.embeddings.storage import embedding_storage, EmbeddingStorage
+from app.embeddings.reranker import (
+    BaseReranker,
+    NoOpReranker,
+    RelativeReranker,
+    FixedThresholdReranker,
+    StatisticalReranker,
+    create_reranker,
+    apply_reranker,
+)
 
 __all__ = [
     "create_chunker",
@@ -26,4 +35,11 @@ __all__ = [
     "search",
     "embedding_storage",
     "EmbeddingStorage",
+    "BaseReranker",
+    "NoOpReranker",
+    "RelativeReranker",
+    "FixedThresholdReranker",
+    "StatisticalReranker",
+    "create_reranker",
+    "apply_reranker",
 ]

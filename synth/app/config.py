@@ -354,5 +354,16 @@ class Config:
             return True
         return False
 
+    @property
+    def rag_config(self) -> dict[str, Any]:
+        return self._config.get("rag", {})
+
+    def get_rag_config(self) -> dict[str, Any]:
+        return self.rag_config
+
+    def save_rag_config(self, config: dict[str, Any]) -> None:
+        self._config["rag"] = config
+        self.save()
+
 
 config = Config()

@@ -9,7 +9,7 @@
         <button class="tab-btn" data-tab="summarization" onclick="switchTab('summarization')">Суммаризация</button>
         <button class="tab-btn" data-tab="models" onclick="switchTab('models')">Модели</button>
         <button class="tab-btn" data-tab="mcp" onclick="switchTab('mcp')">MCP Серверы</button>
-        <button class="tab-btn" data-tab="embeddings" onclick="switchTab('embeddings')">Эмбединги</button>
+        <button class="tab-btn" data-tab="embeddings" onclick="switchTab('embeddings')">RAG</button>
         <button class="tab-btn" data-tab="users" onclick="switchTab('users')">Пользователи</button>
         <button class="tab-btn" data-tab="debug" onclick="switchTab('debug')">Отладка</button>
     </div>
@@ -185,11 +185,96 @@
 
     <div class="tab-content" id="tab-embeddings">
         <div class="settings-section">
-            <h3>Эмбединги</h3>
-            <p class="help-text">Создание и управление индексами для семантического поиска.</p>
+            <h3>RAG</h3>
+            <p class="help-text">Настройки Retrieval-Augmented Generation и семантического поиска.</p>
             
             <div class="settings-subsection">
-                <h4>Настройки</h4>
+                <h4>Настройки RAG по умолчанию</h4>
+                <form id="rag-settings-form" onsubmit="saveRagSettings(event)">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rag-enabled">
+                                <input type="checkbox" id="rag-enabled" style="width: auto; margin-right: 8px;">
+                                RAG включён по умолчанию
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rag-default-index">Индекс по умолчанию</label>
+                            <select id="rag-default-index" class="form-input">
+                                <option value="">-- Выберите индекс --</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="rag-top-k">top_k</label>
+                            <input type="number" id="rag-top-k" class="form-input" value="5" min="1" max="20">
+                        </div>
+                    </div>
+                    
+                    <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border);">
+                    
+                    <h4>Reranker</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="reranker-enabled">
+                                <input type="checkbox" id="reranker-enabled" style="width: auto; margin-right: 8px;">
+                                Reranker включён
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label for="reranker-type">Тип</label>
+                            <select id="reranker-type" class="form-input" onchange="updateRerankerParams()">
+                                <option value="relative">Relative (multiplier)</option>
+                                <option value="fixed">Fixed threshold</option>
+                                <option value="statistical">Statistical (std)</option>
+                            </select>
+                            <p class="help-text" id="reranker-type-desc">
+                                <strong>Relative:</strong> distance &lt; best × multiplier<br>
+                                <strong>Fixed:</strong> similarity ≥ threshold (0-1)<br>
+                                <strong>Statistical:</strong> distance &lt; mean + n×std
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div class="form-row" id="reranker-params-relative">
+                        <div class="form-group">
+                            <label for="reranker-multiplier">Multiplier</label>
+                            <input type="number" id="reranker-multiplier" class="form-input" value="1.5" step="0.1" min="1.0" max="5.0">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row" id="reranker-params-fixed" style="display: none;">
+                        <div class="form-group">
+                            <label for="reranker-threshold">Threshold (similarity)</label>
+                            <input type="number" id="reranker-threshold" class="form-input" value="0.3" step="0.05" min="0" max="1">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row" id="reranker-params-statistical" style="display: none;">
+                        <div class="form-group">
+                            <label for="reranker-std-multiplier">Std Multiplier</label>
+                            <input type="number" id="reranker-std-multiplier" class="form-input" value="2.0" step="0.1" min="0.5" max="5.0">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="reranker-top-k-before">top_k_before</label>
+                            <input type="number" id="reranker-top-k-before" class="form-input" value="20" min="5" max="100">
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                    <span id="rag-settings-status" style="margin-left: 10px;"></span>
+                </form>
+            </div>
+            
+            <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border);">
+            
+            <div class="settings-subsection">
+                <h4>Настройки Embeddings</h4>
                 <form id="embed-settings-form" onsubmit="saveEmbedSettings(event)">
                     <div class="form-row">
                         <div class="form-group">
@@ -612,6 +697,7 @@
         loadMCPServers();
         loadEmbeddings();
         loadEmbeddingsConfig();
+        loadRagSettings();
         loadUsers();
         loadDebugConfig();
     }
@@ -752,6 +838,124 @@
             }
         } catch (e) {
             console.error('Failed to load embeddings config:', e);
+        }
+    }
+
+    let ragIndexes = [];
+
+    async function loadRagSettings() {
+        const ragEnabled = document.getElementById('rag-enabled');
+        const ragDefaultIndex = document.getElementById('rag-default-index');
+        const ragTopK = document.getElementById('rag-top-k');
+        const rerankerEnabled = document.getElementById('reranker-enabled');
+        const rerankerType = document.getElementById('reranker-type');
+        
+        const rerankerMultiplier = document.getElementById('reranker-multiplier');
+        const rerankerThreshold = document.getElementById('reranker-threshold');
+        const rerankerStdMultiplier = document.getElementById('reranker-std-multiplier');
+        const rerankerModel = document.getElementById('reranker-model');
+        const rerankerCeThreshold = document.getElementById('reranker-ce-threshold');
+        const rerankerTopKBefore = document.getElementById('reranker-top-k-before');
+        
+        const ragConfig = config.rag || {};
+        const rerankerConfig = ragConfig.reranker || {};
+        
+        ragEnabled.checked = ragConfig.enabled || false;
+        ragDefaultIndex.value = ragConfig.default_index || '';
+        ragTopK.value = ragConfig.top_k || 5;
+        
+        rerankerEnabled.checked = rerankerConfig.enabled || false;
+        rerankerType.value = rerankerConfig.type || 'relative';
+        
+        rerankerMultiplier.value = rerankerConfig.multiplier || 1.5;
+        rerankerThreshold.value = rerankerConfig.threshold || 0.3;
+        rerankerStdMultiplier.value = rerankerConfig.std_multiplier || 2.0;
+        rerankerTopKBefore.value = rerankerConfig.top_k_before || 20;
+        
+        updateRerankerParams();
+        
+        try {
+            const response = await fetch('/api/embeddings/list', { headers: getAuthHeaders() });
+            if (response.ok) {
+                const indexes = await response.json();
+                ragIndexes = indexes || [];
+                ragDefaultIndex.innerHTML = '<option value="">-- Выберите индекс --</option>';
+                for (const idx of ragIndexes) {
+                    const option = document.createElement('option');
+                    option.value = idx.name;
+                    option.textContent = idx.name + (idx.version ? ` (v${idx.version})` : '');
+                    ragDefaultIndex.appendChild(option);
+                }
+                if (ragConfig.default_index) {
+                    ragDefaultIndex.value = ragConfig.default_index;
+                }
+            }
+        } catch (e) {
+            console.error('Failed to load indexes:', e);
+        }
+    }
+
+    function updateRerankerParams() {
+        const type = document.getElementById('reranker-type').value;
+        document.getElementById('reranker-params-relative').style.display = type === 'relative' ? 'flex' : 'none';
+        document.getElementById('reranker-params-fixed').style.display = type === 'fixed' ? 'flex' : 'none';
+        document.getElementById('reranker-params-statistical').style.display = type === 'statistical' ? 'flex' : 'none';
+    }
+
+    async function saveRagSettings(event) {
+        event.preventDefault();
+        
+        const status = document.getElementById('rag-settings-status');
+        status.textContent = 'Сохранение...';
+        status.style.color = 'var(--text-primary)';
+        
+        const ragEnabled = document.getElementById('rag-enabled').checked;
+        const ragDefaultIndex = document.getElementById('rag-default-index').value;
+        const ragTopK = parseInt(document.getElementById('rag-top-k').value);
+        
+        const rerankerEnabled = document.getElementById('reranker-enabled').checked;
+        const rerankerType = document.getElementById('reranker-type').value;
+        
+        const rerankerMultiplier = parseFloat(document.getElementById('reranker-multiplier').value);
+        const rerankerThreshold = parseFloat(document.getElementById('reranker-threshold').value);
+        const rerankerStdMultiplier = parseFloat(document.getElementById('reranker-std-multiplier').value);
+        const rerankerTopKBefore = parseInt(document.getElementById('reranker-top-k-before').value);
+        
+        const ragConfig = {
+            enabled: ragEnabled,
+            default_index: ragDefaultIndex,
+            top_k: ragTopK,
+            reranker: {
+                enabled: rerankerEnabled,
+                type: rerankerType,
+                threshold: rerankerThreshold,
+                multiplier: rerankerMultiplier,
+                std_multiplier: rerankerStdMultiplier,
+                top_k_before: rerankerTopKBefore,
+            }
+        };
+        
+        try {
+            const response = await fetch('/admin/config', {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rag: ragConfig })
+            });
+            
+            if (response.ok) {
+                status.textContent = 'Сохранено!';
+                status.style.color = '#4CAF50';
+                config.rag = ragConfig;
+                setTimeout(() => status.textContent = '', 3000);
+            } else {
+                const data = await response.json();
+                status.textContent = 'Ошибка: ' + (data.error || 'Unknown error');
+                status.style.color = '#f44336';
+            }
+        } catch (e) {
+            console.error('Failed to save rag config:', e);
+            status.textContent = 'Ошибка: ' + e.message;
+            status.style.color = '#f44336';
         }
     }
 

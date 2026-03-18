@@ -422,7 +422,16 @@ def get_rag_settings(session_id: str):
                 "enabled": False,
                 "index_name": "",
                 "version": None,
-                "top_k": 5
+                "top_k": 5,
+                "reranker": {
+                    "enabled": False,
+                    "type": "relative",
+                    "threshold": 0.3,
+                    "multiplier": 1.5,
+                    "std_multiplier": 2.0,
+                    "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
+                    "top_k_before": 20,
+                }
             })
         response.raise_for_status()
         return jsonify(response.json())
