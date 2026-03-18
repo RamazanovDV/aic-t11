@@ -250,6 +250,51 @@
                     <label for="rag-top-k">Количество результатов (top_k):</label>
                     <input type="number" id="rag-top-k" class="form-input" value="5" min="1" max="20">
                 </div>
+                
+                <hr style="margin: 1rem 0; border: none; border-top: 1px solid var(--border);">
+                
+                <div class="form-group">
+                    <label for="rag-reranker-enable">
+                        <input type="checkbox" id="rag-reranker-enable" onchange="toggleRerankerOptions()">
+                        Включить Reranker
+                    </label>
+                </div>
+                
+                <div id="rag-reranker-options" style="display: none; margin-top: 0.5rem; padding-left: 1rem;">
+                    <div class="form-group">
+                        <label for="rag-reranker-type">Тип:</label>
+                        <select id="rag-reranker-type" class="form-input" onchange="toggleRerankerParams()">
+                            <option value="relative">Relative (multiplier)</option>
+                            <option value="fixed">Fixed threshold</option>
+                            <option value="statistical">Statistical (std)</option>
+                        </select>
+                        <p class="help-text" style="font-size: 0.85rem;">
+                            <strong>Relative:</strong> distance &lt; best × multiplier<br>
+                            <strong>Fixed:</strong> similarity ≥ threshold<br>
+                            <strong>Statistical:</strong> distance &lt; mean + n×std
+                        </p>
+                    </div>
+                    
+                    <div id="rag-reranker-params-relative" class="form-group">
+                        <label for="rag-reranker-multiplier">Multiplier:</label>
+                        <input type="number" id="rag-reranker-multiplier" class="form-input" value="1.5" step="0.1" min="1.0" max="5.0">
+                    </div>
+                    
+                    <div id="rag-reranker-params-fixed" class="form-group" style="display: none;">
+                        <label for="rag-reranker-threshold">Threshold (similarity):</label>
+                        <input type="number" id="rag-reranker-threshold" class="form-input" value="0.3" step="0.05" min="0" max="1">
+                    </div>
+                    
+                    <div id="rag-reranker-params-statistical" class="form-group" style="display: none;">
+                        <label for="rag-reranker-std-multiplier">Std Multiplier:</label>
+                        <input type="number" id="rag-reranker-std-multiplier" class="form-input" value="2.0" step="0.1" min="0.5" max="5.0">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="rag-reranker-top-k-before">top_k_before:</label>
+                        <input type="number" id="rag-reranker-top-k-before" class="form-input" value="20" min="5" max="100">
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -3224,20 +3269,64 @@
                     enabled: savedSettings.enabled || false,
                     indexName: savedSettings.index_name || '',
                     version: savedSettings.version,
-                    topK: savedSettings.top_k || 5
+                    topK: savedSettings.top_k || 5,
+                    reranker: savedSettings.reranker || {
+                        enabled: false,
+                        type: 'relative',
+                        threshold: 0.3,
+                        multiplier: 1.5,
+                        std_multiplier: 2.0,
+                        top_k_before: 20
+                    }
                 };
             } else {
-                currentRagSettings = { enabled: false, indexName: '', version: null, topK: 5 };
+                currentRagSettings = { 
+                    enabled: false, 
+                    indexName: '', 
+                    version: null, 
+                    topK: 5,
+                    reranker: {
+                        enabled: false,
+                        type: 'relative',
+                        threshold: 0.3,
+                        multiplier: 1.5,
+                        std_multiplier: 2.0,
+                        top_k_before: 20
+                    }
+                };
             }
         } catch (err) {
             console.error('Failed to load rag settings:', err);
-            currentRagSettings = { enabled: false, indexName: '', version: null, topK: 5 };
+            currentRagSettings = { 
+                enabled: false, 
+                indexName: '', 
+                version: null, 
+                topK: 5,
+                reranker: {
+                    enabled: false,
+                    type: 'relative',
+                    threshold: 0.3,
+                    multiplier: 1.5,
+                    std_multiplier: 2.0,
+                    top_k_before: 20
+                }
+            };
         }
         
         document.getElementById('rag-enable').checked = currentRagSettings.enabled;
         document.getElementById('rag-top-k').value = currentRagSettings.topK;
         
+        // Load reranker settings
+        const reranker = currentRagSettings.reranker || {};
+        document.getElementById('rag-reranker-enable').checked = reranker.enabled || false;
+        document.getElementById('rag-reranker-type').value = reranker.type || 'relative';
+        document.getElementById('rag-reranker-multiplier').value = reranker.multiplier || 1.5;
+        document.getElementById('rag-reranker-threshold').value = reranker.threshold || 0.3;
+        document.getElementById('rag-reranker-std-multiplier').value = reranker.std_multiplier || 2.0;
+        document.getElementById('rag-reranker-top-k-before').value = reranker.top_k_before || 20;
+        
         toggleRagOptions();
+        toggleRerankerParams();
         
         const indexSelect = document.getElementById('rag-index');
         indexSelect.innerHTML = '<option value="">Загрузка...</option>';
@@ -3304,6 +3393,18 @@
         document.getElementById('rag-options').style.display = enabled ? 'block' : 'none';
     }
 
+    function toggleRerankerOptions() {
+        const enabled = document.getElementById('rag-reranker-enable').checked;
+        document.getElementById('rag-reranker-options').style.display = enabled ? 'block' : 'none';
+    }
+
+    function toggleRerankerParams() {
+        const type = document.getElementById('rag-reranker-type').value;
+        document.getElementById('rag-reranker-params-relative').style.display = type === 'relative' ? 'block' : 'none';
+        document.getElementById('rag-reranker-params-fixed').style.display = type === 'fixed' ? 'block' : 'none';
+        document.getElementById('rag-reranker-params-statistical').style.display = type === 'statistical' ? 'block' : 'none';
+    }
+
     function closeRagModal() {
         document.getElementById('rag-modal').style.display = 'none';
     }
@@ -3313,6 +3414,13 @@
         const indexName = document.getElementById('rag-index').value;
         const version = document.getElementById('rag-version').value ? parseInt(document.getElementById('rag-version').value) : null;
         const topK = parseInt(document.getElementById('rag-top-k').value) || 5;
+        
+        const rerankerEnabled = document.getElementById('rag-reranker-enable').checked;
+        const rerankerType = document.getElementById('rag-reranker-type').value;
+        const rerankerMultiplier = parseFloat(document.getElementById('rag-reranker-multiplier').value);
+        const rerankerThreshold = parseFloat(document.getElementById('rag-reranker-threshold').value);
+        const rerankerStdMultiplier = parseFloat(document.getElementById('rag-reranker-std-multiplier').value);
+        const rerankerTopKBefore = parseInt(document.getElementById('rag-reranker-top-k-before').value);
         
         const sessionId = panels[currentRagPanelIndex] ? panels[currentRagPanelIndex].sessionId : 'default';
         
@@ -3325,7 +3433,15 @@
                 enabled: enabled,
                 index_name: indexName,
                 version: version,
-                top_k: topK
+                top_k: topK,
+                reranker: {
+                    enabled: rerankerEnabled,
+                    type: rerankerType,
+                    threshold: rerankerThreshold,
+                    multiplier: rerankerMultiplier,
+                    std_multiplier: rerankerStdMultiplier,
+                    top_k_before: rerankerTopKBefore
+                }
             })
         })
         .then(r => r.json())
@@ -3341,7 +3457,15 @@
             enabled: enabled,
             indexName: indexName,
             version: version,
-            topK: topK
+            topK: topK,
+            reranker: {
+                enabled: rerankerEnabled,
+                type: rerankerType,
+                threshold: rerankerThreshold,
+                multiplier: rerankerMultiplier,
+                std_multiplier: rerankerStdMultiplier,
+                top_k_before: rerankerTopKBefore
+            }
         };
         
         closeRagModal();

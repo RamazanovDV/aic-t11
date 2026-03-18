@@ -2686,7 +2686,6 @@ def get_rag_settings(session_id: str):
             "threshold": 0.3,
             "multiplier": 1.5,
             "std_multiplier": 2.0,
-            "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
             "top_k_before": 20,
         }
     })
@@ -2699,7 +2698,6 @@ def get_rag_settings(session_id: str):
             "threshold": 0.3,
             "multiplier": 1.5,
             "std_multiplier": 2.0,
-            "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
             "top_k_before": 20,
         }
 
@@ -2735,7 +2733,6 @@ def set_rag_settings(session_id: str):
                 "threshold": 0.3,
                 "multiplier": 1.5,
                 "std_multiplier": 2.0,
-                "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
                 "top_k_before": 20,
             }
         }
@@ -2763,7 +2760,6 @@ def set_rag_settings(session_id: str):
                 "threshold": 0.3,
                 "multiplier": 1.5,
                 "std_multiplier": 2.0,
-                "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
                 "top_k_before": 20,
             }
         
@@ -2778,8 +2774,6 @@ def set_rag_settings(session_id: str):
             r["multiplier"] = float(reranker_data["multiplier"])
         if "std_multiplier" in reranker_data:
             r["std_multiplier"] = float(reranker_data["std_multiplier"])
-        if "model" in reranker_data:
-            r["model"] = reranker_data["model"]
         if "top_k_before" in reranker_data:
             r["top_k_before"] = int(reranker_data["top_k_before"])
 
