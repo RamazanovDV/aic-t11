@@ -359,7 +359,22 @@ class Config:
         return self._config.get("rag", {})
 
     def get_rag_config(self) -> dict[str, Any]:
-        return self.rag_config
+        rag = self._config.get("rag", {})
+        return {
+            "enabled": rag.get("enabled", False),
+            "default_index": rag.get("default_index", ""),
+            "top_k": rag.get("top_k", 5),
+            "reranker": rag.get("reranker", {
+                "enabled": False,
+                "type": "relative",
+                "threshold": 0.3,
+                "multiplier": 1.5,
+                "std_multiplier": 2.0,
+                "top_k_before": 20,
+            }),
+            "say_unknown_enabled": rag.get("say_unknown_enabled", False),
+            "say_unknown_threshold": rag.get("say_unknown_threshold", 0.3),
+        }
 
     def save_rag_config(self, config: dict[str, Any]) -> None:
         self._config["rag"] = config

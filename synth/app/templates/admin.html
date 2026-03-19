@@ -266,6 +266,22 @@
                         </div>
                     </div>
                     
+                    <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border);">
+                    
+                    <h4>Say Unknown</h4>
+                    <div class="form-group">
+                        <label for="say-unknown-enabled">
+                            <input type="checkbox" id="say-unknown-enabled" style="width: auto; margin-right: 8px;">
+                            Говорить "не знаю" при низкой релевантности
+                        </label>
+                    </div>
+                    <div class="form-row" id="say-unknown-params" style="margin-top: 0.5rem;">
+                        <div class="form-group">
+                            <label for="say-unknown-threshold">Порог (similarity)</label>
+                            <input type="number" id="say-unknown-threshold" class="form-input" value="0.3" step="0.05" min="0" max="1">
+                        </div>
+                    </div>
+                    
                     <button type="submit" class="btn btn-primary">Сохранить</button>
                     <span id="rag-settings-status" style="margin-left: 10px;"></span>
                 </form>
@@ -857,6 +873,9 @@
         const rerankerCeThreshold = document.getElementById('reranker-ce-threshold');
         const rerankerTopKBefore = document.getElementById('reranker-top-k-before');
         
+        const sayUnknownEnabled = document.getElementById('say-unknown-enabled');
+        const sayUnknownThreshold = document.getElementById('say-unknown-threshold');
+        
         const ragConfig = config.rag || {};
         const rerankerConfig = ragConfig.reranker || {};
         
@@ -871,6 +890,9 @@
         rerankerThreshold.value = rerankerConfig.threshold || 0.3;
         rerankerStdMultiplier.value = rerankerConfig.std_multiplier || 2.0;
         rerankerTopKBefore.value = rerankerConfig.top_k_before || 20;
+        
+        sayUnknownEnabled.checked = ragConfig.say_unknown_enabled || false;
+        sayUnknownThreshold.value = ragConfig.say_unknown_threshold || 0.3;
         
         updateRerankerParams();
         
@@ -921,6 +943,9 @@
         const rerankerStdMultiplier = parseFloat(document.getElementById('reranker-std-multiplier').value);
         const rerankerTopKBefore = parseInt(document.getElementById('reranker-top-k-before').value);
         
+        const sayUnknownEnabled = document.getElementById('say-unknown-enabled').checked;
+        const sayUnknownThreshold = parseFloat(document.getElementById('say-unknown-threshold').value);
+        
         const ragConfig = {
             enabled: ragEnabled,
             default_index: ragDefaultIndex,
@@ -932,7 +957,9 @@
                 multiplier: rerankerMultiplier,
                 std_multiplier: rerankerStdMultiplier,
                 top_k_before: rerankerTopKBefore,
-            }
+            },
+            say_unknown_enabled: sayUnknownEnabled,
+            say_unknown_threshold: sayUnknownThreshold,
         };
         
         try {

@@ -74,7 +74,9 @@ class Session:
                 "std_multiplier": 2.0,
                 "model": "cross-encoder/ms-marco-MiniLM-L-6G-v2",
                 "top_k_before": 20,
-            }
+            },
+            "say_unknown_enabled": False,
+            "say_unknown_threshold": 0.3,
         }
     })
     branches: list[Branch] = field(default_factory=list)

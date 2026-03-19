@@ -140,6 +140,9 @@ class DebugCollector:
         context_added: str,
         reranker_config: dict | None = None,
         reranker_meta: dict | None = None,
+        say_unknown_triggered: bool = False,
+        max_similarity: float = 0.0,
+        say_unknown_threshold: float = 0.3,
     ) -> None:
         if not self._enabled:
             return
@@ -167,6 +170,9 @@ class DebugCollector:
                 "type": reranker_config.get("type") if reranker_config else None,
                 "meta": reranker_meta,
             } if reranker_config or reranker_meta else None,
+            "say_unknown_triggered": say_unknown_triggered,
+            "max_similarity": max_similarity,
+            "threshold": say_unknown_threshold,
         }
 
     def get_debug_info(self) -> dict | None:

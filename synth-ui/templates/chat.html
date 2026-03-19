@@ -295,6 +295,20 @@
                         <input type="number" id="rag-reranker-top-k-before" class="form-input" value="20" min="5" max="100">
                     </div>
                 </div>
+                
+                <hr style="margin: 1rem 0; border: none; border-top: 1px solid var(--border);">
+                
+                <div class="form-group">
+                    <label for="rag-say-unknown-enable">
+                        <input type="checkbox" id="rag-say-unknown-enable">
+                        Говорить "не знаю" при низкой релевантности
+                    </label>
+                </div>
+                
+                <div class="form-group" id="rag-say-unknown-params" style="margin-top: 0.5rem; padding-left: 1rem;">
+                    <label for="rag-say-unknown-threshold">Порог (similarity):</label>
+                    <input type="number" id="rag-say-unknown-threshold" class="form-input" value="0.3" step="0.05" min="0" max="1">
+                </div>
             </div>
         </div>
 
@@ -3301,7 +3315,9 @@
                         multiplier: 1.5,
                         std_multiplier: 2.0,
                         top_k_before: 20
-                    }
+                    },
+                    say_unknown_enabled: savedSettings.say_unknown_enabled || false,
+                    say_unknown_threshold: savedSettings.say_unknown_threshold || 0.3,
                 };
             } else {
                 currentRagSettings = { 
@@ -3316,7 +3332,9 @@
                         multiplier: 1.5,
                         std_multiplier: 2.0,
                         top_k_before: 20
-                    }
+                    },
+                    say_unknown_enabled: false,
+                    say_unknown_threshold: 0.3,
                 };
             }
         } catch (err) {
@@ -3333,7 +3351,9 @@
                     multiplier: 1.5,
                     std_multiplier: 2.0,
                     top_k_before: 20
-                }
+                },
+                say_unknown_enabled: false,
+                say_unknown_threshold: 0.3,
             };
         }
         
@@ -3348,6 +3368,10 @@
         document.getElementById('rag-reranker-threshold').value = reranker.threshold || 0.3;
         document.getElementById('rag-reranker-std-multiplier').value = reranker.std_multiplier || 2.0;
         document.getElementById('rag-reranker-top-k-before').value = reranker.top_k_before || 20;
+        
+        // Load say_unknown settings
+        document.getElementById('rag-say-unknown-enable').checked = currentRagSettings.say_unknown_enabled || false;
+        document.getElementById('rag-say-unknown-threshold').value = currentRagSettings.say_unknown_threshold || 0.3;
         
         toggleRagOptions();
         toggleRerankerParams();
@@ -3446,6 +3470,9 @@
         const rerankerStdMultiplier = parseFloat(document.getElementById('rag-reranker-std-multiplier').value);
         const rerankerTopKBefore = parseInt(document.getElementById('rag-reranker-top-k-before').value);
         
+        const sayUnknownEnabled = document.getElementById('rag-say-unknown-enable').checked;
+        const sayUnknownThreshold = parseFloat(document.getElementById('rag-say-unknown-threshold').value);
+        
         const sessionId = panels[currentRagPanelIndex] ? panels[currentRagPanelIndex].sessionId : 'default';
         
         // Save to backend
@@ -3465,7 +3492,9 @@
                     multiplier: rerankerMultiplier,
                     std_multiplier: rerankerStdMultiplier,
                     top_k_before: rerankerTopKBefore
-                }
+                },
+                say_unknown_enabled: sayUnknownEnabled,
+                say_unknown_threshold: sayUnknownThreshold,
             })
         })
         .then(r => r.json())

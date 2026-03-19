@@ -1244,40 +1244,8 @@ def run_schedule(project_name, schedule_id):
 @api_bp.route("/chat", methods=["POST"])
 @require_user
 def chat():
-    data = request.get_json()
-    if not data or "message" not in data:
-        return jsonify({"error": "Missing 'message' field"}), 400
-
-    user_message = data["message"]
-    provider_name = data.get("provider")
-    model = data.get("model")
-    debug_mode = data.get("debug", False)  # Deprecated - for backward compat
-    source_type = data.get("source", "web")
-    mcp_servers = data.get("mcp_servers", [])
-    mcp_calls = []
-
-    current_user = get_current_user()
-    if current_user:
-        username = current_user.username
-    else:
-        username = data.get("username", "unknown")
-    source = f"{username} | {source_type}"
+    # ... existing code above ...
     
-    if not provider_name:
-        provider_name = config.default_provider
-    
-    provider_config = config.get_provider_config(provider_name)
-    if not provider_config:
-        return jsonify({"error": f"Unknown provider: {provider_name}"}), 400
-
-    provider_config = provider_config.copy()
-    if model:
-        provider_config["model"] = model
-    else:
-        default_model = config.get_default_model(provider_name)
-        if default_model:
-            provider_config["model"] = default_model
-
     if "timeout" not in provider_config:
         provider_config["timeout"] = config.timeout
 
@@ -1287,7 +1255,7 @@ def chat():
         return jsonify({"error": str(e)}), 400
 
     session_id = get_session_id()
-    session = session_manager.get_session(session_id)
+    session = session_manager.get_session(session_id, reload=True)
 
     # RAG parameters - use request params or fall back to session settings
     saved_rag = session.session_settings.get("rag_settings", {})
@@ -1296,6 +1264,11 @@ def chat():
     rag_version = data.get("rag_version") if data.get("rag_version") is not None else saved_rag.get("version")
     rag_top_k = data.get("rag_top_k") if data.get("rag_top_k") is not None else saved_rag.get("top_k", 5)
     rag_reranker = data.get("rag_reranker") if data.get("rag_reranker") else saved_rag.get("reranker", {})
+    
+    # Say unknown settings - session or global
+    global_rag_config = config.get_rag_config()
+    say_unknown_enabled = saved_rag.get("say_unknown_enabled", global_rag_config.get("say_unknown_enabled", False))
+    say_unknown_threshold = saved_rag.get("say_unknown_threshold", global_rag_config.get("say_unknown_threshold", 0.3))
 
     debug_collector = DebugCollector.from_session(session)
 
@@ -1359,7 +1332,24 @@ def chat():
                 top_k=rag_top_k,
                 reranker_config=reranker_config,
             )
-            if results:
+            
+            # Calculate max similarity for say_unknown check
+            max_similarity = max((r.get("similarity", 0) for r in results), default=0) if results else 0
+            
+            # Check if we should trigger "say unknown" behavior
+            say_unknown_triggered = False
+            if say_unknown_enabled and results and max_similarity < say_unknown_threshold:
+                say_unknown_triggered = True
+                # Load RAG_UNKNOWN.md context instead of regular RAG context
+                unknown_context = config.context_manager.get_context_file("RAG_UNKNOWN.md")
+                if unknown_context:
+                    rag_context = unknown_context
+                    debug("RAG", f"say_unknown triggered: max_similarity={max_similarity:.3f}, threshold={say_unknown_threshold}, using RAG_UNKNOWN.md")
+                else:
+                    rag_context = ""
+                    debug("RAG", f"say_unknown triggered but RAG_UNKNOWN.md not found")
+            elif results:
+                # Normal RAG context building
                 rag_context = "\n\n## Relevant Context\n"
                 for i, result in enumerate(results, 1):
                     metadata = result.get("metadata", {})
@@ -1381,9 +1371,12 @@ def chat():
                     version=rag_version,
                     top_k=rag_top_k,
                     results=results or [],
-                    context_added=rag_context,
+                    context_added=rag_context if rag_context else "",
                     reranker_config=reranker_config,
                     reranker_meta=reranker_meta,
+                    say_unknown_triggered=say_unknown_triggered,
+                    max_similarity=max_similarity,
+                    say_unknown_threshold=say_unknown_threshold,
                 )
         except Exception as e:
             warning("RAG", f"RAG search error in chat: {e}")
@@ -1574,7 +1567,7 @@ def chat_stream():
         return jsonify({"error": str(e)}), 400
 
     session_id = get_session_id()
-    session = session_manager.get_session(session_id)
+    session = session_manager.get_session(session_id, reload=True)
 
     # RAG parameters - use request params or fall back to session settings
     saved_rag = session.session_settings.get("rag_settings", {})
@@ -1583,6 +1576,11 @@ def chat_stream():
     rag_version = data.get("rag_version") if data.get("rag_version") is not None else saved_rag.get("version")
     rag_top_k = data.get("rag_top_k") if data.get("rag_top_k") is not None else saved_rag.get("top_k", 5)
     rag_reranker = data.get("rag_reranker") if data.get("rag_reranker") else saved_rag.get("reranker", {})
+    
+    # Say unknown settings - session or global
+    global_rag_config = config.get_rag_config()
+    say_unknown_enabled = saved_rag.get("say_unknown_enabled", global_rag_config.get("say_unknown_enabled", False))
+    say_unknown_threshold = saved_rag.get("say_unknown_threshold", global_rag_config.get("say_unknown_threshold", 0.3))
 
     debug_collector = DebugCollector.from_session(session)
 
@@ -1675,7 +1673,24 @@ def chat_stream():
                     top_k=rag_top_k,
                     reranker_config=reranker_config,
                 )
-                if results:
+                
+                # Calculate max similarity for say_unknown check
+                max_similarity = max((r.get("similarity", 0) for r in results), default=0) if results else 0
+                
+                # Check if we should trigger "say unknown" behavior
+                say_unknown_triggered = False
+                if say_unknown_enabled and results and max_similarity < say_unknown_threshold:
+                    say_unknown_triggered = True
+                    # Load RAG_UNKNOWN.md context instead of regular RAG context
+                    unknown_context = config.context_manager.get_context_file("RAG_UNKNOWN.md")
+                    if unknown_context:
+                        rag_context = unknown_context
+                        debug("RAG", f"say_unknown triggered: max_similarity={max_similarity:.3f}, threshold={say_unknown_threshold}, using RAG_UNKNOWN.md")
+                    else:
+                        rag_context = ""
+                        debug("RAG", f"say_unknown triggered but RAG_UNKNOWN.md not found")
+                elif results:
+                    # Normal RAG context building
                     rag_context = "\n\n## Relevant Context\n"
                     for i, result in enumerate(results, 1):
                         metadata = result.get("metadata", {})
@@ -1697,9 +1712,12 @@ def chat_stream():
                         version=rag_version,
                         top_k=rag_top_k,
                         results=results or [],
-                        context_added=rag_context,
+                        context_added=rag_context if rag_context else "",
                         reranker_config=reranker_config,
                         reranker_meta=reranker_meta,
+                        say_unknown_triggered=say_unknown_triggered,
+                        max_similarity=max_similarity,
+                        say_unknown_threshold=say_unknown_threshold,
                     )
             except Exception as e:
                 warning("RAG", f"RAG search error in stream: {e}")
@@ -2687,7 +2705,9 @@ def get_rag_settings(session_id: str):
             "multiplier": 1.5,
             "std_multiplier": 2.0,
             "top_k_before": 20,
-        }
+        },
+        "say_unknown_enabled": False,
+        "say_unknown_threshold": 0.3,
     })
 
     reranker = rag_settings.get("reranker", {})
@@ -2707,6 +2727,8 @@ def get_rag_settings(session_id: str):
         "version": rag_settings.get("version"),
         "top_k": rag_settings.get("top_k", 5),
         "reranker": reranker,
+        "say_unknown_enabled": rag_settings.get("say_unknown_enabled", False),
+        "say_unknown_threshold": rag_settings.get("say_unknown_threshold", 0.3),
     })
 
 
@@ -2734,7 +2756,9 @@ def set_rag_settings(session_id: str):
                 "multiplier": 1.5,
                 "std_multiplier": 2.0,
                 "top_k_before": 20,
-            }
+            },
+            "say_unknown_enabled": False,
+            "say_unknown_threshold": 0.3,
         }
 
     if "enabled" in data:
@@ -2777,9 +2801,28 @@ def set_rag_settings(session_id: str):
         if "top_k_before" in reranker_data:
             r["top_k_before"] = int(reranker_data["top_k_before"])
 
+    if "say_unknown_enabled" in data:
+        if "say_unknown_enabled" not in session.session_settings["rag_settings"]:
+            session.session_settings["rag_settings"]["say_unknown_enabled"] = False
+        session.session_settings["rag_settings"]["say_unknown_enabled"] = bool(data["say_unknown_enabled"])
+    if "say_unknown_threshold" in data:
+        if "say_unknown_threshold" not in session.session_settings["rag_settings"]:
+            session.session_settings["rag_settings"]["say_unknown_threshold"] = 0.3
+        session.session_settings["rag_settings"]["say_unknown_threshold"] = float(data["say_unknown_threshold"])
+    else:
+        # Ensure default value exists
+        if "say_unknown_threshold" not in session.session_settings["rag_settings"]:
+            session.session_settings["rag_settings"]["say_unknown_threshold"] = 0.3
+
     session_manager.save_session(session_id)
 
-    return jsonify({"status": "saved"})
+    return jsonify({
+        "status": "saved",
+        "debug": {
+            "say_unknown_enabled": session.session_settings["rag_settings"].get("say_unknown_enabled"),
+            "say_unknown_threshold": session.session_settings["rag_settings"].get("say_unknown_threshold"),
+        }
+    })
 
 
 @api_bp.route("/sessions/<session_id>/tsm-settings", methods=["GET"])

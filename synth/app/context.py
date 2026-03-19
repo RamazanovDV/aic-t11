@@ -16,6 +16,7 @@ SYSTEM_CONTEXT_FILES = [
     "INTERVIEW.md",
     "NEW_PROJECT.md",
     "SCHEDULER.md",
+    "RAG_UNKNOWN.md",
 ]
 
 DEFAULT_CONTEXT_FILES = [
