@@ -59,6 +59,7 @@ class EmbeddingSearch:
 
         results = [
             {
+                "id": chunk.id,
                 "content": chunk.content,
                 "metadata": chunk.metadata,
                 "distance": distance,

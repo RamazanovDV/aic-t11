@@ -151,6 +151,7 @@ class DebugCollector:
             "results_count": len(results),
             "results": [
                 {
+                    "chunk_id": r.get("id"),
                     "content": r.get("content", "")[:500],  # Limit content length
                     "source": r.get("metadata", {}).get("source", "unknown"),
                     "section": r.get("metadata", {}).get("section", ""),
