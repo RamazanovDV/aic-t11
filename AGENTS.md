@@ -5,11 +5,74 @@ Synth is a multi-user AI agent with web interface and CLI. Backend is Flask (por
 
 ## Project Structure
 ```
-synth/      # Flask API (port 5000): routes.py, session.py, storage.py, auth.py, config.py, models.py, tsm.py
+synth/      # Flask API (port 5000)
 synth-ui/   # Flask + htmx web UI (port 5001)
 synth-cli/  # Click-based CLI
 context/    # Markdown files for system prompt
 data/       # Session data (gitignored)
+
+synth/app/  # Main backend modules
+├── routes.py           # HTTP endpoints (/chat, /chat/stream, sessions, etc.)
+├── session.py          # Session, SessionManager
+├── storage.py          # FileStorage
+├── tsm.py             # Orchestrator mode (process_orchestrator_response)
+├── orchestration.py    # NEW: OrchestrationController
+├── context_builder.py  # NEW: ContextBuilder (prompts + RAG + MCP)
+├── handlers/          # NEW: Request handlers
+│   ├── base.py
+│   ├── chat_handler.py
+│   ├── stream_handler.py
+│   └── session_handler.py
+├── llm/
+│   ├── base.py        # BaseProvider, LLMResponse, LLMChunk, Message
+│   ├── providers.py   # OpenAI, Anthropic, Ollama, etc.
+│   └── client.py      # LLMClient, PromptBuilder
+├── debug.py           # DebugCollector
+├── config.py          # Config
+└── models.py          # User, etc.
+
+docs/                  # Documentation with architecture diagrams
+```
+
+## Architecture
+
+См. [docs/README.md](../docs/README.md) для полных схем обработки сообщений:
+
+- Non-Stream режим: `POST /chat` → validate → provider.chat() → save → JSON response
+- Stream режим: `GET /chat/stream` → SSE chunks → tool handling
+- Orchestrator режим: итерации с subagents, progress_queue events
+
+```
+┌─────────────────────────────────────────────┐
+│ RequestHandler (routes.py)                  │
+└────────────────────┬────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────┐
+│ ContextBuilder (context_builder.py)          │
+│   build_system_prompt, build_rag_context,   │
+│   build_mcp_tools, build_messages           │
+└────────────────────┬────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────┐
+│ OrchestrationController (orchestration.py)  │
+│   run_simple, run_simple_stream,             │
+│   run_orchestrator, save_response           │
+└────────────────────┬────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────┐
+│ LLMProvider (llm/providers.py)               │
+│   chat(), stream_chat()                     │
+└────────────────────┬────────────────────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────┐
+│ SessionManager (session.py)                  │
+│   save_session, get_session, branches,      │
+│   checkpoints, add_assistant_message        │
+└─────────────────────────────────────────────┘
 ```
 
 ## Build/Lint/Test Commands

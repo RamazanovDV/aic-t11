@@ -8,7 +8,6 @@ import requests
 from flask import Blueprint, jsonify, render_template, request, Response
 
 from app.config import config
-from app.context import get_system_prompt
 from app.llm import ProviderFactory
 from app.llm.base import Message
 from app.llm.providers import ContextLengthExceededError
@@ -25,6 +24,8 @@ from app.auth import get_auth_provider, require_user, require_admin, get_current
 from app.mcp import mcp_available, mcp_config
 from app.logger import debug, info, warning, error
 from app.debug import DebugCollector
+from app.context_builder import ContextBuilder
+from app.orchestration import OrchestrationController
 
 _mcp_event_loop: asyncio.AbstractEventLoop | None = None
 
@@ -112,104 +113,6 @@ def should_show_interview(session, user_id: str | None = None) -> bool:
         return not user.interview_completed
     
     return False
-
-
-def get_profile_prompt(session, user_id: str | None = None) -> str:
-    """Сформировать промпт с данными профиля пользователя"""
-    user = None
-    
-    if session and session.owner_id:
-        from app import storage as app_storage
-        user = app_storage.storage.load_user(session.owner_id)
-    
-    if not user and user_id:
-        from app import storage as app_storage
-        user = app_storage.storage.load_user(user_id)
-    
-    if not user:
-        try:
-            user = get_current_user()
-        except Exception:
-            user = None
-    
-    if not user:
-        return ""
-    
-    parts = []
-    if user.username:
-        parts.append(f"Имя: {user.username}")
-    if user.team_role:
-        parts.append(f"Роль: {user.team_role}")
-    if user.notes:
-        notes_without_interview = user.notes.split("[ИНТЕРВЬЮ]")[0].strip()
-        if notes_without_interview:
-            parts.append(f"Отметки: {notes_without_interview}")
-    
-    if parts:
-        return f"\n\n[ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ]\n" + "\n".join(parts) + "\n"
-    
-    return ""
-
-
-def get_project_prompt(session) -> str:
-    """Сформировать промпт с данными проекта"""
-    project_name = session.status.get("project")
-    
-    if not project_name:
-        projects_list = project_manager.project_manager.get_projects_list()
-        projects_text = ", ".join(projects_list) if projects_list else "пока нет проектов"
-        
-        new_project_prompt = config.get_context_file("NEW_PROJECT.md") or "Если пользователь хочет начать новый проект - уточни название, укажи полученное название в поле project."
-        
-        return (
-            f"\n\n[ПРОЕКТ]\n"
-            f"Выясни у пользователя над каким проектом он хочет поработать.\n"
-            f"Существующие проекты: {projects_text}\n"
-            f"{new_project_prompt}\n"
-        )
-    
-    if not project_manager.project_manager.project_exists(project_name):
-        project_manager.project_manager.create_project(project_name)
-    
-    project_info = project_manager.project_manager.get_project_info(project_name)
-    current_task = project_manager.project_manager.get_current_task(project_name)
-    invariants = project_manager.project_manager.get_invariants(project_name)
-    
-    result = f"\n\n[ПРОЕКТ: {project_name}]\n"
-    
-    if project_info:
-        result += f"{project_info}\n"
-    else:
-        result += "(Описание проекта отсутствует)\n"
-    
-    if current_task:
-        result += f"\n[ТЕКУЩАЯ ЗАДАЧА]\n{current_task}\n"
-    
-    if invariants:
-        result += f"\n[ИНВАРИАНТЫ - ОБЯЗАТЕЛЬНО К СОБЛЮДЕНИЮ]\n"
-        for key, value in invariants.items():
-            if isinstance(value, list):
-                result += f"- {key}: {', '.join(str(v) for v in value)}\n"
-            else:
-                result += f"- {key}: {value}\n"
-    
-    schedules = scheduler.scheduler.get_schedules(project_name)
-    enabled_schedules = [s for s in schedules if s.enabled]
-    if project_name:
-        result += f"\n[ЗАДАНИЯ ПО РАСПИСАНИЮ]\n"
-        if enabled_schedules:
-            result += "В этом проекте настроены автоматические задания:\n"
-            for s in enabled_schedules:
-                next_run_str = s.next_run.strftime("%Y-%m-%d %H:%M") if s.next_run else "неизвестно"
-                result += f"- {s.name}: cron={s.cron}, следующий запуск: {next_run_str}\n"
-        result += "Можно создать новое задание, указав его параметры в поле schedule блока статуса.\n"
-    
-    return result
-
-
-def get_status_prompt(session) -> str:
-    """Сформировать промпт с инструкцией по статусу задачи"""
-    return tsm.get_tsm_prompt(session)
 
 
 @admin_bp.route("/")
@@ -650,345 +553,6 @@ def add_note():
     })
 
 
-async def _get_mcp_tools(session, provider_name: str) -> list[dict]:
-    """Get MCP tools for the session's configured MCP servers."""
-    if not mcp_available():
-        return []
-    
-    mcp_servers = session.get_mcp_servers()
-    if not mcp_servers:
-        return []
-    
-    all_tools = []
-    failed_servers = []
-    
-    for server_name in mcp_servers:
-        try:
-            from app.mcp import MCPManager, tools_to_provider_format
-            server_tools = await MCPManager.get_tools([server_name])
-            if server_tools:
-                all_tools.extend(tools_to_provider_format(server_tools, provider_name))
-            else:
-                debug("MCP", f"No tools returned from {server_name}")
-        except Exception as e:
-            error_msg = str(e)
-            debug("MCP", f"Failed to get tools from {server_name}: {error_msg}")
-    
-    return all_tools
-
-
-async def _process_status_block(
-    provider,
-    llm_messages: list,
-    system_prompt: str,
-    session,
-    session_id: str,
-    debug_collector,
-    user_id: str | None = None,
-    max_retries: int = 3,
-    mcp_tools: list | None = None,
-    mcp_calls: list | None = None,
-):
-    """Обработать ответ LLM с валидацией статуса.
-    
-    Returns:
-        tuple: (response, message_for_user, status_error, debug_info, group_id)
-            - response: LLMResponse или dict с content/usage для orchestrator
-            - message_for_user: очищенный контент без JSON блока
-            - status_error: строка с ошибкой если все попытки неудачны
-            - debug_info: отладочная информация
-            - group_id: ID группы сообщений (если были tool calls)
-    """
-    debug_mode = debug_collector.enabled if debug_collector else False
-    
-    if mcp_calls is None:
-        mcp_calls = []
-    
-    tsm_mode = tsm.get_tsm_mode(session)
-    debug("ROUTES", f"TSM mode: {tsm_mode}, session_id: {session_id}")
-    
-    if tsm_mode == "orchestrator":
-        debug("ROUTES", f"Using orchestrator mode for session {session_id}")
-        return _process_orchestrator_mode(
-            provider, llm_messages, system_prompt, session, session_id, debug_mode, user_id
-        )
-    
-    status_reminder = config.get_context_file("STATUS_REMINDER.md") or ""
-    if status_reminder:
-        system_prompt += "\n\n" + status_reminder
-    
-    response = None
-    group_id = None  # ID группы для связанных сообщений
-    
-    for attempt in range(max_retries):
-        
-        while True:
-            # Pass tools if MCP tools are available
-            # Provider will filter out orphan tool_results
-            use_tools = mcp_tools if mcp_tools else None
-            
-            prompt_with_reminder = system_prompt + status_reminder if attempt > 0 else system_prompt
-            
-            try:
-                if use_tools:
-                    debug("MCP", f"Sending {len(use_tools)} tools to model: {[t.get('function', {}).get('name') or t.get('name') for t in use_tools]}")
-                
-                response = provider.chat(llm_messages, prompt_with_reminder, debug_collector=debug_collector, tools=use_tools)
-            except requests.HTTPError as e:
-                # Check for tool-related 400 errors
-                if e.response and e.response.status_code == 400:
-                    try:
-                        error_data = e.response.json()
-                        error_msg = error_data.get("error", {}).get("message", "")
-                    except:
-                        error_msg = str(e)
-                    
-                    if "tool call result does not follow" in error_msg:
-                        error("ROUTES", "Got 400 tool error, cleaning up orphan tool_results and retrying...")
-                        # Clean up orphan tool_results and retry
-                        cleaned = _cleanup_orphan_tool_results(session)
-                        session_manager.save_session(session_id)
-                        
-                        # Reload messages after cleanup
-                        llm_messages = session.get_messages_for_llm()
-                        
-                        # Retry once
-                        try:
-                            response = provider.chat(llm_messages, prompt_with_reminder, debug_collector=debug_collector, tools=use_tools)
-                        except Exception as retry_e:
-                            error("ROUTES", f"Retry after cleanup failed: {retry_e}")
-                            raise
-                    else:
-                        raise
-                else:
-                    raise
-            except Exception as e:
-                import traceback
-                error("ROUTES", f"provider.chat() failed: {e}")
-                error("ROUTES", traceback.format_exc())
-                if attempt == max_retries - 1:
-                    break
-                break
-            
-            debug("MCP", f"After response: mcp_tools={bool(mcp_tools)}, response.tool_calls={response.tool_calls}")
-            debug("MCP", f"Response content: {response.content[:200] if response.content else 'EMPTY'}")
-            
-            if not response.tool_calls:
-                # No more tool calls, exit the loop
-                # Clean up ALL tool_use from assistant messages in session
-                # (tool_use was needed only for tool execution, not for future requests)
-                cleaned_count = 0
-                for msg in session.messages:
-                    if msg.role == "assistant" and msg.tool_use:
-                        debug("MCP", f"Cleaning up tool_use: {[tu.get('id') for tu in msg.tool_use]}")
-                        msg.tool_use = None
-                        cleaned_count += 1
-                if cleaned_count:
-                    debug("MCP", f"Cleaned up tool_use from {cleaned_count} messages")
-                break
-            
-            # Создаём group_id и сохраняем промежуточное сообщение
-            if group_id is None:
-                group_id = str(uuid.uuid4())
-            
-            session.add_assistant_message(
-                response.content or "",
-                response.usage or {},
-                debug={"usage": response.usage or {}, "model": provider.model},
-                model=provider.model,
-                reasoning=response.reasoning,
-                group_id=group_id
-            )
-            
-            # Execute tool calls
-            debug("MCP", f"Detected {len(response.tool_calls)} tool call(s)")
-            debug("MCP", f"Tool calls: {json.dumps(response.tool_calls, ensure_ascii=False)[:500]}")
-            
-            # Update last assistant message with tool_use and debug info if tools were called
-            if response.tool_calls and debug_mode:
-                debug_info = debug_collector.get_debug_info()
-                if debug_info is None:
-                    debug_info = {}
-                debug_info["tool_use"] = response.tool_calls
-                # Update the last message
-                if session.messages:
-                    last_msg = session.messages[-1]
-                    last_msg.tool_use = response.tool_calls
-                    last_msg.debug = debug_info
-            
-            try:
-                from app.mcp import MCPManager
-                tool_call_results = []
-                
-                for tc in response.tool_calls:
-                    tool_name = tc.get("function", {}).get("name") or tc.get("name", "")
-                    tool_args = tc.get("function", {}).get("arguments") or tc.get("arguments", {}) or {}
-                    
-                    if isinstance(tool_args, str):
-                        try:
-                            tool_args = json.loads(tool_args)
-                        except:
-                            tool_args = {}
-                    
-                    debug("MCP", f"Calling tool: {tool_name}")
-                    debug("MCP", f"Arguments: {json.dumps(tool_args, ensure_ascii=False)[:500]}")
-                    
-                    try:
-                        result = await MCPManager.call_tool(tool_name, tool_args)
-                        tool_result_content = result.content
-                        is_error = getattr(result, 'is_error', False)
-                        debug("MCP", f"Result: {tool_result_content[:500] if tool_result_content else 'empty'}")
-                        debug("MCP", f"Is error: {is_error}")
-                    except Exception as e:
-                        tool_result_content = f"Error: {str(e)}"
-                        is_error = True
-                        error("MCP", f"Tool error: {e}")
-                    
-                    mcp_calls.append({
-                        "tool": tool_name,
-                        "arguments": tool_args,
-                        "result": tool_result_content,
-                        "is_error": is_error
-                    })
-                    
-                    tool_call_results.append({
-                        "role": "tool",
-                        "tool_call_id": tc.get("id"),
-                        "content": tool_result_content,
-                    })
-                
-                # Update last assistant message with mcp_calls after tools execution
-                if response.tool_calls and debug_mode and mcp_calls:
-                    if session.messages:
-                        last_msg = session.messages[-1]
-                        if last_msg.debug is None:
-                            last_msg.debug = {}
-                        last_msg.debug["mcp_calls"] = list(mcp_calls)
-                
-                # Save session after updating intermediate message
-                session_manager.save_session(session_id)
-                
-                # Build tool messages and call model again
-                tool_messages = list(llm_messages)
-                tool_messages.append(Message(role="assistant", content=response.content or "", usage={}, tool_use=response.tool_calls))
-                for tc_result in tool_call_results:
-                    tool_messages.append(Message(
-                        role="tool",
-                        content=tc_result["content"],
-                        tool_call_id=tc_result.get("tool_call_id"),
-                        usage={}
-                    ))
-                
-                # Continue in the while loop - will call provider.chat with tools=None
-                llm_messages = tool_messages
-                debug("MCP", "Continuing with tool results, will call model again")
-                
-            except Exception as e:
-                error("MCP", f"Tool handling error: {e}")
-                break
-        
-        # After while loop, check for status block
-        # If tools were called and we're here, it means model didn't provide status - that's an error
-        parsed_status = None
-        if response and response.tool_calls:
-            debug("MCP", "Tools were called but no status block - returning error")
-            # Return the content anyway, don't retry
-            cleaned_content = response.content if response.content else ""
-            return response, cleaned_content, "Модель вызвала инструменты, но не предоставила статусный блок", None, group_id
-        
-        if response:
-            parsed_status, cleaned_content = status_validator.validate_status_block(response.content)
-        else:
-            parsed_status, cleaned_content = None, ""
-
-        # If tools were called but no status - return content without error, keep old status
-        if response and response.tool_calls:
-            debug("MCP", "Tools were called but no status block - returning content without error")
-            cleaned_content = response.content if response.content else ""
-            return response, cleaned_content, None, None, group_id
-        
-        # If no status block - just return content without error, keep old status
-        if parsed_status is None:
-            debug("ROUTES", "No status block in response - returning content without updating status")
-            cleaned_content = response.content if response.content else ""
-            return response, cleaned_content, None, None, group_id
-        
-        # Process status transition if status block exists
-        parsed_status = tsm.process_state_transition(session, parsed_status)
-        
-        session.update_status(parsed_status)
-        
-        _handle_project_updates(session)
-        
-        _handle_user_info_update(parsed_status, user_id)
-        
-        return response, cleaned_content, None, None, group_id
-
-        if attempt < max_retries - 1:
-            llm_messages = session.get_messages_for_llm()
-            status_format = "Пожалуйста, добавь в конце своего ответа JSON-блок со статусом задачи в формате: "
-            status_format += '{"status": {"task_name": "название", "state": "состояние", "progress": "прогресс", '
-            status_format += '"project": "проект", "updated_project_info": "обновлённое описание проекта", '
-            status_format += '"current_task_info": "текущая задача", "approved_plan": "план", '
-            status_format += '"already_done": "сделано", "currently_doing": "текущее", '
-            status_format += '"invariants": {"язык": "Python", "не использовать": ["материал1"]} или null}}'
-            llm_messages.append(Message(role="user", content=status_format, usage={}))
-
-    return response, response.content, "Модель не формирует блок статуса в ответе", None
-
-
-def _process_orchestrator_mode(
-    provider,
-    llm_messages: list,
-    system_prompt: str,
-    session,
-    session_id: str,
-    debug_collector,
-    user_id: str | None = None,
-):
-    """Обработать ответ в режиме оркестратора с поддержкой сабагентов."""
-    debug_mode = debug_collector.enabled if debug_collector else False
-    debug("ORCHESTRATOR", f"Starting orchestrator mode, debug_mode: {debug_mode}")
-    try:
-        result = tsm.process_orchestrator_response(
-            session=session,
-            llm_messages=llm_messages,
-            provider=provider,
-            system_prompt=system_prompt,
-            debug_prompt=system_prompt,
-            debug_collector=debug_collector
-        )
-        debug("ORCHESTRATOR", f"Result keys: {result.keys() if result else 'None'}")
-    except Exception as e:
-        return None, f"Ошибка при обработке оркестратора: {str(e)}", str(e), None
-    
-    final_content = result.get("final_content", "")
-    final_status = result.get("final_status", {})
-    debug_info = result.get("debug")
-    usage = result.get("usage", {})
-    
-    if final_status:
-        session.update_status(final_status)
-        _handle_project_updates(session)
-        _handle_user_info_update(final_status, user_id)
-    
-    cleaned_content, _ = status_validator.validate_status_block(final_content)
-    if cleaned_content:
-        final_content = cleaned_content
-    
-    class MockResponse:
-        def __init__(self, content, usage, debug_info, model):
-            self.content = content
-            self.usage = usage
-            self.debug_request = debug_info.get("orchestrator_request", {}) if debug_info else {}
-            self.debug_response = debug_info
-            self.model = model
-    
-    mock_response = MockResponse(final_content, usage, debug_info, provider.model)
-    
-    return mock_response, final_content, None, debug_info
-
-
 def _handle_user_info_update(parsed_status: dict, user_id: str | None) -> None:
     """Обработать обновление user_info из статуса и сохранить в профиль пользователя"""
     user_info = parsed_status.get("user_info")
@@ -1244,8 +808,42 @@ def run_schedule(project_name, schedule_id):
 @api_bp.route("/chat", methods=["POST"])
 @require_user
 def chat():
-    # ... existing code above ...
+    data = request.get_json()
+    if not data or "message" not in data:
+        return jsonify({"error": "Missing 'message' field"}), 400
+
+    user_message = data["message"]
+    provider_name = data.get("provider")
+    model = data.get("model")
+    source_type = data.get("source", "web")
+    mcp_servers = data.get("mcp_servers", [])
+    mcp_calls = []
     
+    current_user = get_current_user()
+    if current_user:
+        username = current_user.username
+    else:
+        username = data.get("username", "unknown")
+    source = f"{username} | {source_type}"
+
+    if not provider_name:
+        provider_name = config.default_provider
+
+    provider_config = config.get_provider_config(provider_name)
+    if not provider_config:
+        return jsonify({"error": f"Unknown provider: {provider_name}"}), 400
+
+    provider_config = provider_config.copy()
+
+    if model:
+        provider_config["model"] = model
+    else:
+        default_model = config.get_default_model(provider_name)
+        if default_model:
+            provider_config["model"] = default_model
+        else:
+            return jsonify({"error": f"No model specified and no default model for provider: {provider_name}"}), 400
+
     if "timeout" not in provider_config:
         provider_config["timeout"] = config.timeout
 
@@ -1270,7 +868,7 @@ def chat():
     say_unknown_enabled = saved_rag.get("say_unknown_enabled", global_rag_config.get("say_unknown_enabled", False))
     say_unknown_threshold = saved_rag.get("say_unknown_threshold", global_rag_config.get("say_unknown_threshold", 0.3))
 
-    debug_collector = DebugCollector.from_session(session)
+    debug_collector = DebugCollector(enabled=True)
 
     request_id = RequestTracker.create_request()
 
@@ -1306,86 +904,12 @@ def chat():
     elif provider_name and not session.provider:
         session.set_provider_model(provider_name, config.get_default_model(provider_name))
 
-    system_prompt = get_system_prompt()
-    system_prompt += get_profile_prompt(session, request.headers.get("X-User-Id"))
-    system_prompt += get_project_prompt(session)
-    system_prompt += get_status_prompt(session)
-    if should_show_interview(session, request.headers.get("X-User-Id")):
-        system_prompt += get_interview_prompt()
-
-    # RAG - Add relevant context from embeddings index
-    rag_context = ""
-    if use_rag and rag_index_name:
-        reranker_config = None
-        if rag_reranker and rag_reranker.get("enabled"):
-            reranker_config = rag_reranker
-            info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}, reranker: {rag_reranker.get('type')}")
-        else:
-            info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}")
-        try:
-            from app.embeddings.search import EmbeddingSearch
-            search_engine = EmbeddingSearch()
-            results, reranker_meta = search_engine.search(
-                query=user_message,
-                index_name=rag_index_name,
-                version=rag_version,
-                top_k=rag_top_k,
-                reranker_config=reranker_config,
-            )
-            
-            # Calculate max similarity for say_unknown check
-            max_similarity = max((r.get("similarity", 0) for r in results), default=0) if results else 0
-            
-            # Check if we should trigger "say unknown" behavior
-            say_unknown_triggered = False
-            if say_unknown_enabled and results and max_similarity < say_unknown_threshold:
-                say_unknown_triggered = True
-                # Load RAG_UNKNOWN.md context instead of regular RAG context
-                unknown_context = config.context_manager.get_context_file("RAG_UNKNOWN.md")
-                if unknown_context:
-                    rag_context = unknown_context
-                    debug("RAG", f"say_unknown triggered: max_similarity={max_similarity:.3f}, threshold={say_unknown_threshold}, using RAG_UNKNOWN.md")
-                else:
-                    rag_context = ""
-                    debug("RAG", f"say_unknown triggered but RAG_UNKNOWN.md not found")
-            elif results:
-                # Normal RAG context building
-                rag_context = "\n\n## Relevant Context\n"
-                for i, result in enumerate(results, 1):
-                    metadata = result.get("metadata", {})
-                    source = metadata.get("source", "unknown")
-                    section = metadata.get("section", "")
-                    content = result.get("content", "")
-                    rag_context += f"[{i}] Source: {source}"
-                    if section:
-                        rag_context += f", Section: {section}"
-                    rag_context += f"\n{content}\n\n---\n"
-                
-                debug("RAG", f"RAG search completed: found {len(results)} results, context added: {len(rag_context)} chars")
-            
-            # Capture RAG debug info
-            if debug_collector and debug_collector.enabled:
-                debug_collector.capture_rag_info(
-                    query=user_message,
-                    index_name=rag_index_name,
-                    version=rag_version,
-                    top_k=rag_top_k,
-                    results=results or [],
-                    context_added=rag_context if rag_context else "",
-                    reranker_config=reranker_config,
-                    reranker_meta=reranker_meta,
-                    say_unknown_triggered=say_unknown_triggered,
-                    max_similarity=max_similarity,
-                    say_unknown_threshold=say_unknown_threshold,
-                )
-        except Exception as e:
-            warning("RAG", f"RAG search error in chat: {e}")
-
-    if rag_context:
-        system_prompt += rag_context
+    context_builder = ContextBuilder(session, request.headers.get("X-User-Id"), debug_collector)
+    system_prompt = context_builder.build_system_prompt()
+    system_prompt = context_builder.apply_rag_to_prompt(system_prompt, user_message, use_rag)
+    messages = context_builder.build_messages(user_message)
 
     try:
-        llm_messages = session.get_messages_for_llm()
         session_manager.save_session(session_id)
     except ContextLengthExceededError as e:
         session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
@@ -1400,30 +924,61 @@ def chat():
         result = {"error": f"LLM error: {str(e)}", "model": provider.model}
         return jsonify(result), 500
 
-    import asyncio
+    debug_mode = data.get("debug", False)
+    
     actual_provider_type = provider.get_provider_name()
-    mcp_tools = run_mcp_async(_get_mcp_tools(session, actual_provider_type))
+    mcp_tools = context_builder.build_mcp_tools(actual_provider_type)
 
-    try:
-        response, message_for_user, status_error, orchestrator_debug, group_id = run_mcp_async(_process_status_block(
-            provider, llm_messages, system_prompt, session, session_id, debug_collector, 
-            request.headers.get("X-User-Id"), mcp_tools=mcp_tools, mcp_calls=mcp_calls
-        ))
-        if status_error:
-            # Save assistant message first
-            if message_for_user:
-                session.add_assistant_message(message_for_user, response.usage if response else {}, debug=orchestrator_debug if debug_mode else None, model=response.model if response else provider.model, group_id=group_id)
-            session.add_error_message(f"[Ошибка статуса] {status_error}", debug=orchestrator_debug if debug_mode else None, model=provider.model)
+    tsm_mode = tsm.get_tsm_mode(session)
+    
+    orchestrator = OrchestrationController(provider, session, debug_collector)
+    
+    if tsm_mode == "orchestrator":
+        try:
+            result = orchestrator.run_orchestrator(messages, system_prompt)
+        except Exception as e:
+            session.add_error_message(f"[Ошибка оркестратора] {str(e)}", None, model=provider.model)
             session_manager.save_session(session_id)
-            RequestTracker.error(request_id, status_error)
-            result = {
-                "error": status_error,
-                "model_error": status_error,
-                "model": provider.model,
-            }
-            if debug_mode:
-                result["debug"] = {"status_error": status_error}
-            return jsonify(result), 500
+            RequestTracker.error(request_id, str(e))
+            return jsonify({"error": f"Orchestrator error: {str(e)}", "model": provider.model}), 500
+        
+        final_content = result.get("final_content", "")
+        final_reasoning = result.get("reasoning")
+        final_status = result.get("final_status")
+        usage = result.get("usage", {})
+        debug_info = result.get("debug")
+        
+        if final_status:
+            session.update_status(final_status)
+        
+        message_index = len(session.messages)
+        session.add_assistant_message(final_content, usage, debug=debug_info, model=provider.model, reasoning=final_reasoning)
+        session_manager.save_session(session_id)
+        
+        disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
+        
+        message_id = session.messages[message_index].id if message_index < len(session.messages) else None
+        RequestTracker.complete(request_id, message_id)
+        
+        result_response = {
+            "message": final_content,
+            "session_id": session_id,
+            "model": "orchestrator",
+            "usage": usage,
+            "total_tokens": session.total_tokens,
+            "disabled_indices": disabled_indices,
+            "request_id": request_id,
+            "message_id": message_id,
+            "reasoning": final_reasoning,
+        }
+        
+        if debug_mode and debug_info:
+            result_response["debug"] = debug_info
+        
+        return jsonify(result_response)
+    
+    try:
+        response = orchestrator.run_simple(messages, system_prompt, mcp_tools)
     except ContextLengthExceededError as e:
         session.add_error_message(f"[Ошибка] {str(e)}", debug=e.debug_response if debug_mode else None, model=provider.model)
         session_manager.save_session(session_id)
@@ -1439,23 +994,10 @@ def chat():
         result = {"error": f"LLM error: {str(e)}", "model": provider.model}
         return jsonify(result), 500
 
-    if debug_collector.enabled:
-        debug_collector.capture_reasoning(response.reasoning)
-        debug_collector.capture_session_info(session.session_id, provider.model, provider.get_provider_name())
-        if session.status:
-            debug_collector.capture_status(session.status)
-        for mcp in mcp_calls:
-            debug_collector.capture_mcp_call(
-                tool=mcp.get("tool", ""),
-                arguments=mcp.get("arguments", {}),
-                result=mcp.get("result", ""),
-                is_error=mcp.get("is_error", False)
-            )
-
-    debug_info = debug_collector.get_debug_info()
+    debug_info = debug_collector.get_debug_info() if debug_collector else None
 
     message_index = len(session.messages)
-    session.add_assistant_message(message_for_user, response.usage, debug=debug_info, model=response.model, reasoning=response.reasoning, group_id=group_id)
+    session.add_assistant_message(response.content, response.usage, debug=debug_info, model=response.model, reasoning=response.reasoning)
     
     debug("STORAGE", f"Saving session after assistant message, messages count: {len(session.messages)}")
     session_manager.save_session(session_id)
@@ -1466,7 +1008,7 @@ def chat():
     RequestTracker.complete(request_id, message_id)
 
     result = {
-        "message": message_for_user,
+        "message": response.content,
         "session_id": session_id,
         "model": response.model,
         "usage": response.usage,
@@ -1477,7 +1019,7 @@ def chat():
         "reasoning": response.reasoning,
     }
     
-    if debug_info:
+    if debug_mode and debug_info:
         result["debug"] = debug_info
     
     return jsonify(result)
@@ -1582,7 +1124,7 @@ def chat_stream():
     say_unknown_enabled = saved_rag.get("say_unknown_enabled", global_rag_config.get("say_unknown_enabled", False))
     say_unknown_threshold = saved_rag.get("say_unknown_threshold", global_rag_config.get("say_unknown_threshold", 0.3))
 
-    debug_collector = DebugCollector.from_session(session)
+    debug_collector = DebugCollector(enabled=True)
 
     if data.get("tsm_mode"):
         try:
@@ -1647,99 +1189,23 @@ def chat_stream():
         elif provider_name and not session.provider:
             session.set_provider_model(provider_name, config.get_default_model(provider_name))
 
-        system_prompt = get_system_prompt()
-        system_prompt += get_profile_prompt(session, user_id)
-        system_prompt += get_project_prompt(session)
-        system_prompt += get_status_prompt(session)
-        if should_show_interview(session, user_id):
-            system_prompt += get_interview_prompt()
-
-        # RAG - Add relevant context from embeddings index
-        rag_context = ""
-        if use_rag and rag_index_name:
-            reranker_config = None
-            if rag_reranker and rag_reranker.get("enabled"):
-                reranker_config = rag_reranker
-                info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}, reranker: {rag_reranker.get('type')}")
-            else:
-                info("RAG", f"RAG enabled for session {session_id}, index: {rag_index_name}, version: {rag_version}, top_k: {rag_top_k}")
-            try:
-                from app.embeddings.search import EmbeddingSearch
-                search_engine = EmbeddingSearch()
-                results, reranker_meta = search_engine.search(
-                    query=user_message,
-                    index_name=rag_index_name,
-                    version=rag_version,
-                    top_k=rag_top_k,
-                    reranker_config=reranker_config,
-                )
-                
-                # Calculate max similarity for say_unknown check
-                max_similarity = max((r.get("similarity", 0) for r in results), default=0) if results else 0
-                
-                # Check if we should trigger "say unknown" behavior
-                say_unknown_triggered = False
-                if say_unknown_enabled and results and max_similarity < say_unknown_threshold:
-                    say_unknown_triggered = True
-                    # Load RAG_UNKNOWN.md context instead of regular RAG context
-                    unknown_context = config.context_manager.get_context_file("RAG_UNKNOWN.md")
-                    if unknown_context:
-                        rag_context = unknown_context
-                        debug("RAG", f"say_unknown triggered: max_similarity={max_similarity:.3f}, threshold={say_unknown_threshold}, using RAG_UNKNOWN.md")
-                    else:
-                        rag_context = ""
-                        debug("RAG", f"say_unknown triggered but RAG_UNKNOWN.md not found")
-                elif results:
-                    # Normal RAG context building
-                    rag_context = "\n\n## Relevant Context\n"
-                    for i, result in enumerate(results, 1):
-                        metadata = result.get("metadata", {})
-                        chunk_source = metadata.get("source", "unknown")
-                        section = metadata.get("section", "")
-                        content = result.get("content", "")
-                        rag_context += f"[{i}] Source: {chunk_source}"
-                        if section:
-                            rag_context += f", Section: {section}"
-                        rag_context += f"\n{content}\n\n---\n"
-                    
-                    debug("RAG", f"RAG search completed: found {len(results)} results, context added: {len(rag_context)} chars")
-                
-                # Capture RAG debug info
-                if debug_collector and debug_collector.enabled:
-                    debug_collector.capture_rag_info(
-                        query=user_message,
-                        index_name=rag_index_name,
-                        version=rag_version,
-                        top_k=rag_top_k,
-                        results=results or [],
-                        context_added=rag_context if rag_context else "",
-                        reranker_config=reranker_config,
-                        reranker_meta=reranker_meta,
-                        say_unknown_triggered=say_unknown_triggered,
-                        max_similarity=max_similarity,
-                        say_unknown_threshold=say_unknown_threshold,
-                    )
-            except Exception as e:
-                warning("RAG", f"RAG search error in stream: {e}")
-
-        if rag_context:
-            system_prompt += rag_context
-
-        # Используем get_messages_for_llm() для поддержки скользящего окна
-        llm_messages = session.get_messages_for_llm()
+        context_builder = ContextBuilder(session, user_id)
+        system_prompt = context_builder.build_system_prompt()
+        system_prompt = context_builder.apply_rag_to_prompt(system_prompt, user_message, use_rag)
+        messages = context_builder.build_messages(user_message)
         session_manager.save_session(session_id)
 
         # Получаем MCP инструменты
         import asyncio
         actual_provider_type = provider.get_provider_name()
-        mcp_tools = run_mcp_async(_get_mcp_tools(session, actual_provider_type))
+        mcp_tools = context_builder.build_mcp_tools(actual_provider_type)
 
         # Формируем сообщения для LLM (до проверки tsm_mode)
         formatted_messages = []
         if system_prompt:
             formatted_messages.append({"role": "system", "content": system_prompt})
 
-        for msg in llm_messages:
+        for msg in messages:
             if msg.role == "summary":
                 summary_text = f"До этого вы обсудили следующее:\n{msg.content}"
                 if formatted_messages and formatted_messages[0]["role"] == "system":
@@ -1784,15 +1250,13 @@ def chat_stream():
             result_queue = queue.Queue()
             stop_event = threading.Event()
             
+            orchestrator = OrchestrationController(provider, session, debug_collector)
+            
             def run_orchestrator():
                 try:
-                    result = tsm.process_orchestrator_response(
-                        session=session,
-                        llm_messages=llm_msgs,
-                        provider=provider,
-                        system_prompt=orchestrator_system,
-                        debug_prompt=system_prompt,
-                        debug_mode=debug_mode,
+                    result = orchestrator.run_orchestrator(
+                        llm_msgs,
+                        orchestrator_system,
                         progress_queue=progress_queue,
                         token_limit=token_limit,
                         stop_event=stop_event
@@ -1865,6 +1329,7 @@ def chat_stream():
                 return
             
             final_content = result.get("final_content", "")
+            final_reasoning = result.get("reasoning")
             subtask_results = result.get("subtask_results", [])
             debug_info = result.get("debug") if debug_mode else None
             was_aborted = result.get("aborted", False)
@@ -1893,11 +1358,6 @@ def chat_stream():
                     debug_info = {}
                 debug_info['raw_model_response'] = raw_original_content
             
-            # Отправляем контент частями для имитации streaming
-            for i in range(0, len(final_content), 50):
-                chunk = final_content[i:i+50]
-                yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
-            
             # Сохраняем в сессию (user_message уже добавлен в get_messages_for_llm)
             if session.status:
                 if debug_info is None:
@@ -1910,13 +1370,13 @@ def chat_stream():
                     debug_info = {}
                 debug_info['mcp_calls'] = mcp_calls
                 
-            session.add_assistant_message(final_content, usage, debug=debug_info, model=provider.model)
+            session.add_assistant_message(final_content, usage, debug=debug_info, model=provider.model, reasoning=final_reasoning)
             
             session_manager.save_session(session_id)
             
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
             
-            yield f"data: {json.dumps({'content': final_content, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices, 'aborted': was_aborted})}\n\n"
+            yield f"data: {json.dumps({'content': final_content, 'reasoning': final_reasoning, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices, 'aborted': was_aborted})}\n\n"
             
             status_event = _emit_project_status(session, previous_status)
             if status_event:
@@ -2288,18 +1748,7 @@ def chat_stream():
                     debug_info = {}
                 debug_info['mcp_calls'] = mcp_calls
             
-            # Update or add assistant message
-            if debug_collector.enabled:
-                if session.status:
-                    debug_collector.capture_status(session.status)
-                for mcp in mcp_calls:
-                    debug_collector.capture_mcp_call(
-                        tool=mcp.get("tool", ""),
-                        arguments=mcp.get("arguments", {}),
-                        result=mcp.get("result", ""),
-                        is_error=mcp.get("is_error", False)
-                    )
-            debug_info = debug_collector.get_debug_info()
+            debug_info = debug_collector.get_debug_info() if debug_collector else None
             
             if preliminary_saved and preliminary_message_id:
                 # Find assistant message by ID (search from end to handle info messages added after)

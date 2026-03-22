@@ -283,7 +283,7 @@ def process_orchestrator_response(
     prompt_for_debug = debug_prompt if debug_prompt is not None else system_prompt
     
     debug_info = {}
-    if debug_collector:
+    if debug_collector and debug_collector.enabled:
         debug_collector.capture_session_info(
             session_id=session.session_id,
             model=provider.model,
@@ -309,6 +309,7 @@ def process_orchestrator_response(
     
     current_content = None
     current_status = None
+    current_reasoning = None
     subtask_results = []
     raw_response = None
     
@@ -367,14 +368,15 @@ def process_orchestrator_response(
         except Exception as e:
             error("TSM", f"ERROR in provider.chat iteration {iteration}: {e}")
             debug("TSM", "Stopping orchestration due to error, returning current results")
-            if debug_collector:
+            if debug_collector and debug_collector.enabled:
                 debug_info["error"] = str(e)
             break
         
         info("TSM", f"Iteration {iteration}: Got response, length {len(response.content)}, usage: {response.usage}")
         
-        # Save raw response immediately before any processing
+        # Save raw response and reasoning immediately before any processing
         raw_response = response.content
+        current_reasoning = response.reasoning
         
         # Add usage from orchestrator response immediately
         total_usage["input_tokens"] += response.usage.get("input_tokens", 0)
@@ -383,15 +385,18 @@ def process_orchestrator_response(
         
         parsed_status, cleaned_content = validate_status_block(response.content)
         
-        if debug_collector and response.content:
-            debug_info['orchestrator_responses'].append({
-                "content": response.content,
-                "parsed_status": parsed_status,
-                "usage": response.usage
-            })
-            debug_info['raw_model_response'] = response.content
-            debug_info['raw_status'] = parsed_status
-            debug_collector.capture_raw_model_response(response.content)
+        if debug_collector and debug_collector.enabled:
+            if response.content:
+                debug_info['orchestrator_responses'].append({
+                    "content": response.content,
+                    "parsed_status": parsed_status,
+                    "usage": response.usage
+                })
+                debug_info['raw_model_response'] = response.content
+                debug_info['raw_status'] = parsed_status
+                debug_collector.capture_raw_model_response(response.content)
+            if response.reasoning:
+                debug_collector.capture_reasoning(response.reasoning)
             if parsed_status:
                 debug_collector.capture_status(parsed_status)
         
@@ -487,7 +492,7 @@ def process_orchestrator_response(
                 subagent_response = provider.chat(subagent_messages, None, debug_collector=None)
                 print(f"[TSM] Subagent '{subtask_name}' response, usage: {subagent_response.usage}")
             except Exception as e:
-                if debug_collector:
+                if debug_collector and debug_collector.enabled:
                     subagent_call_info["error"] = str(e)
                     debug_info["subagent_calls"].append(subagent_call_info)
                 print(f"[TSM] Error calling subagent {subtask_name}: {e}")
@@ -600,7 +605,7 @@ def process_orchestrator_response(
     # Send final token update
     send_token_update()
     
-    if debug_collector:
+    if debug_collector and debug_collector.enabled:
         try:
             debug_usage = response.usage
         except UnboundLocalError:
@@ -621,5 +626,6 @@ def process_orchestrator_response(
         "debug": debug_info if debug_collector else None,
         "usage": total_usage,
         "subtask_results": subtask_results,
-        "aborted": was_aborted
+        "aborted": was_aborted,
+        "reasoning": current_reasoning if 'current_reasoning' in locals() else None
     }

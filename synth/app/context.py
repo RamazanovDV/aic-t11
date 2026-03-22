@@ -243,3 +243,142 @@ def get_system_prompt() -> str:
         return f"{base_prompt}\n\nДополнительный контекст:\n{context}"
 
     return base_prompt
+
+
+def get_profile_prompt(session, user_id: str | None = None) -> str:
+    """Сформировать промпт с данными профиля пользователя"""
+    from app import storage as app_storage
+    
+    user = None
+    
+    if session and session.owner_id:
+        user = app_storage.storage.load_user(session.owner_id)
+    
+    if not user and user_id:
+        user = app_storage.storage.load_user(user_id)
+    
+    if not user:
+        try:
+            from app.auth import get_current_user
+            user = get_current_user()
+        except Exception:
+            user = None
+    
+    if not user:
+        return ""
+    
+    parts = []
+    if user.username:
+        parts.append(f"Имя: {user.username}")
+    if user.team_role:
+        parts.append(f"Роль: {user.team_role}")
+    if user.notes:
+        notes_without_interview = user.notes.split("[ИНТЕРВЬЮ]")[0].strip()
+        if notes_without_interview:
+            parts.append(f"Отметки: {notes_without_interview}")
+    
+    if parts:
+        return f"\n\n[ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ]\n" + "\n".join(parts) + "\n"
+    
+    return ""
+
+
+def get_project_prompt(session) -> str:
+    """Сформировать промпт с данными проекта"""
+    from app import project_manager, scheduler, config
+    
+    project_name = session.status.get("project")
+    
+    if not project_name:
+        projects_list = project_manager.project_manager.get_projects_list()
+        projects_text = ", ".join(projects_list) if projects_list else "пока нет проектов"
+        
+        new_project_prompt = config.get_context_file("NEW_PROJECT.md") or "Если пользователь хочет начать новый проект - уточни название, укажи полученное название в поле project."
+        
+        return (
+            f"\n\n[ПРОЕКТ]\n"
+            f"Выясни у пользователя над каким проектом он хочет поработать.\n"
+            f"Существующие проекты: {projects_text}\n"
+            f"{new_project_prompt}\n"
+        )
+    
+    if not project_manager.project_manager.project_exists(project_name):
+        project_manager.project_manager.create_project(project_name)
+    
+    project_info = project_manager.project_manager.get_project_info(project_name)
+    current_task = project_manager.project_manager.get_current_task(project_name)
+    invariants = project_manager.project_manager.get_invariants(project_name)
+    
+    result = f"\n\n[ПРОЕКТ: {project_name}]\n"
+    
+    if project_info:
+        result += f"{project_info}\n"
+    else:
+        result += "(Описание проекта отсутствует)\n"
+    
+    if current_task:
+        result += f"\n[ТЕКУЩАЯ ЗАДАЧА]\n{current_task}\n"
+    
+    if invariants:
+        result += f"\n[ИНВАРИАНТЫ - ОБЯЗАТЕЛЬНО К СОБЛЮДЕНИЮ]\n"
+        for key, value in invariants.items():
+            if isinstance(value, list):
+                result += f"- {key}: {', '.join(str(v) for v in value)}\n"
+            else:
+                result += f"- {key}: {value}\n"
+    
+    schedules = scheduler.scheduler.get_schedules(project_name)
+    enabled_schedules = [s for s in schedules if s.enabled]
+    if project_name:
+        result += f"\n[ЗАДАНИЯ ПО РАСПИСАНИЮ]\n"
+        if enabled_schedules:
+            result += "В этом проекте настроены автоматические задания:\n"
+            for s in enabled_schedules:
+                next_run_str = s.next_run.strftime("%Y-%m-%d %H:%M") if s.next_run else "неизвестно"
+                result += f"- {s.name}: cron={s.cron}, следующий запуск: {next_run_str}\n"
+        result += "Можно создать новое задание, указав его параметры в поле schedule блока статуса.\n"
+    
+    return result
+
+
+def get_status_prompt(session) -> str:
+    """Сформировать промпт с инструкцией по статусу задачи"""
+    from app import tsm
+    return tsm.get_tsm_prompt(session)
+
+
+def should_show_interview(session, user_id: str | None = None) -> bool:
+    """Проверить нужно ли показывать интервью.
+    
+    Интервью показывается только если:
+    1. Это первое сообщение в сессии
+    2. Пользователь еще не прошел интервью
+    """
+    if session.get_active_message_count() != 0:
+        return False
+    
+    from app import storage as app_storage
+    
+    user = None
+    if session.owner_id:
+        user = app_storage.storage.load_user(session.owner_id)
+    
+    if not user and user_id:
+        user = app_storage.storage.load_user(user_id)
+    
+    if not user:
+        try:
+            from app.auth import get_current_user
+            user = get_current_user()
+        except Exception:
+            pass
+    
+    if user:
+        return not user.interview_completed
+    
+    return False
+
+
+def get_interview_prompt() -> str:
+    """Получить промпт интервью"""
+    return config.get_context_file("INTERVIEW.md") or ""
