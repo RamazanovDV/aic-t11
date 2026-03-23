@@ -6,6 +6,7 @@ from app.handlers.base import BaseHandler
 from app.session import Session
 from app.debug import DebugCollector
 from app.llm.base import Message
+from app.project_updates import handle_project_updates
 
 
 class StreamHandler(BaseHandler):
@@ -247,7 +248,7 @@ class StreamHandler(BaseHandler):
             pass  # RAG already applied in handle() method
         
         progress_queue = queue.Queue()
-        result_queue = queue.Queue()
+        result_queue = queue.Queue(maxsize=1)
         stop_event = threading.Event()
         
         ORCHESTRATOR_TIMEOUT = config.orchestrator_timeout
@@ -256,6 +257,8 @@ class StreamHandler(BaseHandler):
         model_name = model or provider.model
         context_window = config.get_context_window(model_name)
         token_limit = int(context_window * 0.9)
+        
+        session_manager = self.session_manager
         
         def run_orchestrator():
             try:
@@ -271,6 +274,22 @@ class StreamHandler(BaseHandler):
                     stop_event=stop_event,
                     mcp_tools=mcp_tools
                 )
+                
+                final_content = result.get("final_content", "")
+                if final_content:
+                    try:
+                        session.add_assistant_message(
+                            final_content,
+                            result.get("usage", {}),
+                            debug=result.get("debug"),
+                            model=provider.model,
+                            reasoning=result.get("reasoning")
+                        )
+                        handle_project_updates(session)
+                        session_manager.save_session(session.session_id)
+                    except Exception:
+                        pass
+                
                 result_queue.put(("success", result))
             except Exception as e:
                 result_queue.put(("error", str(e)))
@@ -293,46 +312,60 @@ class StreamHandler(BaseHandler):
                 
                 if event.get('type') == 'orchestrator_content':
                     content = event.get('content', '')
-                    yield f"data: {json.dumps({'type': 'orchestrator_content', 'content': content, 'done': False, 'subtasks': event.get('subtasks', [])})}\n\n"
+                    try:
+                        yield f"data: {json.dumps({'type': 'orchestrator_content', 'content': content, 'done': False, 'subtasks': event.get('subtasks', [])})}\n\n"
+                    except Exception:
+                        pass
                 
                 elif event.get('type') == 'subtask_progress':
-                    yield f"data: {json.dumps({'type': 'subtask_progress', 'name': event.get('name'), 'status': event.get('status'), 'error': event.get('error')})}\n\n"
+                    try:
+                        yield f"data: {json.dumps({'type': 'subtask_progress', 'name': event.get('name'), 'status': event.get('status'), 'error': event.get('error')})}\n\n"
+                    except Exception:
+                        pass
             
             except queue.Empty:
                 continue
         
-        orchestrator_thread.join(timeout=10)
+        orchestrator_thread.join(timeout=60)
         
-        result_type, result = result_queue.get()
+        result_type = None
+        result = None
         
-        if result_type == "error":
-            yield f"data: {json.dumps({'type': 'error', 'error': str(result)})}\n\n"
+        try:
+            result_type, result = result_queue.get(timeout=5)
+        except queue.Empty:
+            pass
+        
+        if result_type == "error" or result is None:
+            yield f"data: {json.dumps({'type': 'error', 'error': 'Orchestrator thread did not complete in time'})}\n\n"
             yield "data: [DONE]\n\n"
             return
         
         final_content = result.get("final_content", "")
         final_reasoning = result.get("reasoning")
         subtask_results = result.get("subtask_results", [])
-        debug_info = result.get("debug")  # Get from result regardless of enabled check
+        debug_info = result.get("debug")
         was_aborted = result.get("aborted", False)
         usage = result.get("usage", {})
         
-        for i in range(0, len(final_content), 50):
-            chunk = final_content[i:i+50]
-            yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
-        
-        session.add_assistant_message(
-            final_content,
-            usage,
-            debug=debug_info,
-            model=provider.model,
-            reasoning=final_reasoning
-        )
-        
-        self.save_session(session.session_id)
-        
-        disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
-        
-        yield f"data: {json.dumps({'content': final_content, 'reasoning': final_reasoning, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices, 'aborted': was_aborted})}\n\n"
-        
-        yield "data: [DONE]\n\n"
+        try:
+            for i in range(0, len(final_content), 50):
+                chunk = final_content[i:i+50]
+                try:
+                    yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+                except Exception:
+                    pass
+            
+            disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
+            
+            try:
+                yield f"data: {json.dumps({'content': final_content, 'reasoning': final_reasoning, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices, 'aborted': was_aborted})}\n\n"
+            except Exception:
+                pass
+            
+            try:
+                yield "data: [DONE]\n\n"
+            except Exception:
+                pass
+        except Exception:
+            pass

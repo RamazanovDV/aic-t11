@@ -6,6 +6,7 @@ from app.handlers.base import BaseHandler
 from app.session import Session
 from app import tsm
 from app.debug import DebugCollector
+from app.project_updates import handle_project_updates
 
 
 class ChatHandler(BaseHandler):
@@ -97,6 +98,7 @@ class ChatHandler(BaseHandler):
         parsed_status, cleaned_content = validate_status_block(response.content)
         if parsed_status:
             session.update_status(parsed_status)
+            handle_project_updates(session)
             message_for_user = cleaned_content if cleaned_content else response.content
         
         if debug_collector and debug_collector.enabled:
@@ -176,6 +178,7 @@ class ChatHandler(BaseHandler):
         
         if final_status:
             session.update_status(final_status)
+            handle_project_updates(session)
         
         session.add_assistant_message(
             final_content,
