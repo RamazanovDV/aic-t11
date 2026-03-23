@@ -14,7 +14,8 @@ class BaseHandler(ABC):
     """Base class for request handlers."""
     
     def __init__(self):
-        self.session_manager = SessionManager()
+        from app.session import session_manager as _session_manager
+        self.session_manager = _session_manager
     
     def get_session(self, session_id: str) -> Session:
         """Get session by ID."""

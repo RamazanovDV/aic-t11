@@ -1620,6 +1620,7 @@
         let assistantRow = null;
 
         try {
+            const requestBody = { message, provider, model, debug: debugMode, source: 'web', tsm_mode: panel.tsmMode || null };
             const response = await fetch('/api/chat/stream', {
                 method: 'POST',
                 headers: {
@@ -1628,16 +1629,7 @@
                     'X-User-Id': user ? user.id : '',
                 },
                 signal: panel.abortController ? panel.abortController.signal : null,
-                body: JSON.stringify({ 
-                    message, provider, model, debug: debugMode, source: 'web', 
-                    tsm_mode: panel.tsmMode || null,
-                    ...(panelRagSettings[panelIndex] ? {
-                        use_rag: panelRagSettings[panelIndex].enabled,
-                        rag_index_name: panelRagSettings[panelIndex].indexName,
-                        rag_version: panelRagSettings[panelIndex].version,
-                        rag_top_k: panelRagSettings[panelIndex].topK
-                    } : {})
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (response.status === 401) {

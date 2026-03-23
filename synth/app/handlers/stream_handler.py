@@ -28,15 +28,20 @@ class StreamHandler(BaseHandler):
         
         session.add_user_message(message, source="web")
         
-        debug_collector = self.create_debug_collector(session) if debug_mode else None
+        debug_collector = self.create_debug_collector(session)
         
         context_builder = self.create_context_builder(session, user_id)
         system_prompt = context_builder.build_system_prompt()
         
         system_prompt = context_builder.apply_rag_to_prompt(system_prompt, message)
         
-        messages = context_builder.build_messages()
+        messages = context_builder.build_messages(message)
         mcp_tools = context_builder.build_mcp_tools(provider_name)
+        
+        # Set default provider if not specified
+        from app.config import config
+        if not provider_name:
+            provider_name = config.default_provider
         
         provider = self.create_provider(provider_name, model)
         
@@ -45,7 +50,7 @@ class StreamHandler(BaseHandler):
         
         if tsm_mode == "orchestrator":
             yield from self._handle_orchestrator_stream(
-                session, messages, system_prompt, provider, debug_collector, message
+                session, messages, system_prompt, provider, debug_collector, message, provider_name, model
             )
         else:
             yield from self._handle_simple_stream(
@@ -115,16 +120,19 @@ class StreamHandler(BaseHandler):
         
         if debug_collector and debug_collector.enabled:
             debug_collector.capture_reasoning(full_reasoning)
+            debug_collector.capture_raw_model_response(full_content)
             debug_collector.capture_session_info(
                 session.session_id, provider.model, provider.get_provider_name()
             )
+            if session.status:
+                debug_collector.capture_status(session.status)
         
         debug_info = debug_collector.get_debug_info() if debug_collector else None
         
         session.add_assistant_message(
             full_content,
             total_usage,
-            debug={"usage": total_usage, "model": provider.model},
+            debug=debug_info,
             model=provider.model,
             reasoning=full_reasoning
         )
@@ -219,7 +227,9 @@ class StreamHandler(BaseHandler):
         system_prompt: str,
         provider,
         debug_collector: DebugCollector | None,
-        user_message: str
+        user_message: str,
+        provider_name: str,
+        model: str | None
     ) -> Generator[str, None, None]:
         """Handle orchestrator mode with streaming events."""
         import json
@@ -231,7 +241,8 @@ class StreamHandler(BaseHandler):
         
         use_rag = session.session_settings.get("rag_settings", {}).get("enabled", False)
         if use_rag:
-            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, user_message, use_rag)
+            # context_builder was in handle() method, need to recreate or pass it
+            pass  # RAG already applied in handle() method
         
         progress_queue = queue.Queue()
         result_queue = queue.Queue()
@@ -299,7 +310,7 @@ class StreamHandler(BaseHandler):
         final_content = result.get("final_content", "")
         final_reasoning = result.get("reasoning")
         subtask_results = result.get("subtask_results", [])
-        debug_info = result.get("debug") if debug_collector and debug_collector.enabled else None
+        debug_info = result.get("debug")  # Get from result regardless of enabled check
         was_aborted = result.get("aborted", False)
         usage = result.get("usage", {})
         

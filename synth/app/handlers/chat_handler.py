@@ -18,7 +18,11 @@ class ChatHandler(BaseHandler):
         provider_name: str | None = None,
         model: str | None = None,
         debug_mode: bool = False,
-        user_id: str | None = None
+        user_id: str | None = None,
+        tsm_mode: str | None = None,
+        use_rag: bool = False,
+        rag_index_name: str | None = None,
+        rag_top_k: int = 5
     ) -> dict[str, Any]:
         """Handle chat request.
         
@@ -27,19 +31,19 @@ class ChatHandler(BaseHandler):
         """
         session = self.get_session(session_id)
         
-        if data.get("tsm_mode"):
+        if tsm_mode:
             try:
-                tsm.set_tsm_mode(session, data["tsm_mode"])
+                tsm.set_tsm_mode(session, tsm_mode)
             except ValueError as e:
-                return {"error": f"Invalid tsm_mode: {str(e)}"}, 400
+                return {"error": f"Invalid tsm_mode: {str(e)}"}
         
         session.add_user_message(message, source="web")
         
-        debug_collector = self.create_debug_collector(session) if debug_mode else None
+        debug_collector = self.create_debug_collector(session)
         
         context_builder = self.create_context_builder(session, user_id)
         system_prompt = context_builder.build_system_prompt()
-        messages = context_builder.build_messages()
+        messages = context_builder.build_messages(message)  # Pass user message!
         
         mcp_tools = context_builder.build_mcp_tools(provider_name)
         
@@ -87,6 +91,8 @@ class ChatHandler(BaseHandler):
         
         message_for_user = response.content
         
+        # Сохраняем оригинальный контент ДО парсинга статуса
+        raw_original = response.content
         parsed_status, cleaned_content = validate_status_block(response.content)
         if parsed_status:
             session.update_status(parsed_status)
@@ -94,11 +100,14 @@ class ChatHandler(BaseHandler):
         
         if debug_collector and debug_collector.enabled:
             debug_collector.capture_reasoning(response.reasoning)
+            debug_collector.capture_raw_model_response(raw_original)
             debug_collector.capture_session_info(
                 session.session_id, 
                 provider.model,
                 provider.get_provider_name()
             )
+            if parsed_status:
+                debug_collector.capture_status(parsed_status)
         
         debug_info = debug_collector.get_debug_info() if debug_collector else None
         
@@ -114,7 +123,7 @@ class ChatHandler(BaseHandler):
         
         disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
         
-        return {
+        result = {
             "message": message_for_user,
             "session_id": session.session_id,
             "model": response.model,
@@ -123,6 +132,11 @@ class ChatHandler(BaseHandler):
             "disabled_indices": disabled_indices,
             "reasoning": response.reasoning,
         }
+        
+        if debug_info:
+            result["debug"] = debug_info
+        
+        return result
     
     def _handle_orchestrator(
         self,
@@ -135,6 +149,10 @@ class ChatHandler(BaseHandler):
         user_id: str | None
     ) -> dict:
         """Handle orchestrator mode."""
+        from app.config import config
+        
+        if not provider_name:
+            provider_name = config.default_provider
         
         provider = self.create_provider(provider_name, model)
         
@@ -166,7 +184,7 @@ class ChatHandler(BaseHandler):
         
         self.save_session(session.session_id)
         
-        return {
+        result = {
             "message": final_content,
             "session_id": session.session_id,
             "model": "orchestrator",
@@ -174,6 +192,11 @@ class ChatHandler(BaseHandler):
             "total_tokens": session.total_tokens,
             "reasoning": final_reasoning,
         }
+        
+        if debug_info:
+            result["debug"] = debug_info
+        
+        return result
 
 
 def data():

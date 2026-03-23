@@ -383,18 +383,20 @@ def process_orchestrator_response(
         total_usage["output_tokens"] += response.usage.get("output_tokens", 0)
         total_usage["total_tokens"] += response.usage.get("total_tokens", 0)
         
+        # Сохраняем оригинальный контент ДО парсинга статуса
+        raw_original = response.content
         parsed_status, cleaned_content = validate_status_block(response.content)
         
         if debug_collector and debug_collector.enabled:
-            if response.content:
+            if raw_original:
                 debug_info['orchestrator_responses'].append({
-                    "content": response.content,
+                    "content": raw_original,
                     "parsed_status": parsed_status,
                     "usage": response.usage
                 })
-                debug_info['raw_model_response'] = response.content
+                debug_info['raw_model_response'] = raw_original
                 debug_info['raw_status'] = parsed_status
-                debug_collector.capture_raw_model_response(response.content)
+                debug_collector.capture_raw_model_response(raw_original)
             if response.reasoning:
                 debug_collector.capture_reasoning(response.reasoning)
             if parsed_status:
@@ -489,7 +491,7 @@ def process_orchestrator_response(
             print(f"[TSM] Calling subagent '{subtask_name}' with prompt len={len(subtask_prompt)}")
             
             try:
-                subagent_response = provider.chat(subagent_messages, None, debug_collector=None)
+                subagent_response = provider.chat(subagent_messages, None, debug_collector=debug_collector)
                 print(f"[TSM] Subagent '{subtask_name}' response, usage: {subagent_response.usage}")
             except Exception as e:
                 if debug_collector and debug_collector.enabled:
@@ -619,11 +621,16 @@ def process_orchestrator_response(
     
     print(f"[TSM] Returning total_usage: {total_usage}")
     
+    if debug_collector and debug_collector.enabled:
+        collector_debug = debug_collector.get_debug_info()
+        if collector_debug:
+            debug_info.update(collector_debug)
+    
     return {
         "final_content": current_content,
         "final_status": current_status,
         "raw_response": raw_response,
-        "debug": debug_info if debug_collector else None,
+        "debug": debug_info,
         "usage": total_usage,
         "subtask_results": subtask_results,
         "aborted": was_aborted,
