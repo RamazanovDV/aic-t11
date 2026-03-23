@@ -869,7 +869,8 @@ class OllamaProvider(BaseProvider):
         full_thinking = ""
         final_data = None
         tool_calls = None
-        total_usage = {}
+        input_tokens = 0
+        output_tokens = 0
         
         for line in lines:
             if not line.strip():
@@ -887,14 +888,18 @@ class OllamaProvider(BaseProvider):
                 if "message" in data and "tool_calls" in data["message"]:
                     tool_calls = data["message"]["tool_calls"]
                 
-                if "prompt_eval_count" in data:
-                    total_usage = {
-                        "input_tokens": data.get("prompt_eval_count", 0),
-                        "output_tokens": data.get("eval_count", 0),
-                        "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
-                    }
+                if "prompt_eval_count" in data and input_tokens == 0:
+                    input_tokens = data.get("prompt_eval_count", 0)
+                
+                output_tokens = data.get("eval_count", 0)
             except json.JSONDecodeError:
                 continue
+        
+        total_usage = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        }
         
         if not full_content and final_data:
             if "message" in final_data and "content" in final_data["message"]:
@@ -902,7 +907,7 @@ class OllamaProvider(BaseProvider):
             else:
                 full_content = final_data.get("content", "") or final_data.get("message", {}).get("content", "")
         
-        if not total_usage and full_content:
+        if total_usage.get("input_tokens", 0) == 0 and total_usage.get("output_tokens", 0) == 0 and full_content:
             total_usage = estimate_tokens(full_content)
 
         if debug_collector and final_data:
@@ -983,7 +988,8 @@ class OllamaProvider(BaseProvider):
 
         full_content = ""
         full_thinking = ""
-        total_usage = {}
+        input_tokens = 0
+        output_tokens = 0
         tool_calls = None
         final_data = None
 
@@ -995,9 +1001,6 @@ class OllamaProvider(BaseProvider):
                 try:
                     data = json.loads(line)
                     final_data = data
-                    
-                    if data.get("done"):
-                        break
                     
                     if "message" in data:
                         message_data = data["message"]
@@ -1015,21 +1018,35 @@ class OllamaProvider(BaseProvider):
                             )
                     
                     if "message" in data and data["message"].get("tool_calls"):
-                        tool_calls = data["message"]["tool_calls"]
+                        tool_calls = data["message"].get("tool_calls")
                     
-                    if "prompt_eval_count" in data:
-                        total_usage = {
-                            "input_tokens": data.get("prompt_eval_count", 0),
-                            "output_tokens": data.get("eval_count", 0),
-                            "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
-                        }
-                        if debug_collector:
-                            debug_collector.capture_api_response(data)
+                    if "prompt_eval_count" in data and input_tokens == 0:
+                        input_tokens = data.get("prompt_eval_count", 0)
+                    
+                    output_tokens = data.get("eval_count", 0)
+                    
+                    if debug_collector and "prompt_eval_count" in data:
+                        debug_collector.capture_api_response(data)
+                    
+                    if data.get("done"):
+                        break
                 except json.JSONDecodeError:
                     continue
 
-        if not total_usage and full_content:
-            total_usage = estimate_tokens(full_content)
+        total_usage = {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        }
+
+        if input_tokens == 0 and final_data:
+            input_tokens = final_data.get("prompt_eval_count", 0)
+            output_tokens = final_data.get("eval_count", output_tokens)
+            total_usage = {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+            }
 
         yield LLMChunk(
             content=full_content,
