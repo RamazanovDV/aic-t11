@@ -2,6 +2,7 @@ from typing import Optional, Any
 from app.config import config
 from app.logger import debug, info, warning, error
 from app.debug import DebugCollector
+from app.context_builder import ContextBuilder
 
 
 VALID_STATES = {"planning", "execution", "validation", "done"}
@@ -477,8 +478,15 @@ def process_orchestrator_response(
                 "orchestrator_prepared_prompt": subtask_prompt,
             }
             
+            context_builder = ContextBuilder(session, None, debug_collector)
+            rag_context = context_builder.build_rag_context(subtask_prompt)
+            enhanced_prompt = subtask_prompt + rag_context
+            
+            if rag_context:
+                subagent_call_info["rag_context_added"] = len(rag_context)
+            
             subagent_messages = [
-                Message(role="user", content=subtask_prompt, usage={})
+                Message(role="user", content=enhanced_prompt, usage={})
             ]
             
             # Отправляем статус "started" перед вызовом сабагента
@@ -492,7 +500,7 @@ def process_orchestrator_response(
             print(f"[TSM] Calling subagent '{subtask_name}' with prompt len={len(subtask_prompt)}")
             
             try:
-                subagent_response = provider.chat(subagent_messages, None, debug_collector=debug_collector)
+                subagent_response = provider.chat(subagent_messages, None, debug_collector=debug_collector, tools=mcp_tools)
                 print(f"[TSM] Subagent '{subtask_name}' response, usage: {subagent_response.usage}")
             except Exception as e:
                 if debug_collector and debug_collector.enabled:
