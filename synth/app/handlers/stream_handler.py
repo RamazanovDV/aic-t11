@@ -110,6 +110,10 @@ class StreamHandler(BaseHandler):
                 )
                 continue
             
+            if chunk.is_final:
+                total_usage = chunk.usage
+                continue
+            
             if chunk.content:
                 full_content += chunk.content
             

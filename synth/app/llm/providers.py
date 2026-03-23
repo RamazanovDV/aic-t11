@@ -270,9 +270,9 @@ class GenericOpenAIProvider(BaseProvider):
                             full_reasoning += reasoning
                         if content or reasoning:
                             yield LLMChunk(
-                                content=full_content,
+                                content=content,
                                 is_final=False,
-                                reasoning=full_reasoning if full_reasoning else None
+                                reasoning=reasoning if reasoning else None
                             )
 
                         if "usage" in data:
@@ -726,7 +726,7 @@ class AnthropicProvider(BaseProvider):
                                     content = delta.get("text", "")
                                     full_content += content
                                     yield LLMChunk(
-                                        content=full_content,
+                                        content=content,
                                         is_final=False,
                                         reasoning=full_reasoning if full_reasoning else None
                                     )
@@ -737,7 +737,7 @@ class AnthropicProvider(BaseProvider):
                                 yield LLMChunk(
                                     content=full_content,
                                     is_final=False,
-                                    reasoning=full_reasoning if full_reasoning else None
+                                    reasoning=thinking if thinking else None
                                 )
                             
                             elif delta.get("type") == "input_json_delta":
@@ -1009,9 +1009,9 @@ class OllamaProvider(BaseProvider):
                             full_thinking += thinking_delta
                         if content_delta or thinking_delta:
                             yield LLMChunk(
-                                content=full_content,
+                                content=content_delta,
                                 is_final=False,
-                                reasoning=full_thinking if full_thinking else None
+                                reasoning=thinking_delta if thinking_delta else None
                             )
                     
                     if "message" in data and data["message"].get("tool_calls"):
