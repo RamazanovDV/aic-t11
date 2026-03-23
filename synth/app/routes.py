@@ -1843,6 +1843,7 @@ def fetch_models_from_providers():
     for provider_name, provider_cfg in providers.items():
         try:
             provider_cfg = provider_cfg.copy()
+            provider_cfg["type"] = provider_name
             if "default_model" not in provider_cfg:
                 provider_cfg["default_model"] = config.get_default_model(provider_name)
             
