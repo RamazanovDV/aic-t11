@@ -5,6 +5,7 @@ from typing import Generator
 from app.handlers.base import BaseHandler
 from app.session import Session
 from app.debug import DebugCollector
+from app.llm.base import Message
 
 
 class StreamHandler(BaseHandler):
@@ -30,7 +31,7 @@ class StreamHandler(BaseHandler):
         
         debug_collector = self.create_debug_collector(session)
         
-        context_builder = self.create_context_builder(session, user_id)
+        context_builder = self.create_context_builder(session, user_id, debug_collector)
         system_prompt = context_builder.build_system_prompt()
         
         system_prompt = context_builder.apply_rag_to_prompt(system_prompt, message)
@@ -50,7 +51,7 @@ class StreamHandler(BaseHandler):
         
         if tsm_mode == "orchestrator":
             yield from self._handle_orchestrator_stream(
-                session, messages, system_prompt, provider, debug_collector, message, provider_name, model
+                session, messages, system_prompt, provider, debug_collector, message, provider_name, model, mcp_tools
             )
         else:
             yield from self._handle_simple_stream(
@@ -229,7 +230,8 @@ class StreamHandler(BaseHandler):
         debug_collector: DebugCollector | None,
         user_message: str,
         provider_name: str,
-        model: str | None
+        model: str | None,
+        mcp_tools: list
     ) -> Generator[str, None, None]:
         """Handle orchestrator mode with streaming events."""
         import json
@@ -266,7 +268,8 @@ class StreamHandler(BaseHandler):
                     debug_prompt=system_prompt,
                     progress_queue=progress_queue,
                     token_limit=token_limit,
-                    stop_event=stop_event
+                    stop_event=stop_event,
+                    mcp_tools=mcp_tools
                 )
                 result_queue.put(("success", result))
             except Exception as e:

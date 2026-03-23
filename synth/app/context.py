@@ -327,7 +327,7 @@ def get_project_prompt(session) -> str:
             else:
                 result += f"- {key}: {value}\n"
     
-    schedules = scheduler.scheduler.get_schedules(project_name)
+    schedules = scheduler.get_schedules(project_name)
     enabled_schedules = [s for s in schedules if s.enabled]
     if project_name:
         result += f"\n[ЗАДАНИЯ ПО РАСПИСАНИЮ]\n"

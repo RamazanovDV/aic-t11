@@ -38,9 +38,9 @@ class BaseHandler(ABC):
         
         return ProviderFactory.create(provider_name, config)
     
-    def create_context_builder(self, session: Session, user_id: str | None = None) -> ContextBuilder:
+    def create_context_builder(self, session: Session, user_id: str | None = None, debug_collector=None) -> ContextBuilder:
         """Create ContextBuilder for session."""
-        return ContextBuilder(session, user_id)
+        return ContextBuilder(session, user_id, debug_collector)
     
     def create_orchestration_controller(
         self,

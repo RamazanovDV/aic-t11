@@ -41,9 +41,10 @@ class ChatHandler(BaseHandler):
         
         debug_collector = self.create_debug_collector(session)
         
-        context_builder = self.create_context_builder(session, user_id)
+        context_builder = self.create_context_builder(session, user_id, debug_collector)
         system_prompt = context_builder.build_system_prompt()
-        messages = context_builder.build_messages(message)  # Pass user message!
+        system_prompt = context_builder.apply_rag_to_prompt(system_prompt, message)
+        messages = context_builder.build_messages(message)
         
         mcp_tools = context_builder.build_mcp_tools(provider_name)
         
@@ -52,7 +53,7 @@ class ChatHandler(BaseHandler):
         if tsm_mode == "orchestrator":
             return self._handle_orchestrator(
                 session, messages, system_prompt, provider_name, model, 
-                debug_collector, user_id
+                debug_collector, user_id, mcp_tools
             )
         
         return self._handle_simple(
@@ -146,7 +147,8 @@ class ChatHandler(BaseHandler):
         provider_name: str | None,
         model: str | None,
         debug_collector: DebugCollector | None,
-        user_id: str | None
+        user_id: str | None,
+        mcp_tools: list
     ) -> dict:
         """Handle orchestrator mode."""
         from app.config import config
@@ -162,7 +164,8 @@ class ChatHandler(BaseHandler):
             provider=provider,
             system_prompt=system_prompt,
             debug_collector=debug_collector,
-            debug_prompt=system_prompt
+            debug_prompt=system_prompt,
+            mcp_tools=mcp_tools
         )
         
         final_content = result.get("final_content", "")

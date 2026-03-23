@@ -1108,9 +1108,18 @@ class SessionManager:
         return self._sessions[session_id]
 
     def reset_session(self, session_id: str) -> None:
+        from app.logger import info, debug
+        debug("SESSION", f"reset_session called for: {session_id}")
+        debug("SESSION", f"Sessions in memory: {list(self._sessions.keys())}")
         if session_id in self._sessions:
+            info("SESSION", f"Clearing session in memory: {session_id}")
             self._sessions[session_id].clear()
             self._sessions[session_id].save()
+        else:
+            info("SESSION", f"Session not in memory, deleting file: {session_id}")
+            session_file = storage._session_file(session_id)
+            if session_file.exists():
+                session_file.unlink()
 
     def delete_session(self, session_id: str) -> bool:
         if session_id in self._sessions:

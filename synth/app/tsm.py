@@ -246,7 +246,8 @@ def process_orchestrator_response(
     debug_prompt: str | None = None,
     progress_queue=None,
     token_limit: int | None = None,
-    stop_event=None
+    stop_event=None,
+    mcp_tools: list | None = None
 ) -> dict:
     """
     Обработать ответ оркестратора и при необходимости вызвать сабагентов.
@@ -364,7 +365,7 @@ def process_orchestrator_response(
         current_system_prompt = build_system_prompt(system_prompt, active_subtasks_internal)
         
         try:
-            response = provider.chat(llm_messages, current_system_prompt, debug_collector=debug_collector)
+            response = provider.chat(llm_messages, current_system_prompt, debug_collector=debug_collector, tools=mcp_tools)
         except Exception as e:
             error("TSM", f"ERROR in provider.chat iteration {iteration}: {e}")
             debug("TSM", "Stopping orchestration due to error, returning current results")

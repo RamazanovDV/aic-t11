@@ -914,9 +914,13 @@ def _old_chat_stream_placeholder():
     pass
 
 
+@api_bp.route("/chat/reset", methods=["POST"])
 def reset_chat():
+    from app.logger import info
     session_id = get_session_id()
+    info("RESET", f"Resetting session: {session_id}")
     session_manager.reset_session(session_id)
+    info("RESET", f"Session reset complete: {session_id}")
 
     return jsonify({
         "status": "reset",
