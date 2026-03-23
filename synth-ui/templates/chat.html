@@ -535,7 +535,7 @@
                         <option value="">По умолчанию</option>
                     </select>
                     <span class="panel-label">Модель:</span>
-                    <select class="model-select panel-model-select" data-panel="${index}" disabled>
+                    <select class="model-select panel-model-select" data-panel="${index}" onchange="onPanelModelChange(${index})" disabled>
                         <option value="">Выберите модель</option>
                     </select>
                     <button class="btn btn-icon btn-refresh" onclick="loadPanelModels(${index})" title="Обновить модели">↻</button>
@@ -1401,7 +1401,41 @@
     }
 
     async function onPanelProviderChange(panelIndex) {
+        const providerSelect = document.querySelector(`.panel-provider-select[data-panel="${panelIndex}"]`);
+        const provider = providerSelect ? providerSelect.value || '' : '';
+        
+        const panel = panels[panelIndex];
+        if (panel && panel.sessionId) {
+            try {
+                await fetch(`/api/sessions/${panel.sessionId}/context-settings`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({provider: provider})
+                });
+            } catch (e) {
+                console.error('Failed to save provider:', e);
+            }
+        }
+        
         await loadPanelModels(panelIndex);
+    }
+
+    async function onPanelModelChange(panelIndex) {
+        const modelSelect = document.querySelector(`.model-select[data-panel="${panelIndex}"]`);
+        const model = modelSelect ? modelSelect.value || '' : '';
+        
+        const panel = panels[panelIndex];
+        if (panel && panel.sessionId) {
+            try {
+                await fetch(`/api/sessions/${panel.sessionId}/context-settings`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({model: model})
+                });
+            } catch (e) {
+                console.error('Failed to save model:', e);
+            }
+        }
     }
 
     async function togglePanelDebug(panelIndex) {

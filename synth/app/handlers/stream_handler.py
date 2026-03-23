@@ -19,7 +19,8 @@ class StreamHandler(BaseHandler):
         provider_name: str | None = None,
         model: str | None = None,
         debug_mode: bool = False,
-        user_id: str | None = None
+        user_id: str | None = None,
+        source: str | None = None
     ) -> Generator[str, None, None]:
         """Handle stream request.
         
@@ -28,7 +29,10 @@ class StreamHandler(BaseHandler):
         """
         session = self.get_session(session_id)
         
-        session.add_user_message(message, source="web")
+        if provider_name or model:
+            session.set_provider_model(provider_name or "", model or "")
+        
+        session.add_user_message(message, source=source or "web")
         
         debug_collector = self.create_debug_collector(session)
         

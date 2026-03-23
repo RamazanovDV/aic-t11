@@ -820,6 +820,7 @@ def chat():
     use_rag = data.get("use_rag", False)
     rag_index_name = data.get("rag_index_name")
     rag_top_k = data.get("rag_top_k", 5)
+    source = data.get("source", "web")
     
     session_id = get_session_id()
     user_id = request.headers.get("X-User-Id")
@@ -835,7 +836,8 @@ def chat():
         tsm_mode=tsm_mode,
         use_rag=use_rag,
         rag_index_name=rag_index_name,
-        rag_top_k=rag_top_k
+        rag_top_k=rag_top_k,
+        source=source
     )
     
     if "error" in result:
@@ -889,7 +891,7 @@ def chat_stream():
     provider_name = data.get("provider")
     model = data.get("model")
     debug_mode = data.get("debug", False)
-    source_type = data.get("source", "web")
+    source = data.get("source", "web")
     
     session_id = get_session_id()
     user_id = request.headers.get("X-User-Id")
@@ -903,7 +905,8 @@ def chat_stream():
             provider_name=provider_name,
             model=model,
             debug_mode=debug_mode,
-            user_id=user_id
+            user_id=user_id,
+            source=source
         ),
         mimetype='text/event-stream'
     )
@@ -1234,6 +1237,12 @@ def set_context_settings(session_id: str):
 
     if "stream_enabled" in data:
         session.session_settings["stream_enabled"] = bool(data["stream_enabled"])
+
+    if "provider" in data:
+        session.provider = data["provider"]
+
+    if "model" in data:
+        session.model = data["model"]
 
     session_manager.save_session(session_id)
 

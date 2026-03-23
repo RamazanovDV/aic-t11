@@ -23,7 +23,8 @@ class ChatHandler(BaseHandler):
         tsm_mode: str | None = None,
         use_rag: bool = False,
         rag_index_name: str | None = None,
-        rag_top_k: int = 5
+        rag_top_k: int = 5,
+        source: str | None = None
     ) -> dict[str, Any]:
         """Handle chat request.
         
@@ -32,13 +33,16 @@ class ChatHandler(BaseHandler):
         """
         session = self.get_session(session_id)
         
+        if provider_name or model:
+            session.set_provider_model(provider_name or "", model or "")
+        
         if tsm_mode:
             try:
                 tsm.set_tsm_mode(session, tsm_mode)
             except ValueError as e:
                 return {"error": f"Invalid tsm_mode: {str(e)}"}
         
-        session.add_user_message(message, source="web")
+        session.add_user_message(message, source=source or "web")
         
         debug_collector = self.create_debug_collector(session)
         
