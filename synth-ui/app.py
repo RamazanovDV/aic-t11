@@ -128,6 +128,12 @@ def chat():
         payload["provider"] = provider_name
     if model:
         payload["model"] = model
+    debug_mode = data.get("debug")
+    if debug_mode is not None:
+        payload["debug"] = debug_mode
+    source = data.get("source")
+    if source:
+        payload["source"] = source
 
     try:
         response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=payload, timeout=60)
@@ -166,6 +172,9 @@ def chat_stream():
     tsm_mode = data.get("tsm_mode")
     if tsm_mode:
         payload["tsm_mode"] = tsm_mode
+    source = data.get("source")
+    if source:
+        payload["source"] = source
 
     try:
         response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=payload, timeout=120, stream=True)
