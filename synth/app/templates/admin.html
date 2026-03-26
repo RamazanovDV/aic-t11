@@ -1773,6 +1773,19 @@
                 }
             }
             
+            if (modelEl) {
+                const selectedProvider = name && agentsConfig[name] ? agentsConfig[name].provider || '' : '';
+                loadAgentModelSelect(uniqueId, selectedProvider || null);
+                if (name && agentsConfig[name] && agentsConfig[name].model) {
+                    modelEl.value = agentsConfig[name].model || '';
+                }
+            }
+            
+            if (contextFileEl) {
+                const selectedContextFile = name && agentsConfig[name] ? agentsConfig[name].context_file || '' : '';
+                populateContextFileSelect(uniqueId, selectedContextFile);
+            }
+            
             modal.style.display = 'flex';
         } catch (e) {
             console.error('Error in openAgentModal:', e);
@@ -1795,13 +1808,15 @@
                 </div>
                 <div class="form-group">
                     <label for="agent-modal-${uniqueId}-provider">Провайдер (пусто = по умолчанию)</label>
-                    <select id="agent-modal-${uniqueId}-provider" class="form-input">
+                    <select id="agent-modal-${uniqueId}-provider" class="form-input" onchange="onAgentProviderChange('${uniqueId}')">
                         <option value="">По умолчанию</option>
                     </select>
                 </div>
                 <div class="form-group">
                     <label for="agent-modal-${uniqueId}-model">Модель (пусто = по умолчанию)</label>
-                    <input type="text" id="agent-modal-${uniqueId}-model" class="form-input" placeholder="gpt-4o">
+                    <select id="agent-modal-${uniqueId}-model" class="form-input">
+                        <option value="">По умолчанию</option>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label for="agent-modal-${uniqueId}-temperature">Temperature</label>
@@ -1817,7 +1832,9 @@
                 </div>
                 <div class="form-group">
                     <label for="agent-modal-${uniqueId}-context-file">Контекстный файл</label>
-                    <input type="text" id="agent-modal-${uniqueId}-context-file" class="form-input" placeholder="ROLE_DEVELOPER.md">
+                    <select id="agent-modal-${uniqueId}-context-file" class="form-input">
+                        <option value="">-- Выберите файл --</option>
+                    </select>
                 </div>
                 <div class="modal-actions">
                     <button class="btn btn-danger" id="agent-modal-${uniqueId}-delete-btn" onclick="deleteCurrentAgent('${uniqueId}')" style="display:none">Удалить</button>
@@ -1830,6 +1847,77 @@
     
     function closeAgentModal() {
         document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+    }
+    
+    function onAgentProviderChange(uniqueId) {
+        const provider = document.getElementById('agent-modal-' + uniqueId + '-provider').value;
+        loadAgentModelSelect(uniqueId, provider || null);
+    }
+    
+    async function loadAgentModelSelect(uniqueId, providerFilter) {
+        const select = document.getElementById('agent-modal-' + uniqueId + '-model');
+        if (!select) return;
+        
+        select.innerHTML = '<option value="">Загрузка...</option>';
+        
+        try {
+            const response = await fetch('/admin/models/available', { headers: getAuthHeaders() });
+            const data = await response.json();
+            const models = data.models || {};
+            
+            let modelNames = Object.keys(models);
+            if (providerFilter) {
+                modelNames = modelNames.filter(m => 
+                    (models[m].provider || '*') === providerFilter || 
+                    (models[m].provider || '*') === '*'
+                );
+            }
+            modelNames.sort();
+            
+            select.innerHTML = '<option value="">-- По умолчанию --</option>';
+            for (const name of modelNames) {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = `${name} (${models[name].provider || '*'})`;
+                select.appendChild(option);
+            }
+        } catch (e) {
+            console.error('Failed to load models:', e);
+            select.innerHTML = '<option value="">Ошибка загрузки</option>';
+        }
+    }
+    
+    function populateContextFileSelect(uniqueId, selectedFile) {
+        const select = document.getElementById('agent-modal-' + uniqueId + '-context-file');
+        if (!select) return;
+        
+        select.innerHTML = '<option value="">-- Выберите файл --</option>';
+        
+        if (typeof systemFiles !== 'undefined' && systemFiles && systemFiles.length > 0) {
+            const systemGroup = document.createElement('optgroup');
+            systemGroup.label = 'Системные';
+            for (const file of systemFiles) {
+                const option = document.createElement('option');
+                option.value = file.filename;
+                option.textContent = file.filename + (file.is_overridden ? ' *' : '');
+                if (selectedFile === file.filename) option.selected = true;
+                systemGroup.appendChild(option);
+            }
+            select.appendChild(systemGroup);
+        }
+        
+        if (typeof userFiles !== 'undefined' && userFiles && userFiles.length > 0) {
+            const userGroup = document.createElement('optgroup');
+            userGroup.label = 'Пользовательские';
+            for (const file of userFiles) {
+                const option = document.createElement('option');
+                option.value = file.filename;
+                option.textContent = file.filename + (file.is_default ? ' (по умолчанию)' : '');
+                if (selectedFile === file.filename) option.selected = true;
+                userGroup.appendChild(option);
+            }
+            select.appendChild(userGroup);
+        }
     }
     
     function deleteCurrentAgent(uniqueId) {
@@ -1848,11 +1936,11 @@
             name: name,
             display_name: document.getElementById('agent-modal-' + uniqueId + '-display-name').value.trim() || name,
             provider: document.getElementById('agent-modal-' + uniqueId + '-provider').value,
-            model: document.getElementById('agent-modal-' + uniqueId + '-model').value.trim(),
+            model: document.getElementById('agent-modal-' + uniqueId + '-model').value,
             temperature: parseFloat(document.getElementById('agent-modal-' + uniqueId + '-temperature').value) || 0.7,
             top_p: document.getElementById('agent-modal-' + uniqueId + '-top-p').value ? parseFloat(document.getElementById('agent-modal-' + uniqueId + '-top-p').value) : null,
             top_k: document.getElementById('agent-modal-' + uniqueId + '-top-k').value ? parseInt(document.getElementById('agent-modal-' + uniqueId + '-top-k').value) : null,
-            context_file: document.getElementById('agent-modal-' + uniqueId + '-context-file').value.trim() || `ROLE_${name.toUpperCase()}.md`,
+            context_file: document.getElementById('agent-modal-' + uniqueId + '-context-file').value || `ROLE_${name.toUpperCase()}.md`,
         };
         
         saveAgentData(agentData);

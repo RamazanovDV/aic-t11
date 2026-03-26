@@ -1118,7 +1118,7 @@
         }
     }
     
-    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null, groupInfo = null) {
+    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null, groupInfo = null, agentRole = null) {
         const panel = panels[panelIndex];
         const container = panel.messagesContainer;
         if (!container) return;
@@ -1129,6 +1129,10 @@
         
         const div = document.createElement('div');
         div.className = `message message-${role}${disabled ? ' message-disabled' : ''}`;
+        
+        if (agentRole) {
+            div.classList.add('message-with-agent');
+        }
         
         if (statusClass && (role === 'user' || role === 'assistant')) {
             div.classList.add(statusClass);
@@ -1147,6 +1151,12 @@
                     </div>
                 </div>
             `;
+        }
+        
+        let agentBadgeHtml = '';
+        if (role === 'assistant' && agentRole) {
+            const displayName = getAgentDisplayName ? getAgentDisplayName(agentRole) : agentRole;
+            agentBadgeHtml = `<div class="message-agent-badge">${escapeHtml(displayName)}</div>`;
         }
         
         let contentHtml = '';
@@ -1201,7 +1211,7 @@
             sourceHtml = `<div class="message-tokens" style="cursor: pointer;" onclick="openProfileModal('${username}')">${source}</div>`;
         }
         
-        let html = thinkingBlockHtml + intermediateBlockHtml + contentHtml;
+        let html = thinkingBlockHtml + agentBadgeHtml + intermediateBlockHtml + contentHtml;
         if (tokensHtml) {
             html += tokensHtml;
         }

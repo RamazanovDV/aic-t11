@@ -404,8 +404,7 @@ def get_interview_prompt() -> str:
 
 def get_role_prompt(role_name: str) -> str:
     """Получить промпт роли агента из контекстного файла"""
-    role_file = f"ROLE_{role_name.upper()}.md"
-    return config.get_context_file(role_file) or ""
+    return config.get_role_prompt(role_name) or ""
 
 
 def get_roles_description() -> str:
