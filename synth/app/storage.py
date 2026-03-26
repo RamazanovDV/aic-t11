@@ -48,6 +48,7 @@ class FileStorage:
                     "tool_call_id": m.tool_call_id,
                     "tool_use": m.tool_use,
                     "group_id": m.group_id,
+                    "agent_role": m.agent_role,
                 }
                 for m in session.messages
             ],
@@ -85,6 +86,7 @@ class FileStorage:
             "owner_id": session.owner_id,
             "access": session.access,
             "mcp_servers": session.mcp_servers,
+            "agent_role": session.agent_role,
         }
 
         with open(session_file, "w") as f:

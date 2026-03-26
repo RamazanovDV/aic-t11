@@ -17,7 +17,7 @@ class ContextBuilder:
         self.user_id = user_id
         self.debug_collector = debug_collector
     
-    def build_system_prompt(self) -> str:
+    def build_system_prompt(self, agent_role: str | None = None) -> str:
         """Build full system prompt from components."""
         from app.context import (
             get_system_prompt,
@@ -25,7 +25,8 @@ class ContextBuilder:
             get_project_prompt,
             get_status_prompt,
             should_show_interview,
-            get_interview_prompt
+            get_interview_prompt,
+            get_role_prompt
         )
         
         system_prompt = get_system_prompt()
@@ -36,9 +37,14 @@ class ContextBuilder:
         if should_show_interview(self.session, self.user_id):
             system_prompt += get_interview_prompt()
         
+        if agent_role:
+            role_prompt = get_role_prompt(agent_role)
+            if role_prompt:
+                system_prompt += "\n\n" + role_prompt
+        
         return system_prompt
     
-    def build_messages(self, include_user_message: str | None = None) -> list[Message]:
+    def build_messages(self, include_user_message: str | None = None, current_agent_role: str | None = None) -> list[Message]:
         """Build messages for LLM."""
         llm_messages = self.session.get_messages_for_llm()
         
@@ -51,7 +57,10 @@ class ContextBuilder:
                 else:
                     formatted_messages.insert(0, {"role": "system", "content": summary_text})
             elif msg.role in ("user", "assistant"):
-                formatted_messages.append({"role": msg.role, "content": msg.content})
+                content = msg.content
+                if msg.role == "assistant" and msg.agent_role and msg.agent_role != current_agent_role:
+                    content = f"Ответ ассистента с ролью {msg.agent_role}:\n{content}"
+                formatted_messages.append({"role": msg.role, "content": content})
         
         if include_user_message:
             formatted_messages.append({"role": "user", "content": include_user_message})

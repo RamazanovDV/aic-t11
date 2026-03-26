@@ -475,6 +475,7 @@
                 sessionId: getPanelSessionId(i),
                 provider: '',
                 model: '',
+                agentRole: '',
                 messages: [],
                 totalInput: 0,
                 totalOutput: 0,
@@ -539,6 +540,10 @@
                         <option value="">Выберите модель</option>
                     </select>
                     <button class="btn btn-icon btn-refresh" onclick="loadPanelModels(${index})" title="Обновить модели">↻</button>
+                    <span class="panel-label">Профиль:</span>
+                    <select class="agent-select panel-agent-select" data-panel="${index}" onchange="onPanelAgentChange(${index})">
+                        <option value="">Без профиля</option>
+                    </select>
                     <div class="chat-header-right">
                         <label class="debug-toggle">
                             <input type="checkbox" class="panel-debug-toggle" data-panel="${index}" ${debugMode ? 'checked' : ''} onchange="togglePanelDebug(${index})">
@@ -720,6 +725,7 @@
         
         await loadSessionsList();
         await loadProviders();
+        await loadAgents();
         
         for (let i = 0; i < panels.length; i++) {
             try {
@@ -770,6 +776,61 @@
         }
     }
 
+    let availableAgents = {};
+
+    async function loadAgents() {
+        try {
+            const response = await authFetch('/api/agents');
+            if (response.ok) {
+                const data = await response.json();
+                availableAgents = data.agents || {};
+                
+                panels.forEach((panel, idx) => {
+                    const agentSelect = document.querySelector(`.panel-agent-select[data-panel="${idx}"]`);
+                    if (agentSelect) {
+                        agentSelect.innerHTML = '<option value="">Без профиля</option>';
+                        for (const [name, cfg] of Object.entries(availableAgents)) {
+                            const option = document.createElement('option');
+                            option.value = name;
+                            option.textContent = cfg.display_name || name;
+                            agentSelect.appendChild(option);
+                        }
+                        if (panel.agentRole && availableAgents[panel.agentRole]) {
+                            agentSelect.value = panel.agentRole;
+                        }
+                    }
+                });
+            }
+        } catch (err) {
+            console.error('Failed to load agents:', err);
+        }
+    }
+
+    function onPanelAgentChange(panelIndex) {
+        const agentSelect = document.querySelector(`.panel-agent-select[data-panel="${panelIndex}"]`);
+        if (!agentSelect) return;
+        
+        const agentRole = agentSelect.value;
+        panels[panelIndex].agentRole = agentRole;
+        
+        saveAgentRole(panelIndex, agentRole);
+    }
+
+    async function saveAgentRole(panelIndex, agentRole) {
+        const panel = panels[panelIndex];
+        if (!panel.sessionId) return;
+        
+        try {
+            await authFetch(`/api/sessions/${panel.sessionId}/agent-role`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agent_role: agentRole })
+            });
+        } catch (err) {
+            console.error('Failed to save agent role:', err);
+        }
+    }
+
     async function loadPanelSessions(panelIndex) {
         const panel = panels[panelIndex];
         const sessionSelect = document.querySelector(`.panel-session-select[data-panel="${panelIndex}"]`);
@@ -808,6 +869,7 @@
                 const data = await response.json();
                 panel.provider = data.provider || '';
                 panel.model = data.model || '';
+                panel.agentRole = data.agent_role || '';
                 panel.currentBranch = data.current_branch || 'main';
                 panel.branches = data.branches || [];
                 panel.checkpoints = data.checkpoints || [];
@@ -1592,6 +1654,7 @@
                 body: JSON.stringify({ 
                     message, provider, model, debug: debugMode, source: username + ' | web', 
                     tsm_mode: panel.tsmMode || null,
+                    agent_role: panel.agentRole || null,
                     ...(panelRagSettings[panelIndex] ? {
                         use_rag: panelRagSettings[panelIndex].enabled,
                         rag_index_name: panelRagSettings[panelIndex].indexName,
@@ -1656,7 +1719,7 @@
         let assistantRow = null;
 
         try {
-            const requestBody = { message, provider, model, debug: debugMode, source: username + ' | web', tsm_mode: panel.tsmMode || null };
+            const requestBody = { message, provider, model, debug: debugMode, source: username + ' | web', tsm_mode: panel.tsmMode || null, agent_role: panel.agentRole || null };
             const response = await fetch('/api/chat/stream', {
                 method: 'POST',
                 headers: {

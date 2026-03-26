@@ -682,6 +682,15 @@ body {
     min-width: 250px;
 }
 
+.agent-select {
+    padding: 0.4rem 0.75rem;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.875rem;
+}
+
 .btn-icon {
     padding: 0.4rem 0.6rem;
     background: var(--bg-tertiary);

@@ -22,7 +22,8 @@ class Message:
     tool_call_id: str | None = None
     tool_use: list[dict] | None = None
     reasoning: str | None = None
-    group_id: str | None = None  # для группировки связанных сообщений
+    group_id: str | None = None
+    agent_role: str | None = None
 
 
 @dataclass

@@ -821,6 +821,7 @@ def chat():
     rag_index_name = data.get("rag_index_name")
     rag_top_k = data.get("rag_top_k", 5)
     source = data.get("source", "web")
+    agent_role = data.get("agent_role")
     
     session_id = get_session_id()
     user_id = request.headers.get("X-User-Id")
@@ -837,7 +838,8 @@ def chat():
         use_rag=use_rag,
         rag_index_name=rag_index_name,
         rag_top_k=rag_top_k,
-        source=source
+        source=source,
+        agent_role=agent_role
     )
     
     if "error" in result:
@@ -892,6 +894,7 @@ def chat_stream():
     model = data.get("model")
     debug_mode = data.get("debug", False)
     source = data.get("source", "web")
+    agent_role = data.get("agent_role")
     
     session_id = get_session_id()
     user_id = request.headers.get("X-User-Id")
@@ -906,7 +909,8 @@ def chat_stream():
             model=model,
             debug_mode=debug_mode,
             user_id=user_id,
-            source=source
+            source=source,
+            agent_role=agent_role
         ),
         mimetype='text/event-stream'
     )
@@ -929,6 +933,20 @@ def reset_chat():
         "status": "reset",
         "session_id": session_id,
     })
+
+
+@api_bp.route("/agents", methods=["GET"])
+def get_agents_api():
+    agents = config.agents
+    result = {}
+    for name, cfg in agents.items():
+        result[name] = {
+            "name": name,
+            "display_name": cfg.get("display_name", name),
+            "provider": cfg.get("provider", ""),
+            "model": cfg.get("model", ""),
+        }
+    return jsonify({"agents": result})
 
 
 @api_bp.route("/sessions", methods=["GET"])
@@ -963,6 +981,7 @@ def get_session(session_id: str):
             "id": m.id,
             "group_id": m.group_id,
             "tool_use": m.tool_use,
+            "agent_role": m.agent_role,
         }
         for m in current_branch_messages
     ]
@@ -999,6 +1018,7 @@ def get_session(session_id: str):
         "project": session.status.get("project") if session.status else None,
         "task_name": session.status.get("task_name") if session.status else None,
         "state": session.status.get("state") if session.status else None,
+        "agent_role": session.agent_role,
     })
 
 
@@ -1034,6 +1054,24 @@ def rename_session(session_id: str):
         return jsonify({"error": "Failed to rename session (may already exist)"}), 400
     
     return jsonify({"status": "renamed", "old_id": session_id, "new_id": new_name})
+
+
+@api_bp.route("/sessions/<session_id>/agent-role", methods=["POST"])
+@require_user
+def set_session_agent_role(session_id: str):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+
+    agent_role = data.get("agent_role", "")
+    session.set_agent_role(agent_role)
+    session_manager.save_session(session_id)
+
+    return jsonify({"status": "ok", "agent_role": session.agent_role})
 
 
 @api_bp.route("/sessions/<session_id>/copy", methods=["POST"])
@@ -2167,6 +2205,85 @@ def admin_embeddings_list():
     from app.embeddings.storage import embedding_storage
     indexes = embedding_storage.list_indexes()
     return jsonify([idx.to_dict() for idx in indexes])
+
+
+@admin_bp.route("/agents", methods=["GET"])
+@require_user
+def get_agents():
+    agents = config.agents
+    result = {}
+    for name, cfg in agents.items():
+        context_file = cfg.get("context_file", "")
+        is_overridden = False
+        if context_file:
+            is_overridden = config.context_manager.is_overridden(context_file)
+        result[name] = {
+            "name": name,
+            "display_name": cfg.get("display_name", name),
+            "provider": cfg.get("provider", ""),
+            "model": cfg.get("model", ""),
+            "temperature": cfg.get("temperature", 0.7),
+            "top_p": cfg.get("top_p"),
+            "top_k": cfg.get("top_k"),
+            "context_file": context_file,
+            "is_overridden": is_overridden,
+        }
+    return jsonify({"agents": result})
+
+
+@admin_bp.route("/agents", methods=["POST"])
+@require_user
+def save_agent():
+    data = request.get_json()
+    if not data or "name" not in data:
+        return jsonify({"error": "Agent name is required"}), 400
+
+    name = data["name"]
+    agent_config = {
+        "display_name": data.get("display_name", name),
+        "provider": data.get("provider", ""),
+        "model": data.get("model", ""),
+        "temperature": data.get("temperature", 0.7),
+        "top_p": data.get("top_p"),
+        "top_k": data.get("top_k"),
+        "context_file": data.get("context_file", f"ROLE_{name.upper()}.md"),
+    }
+
+    config.save_agent(name, agent_config)
+    return jsonify({"message": "Agent saved", "name": name})
+
+
+@admin_bp.route("/agents/<agent_name>", methods=["GET"])
+@require_user
+def get_agent(agent_name: str):
+    agent = config.get_agent(agent_name)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+
+    context_file = agent.get("context_file", "")
+    is_overridden = False
+    if context_file:
+        is_overridden = config.context_manager.is_overridden(context_file)
+
+    return jsonify({
+        "name": agent_name,
+        "display_name": agent.get("display_name", agent_name),
+        "provider": agent.get("provider", ""),
+        "model": agent.get("model", ""),
+        "temperature": agent.get("temperature", 0.7),
+        "top_p": agent.get("top_p"),
+        "top_k": agent.get("top_k"),
+        "context_file": context_file,
+        "is_overridden": is_overridden,
+    })
+
+
+@admin_bp.route("/agents/<agent_name>", methods=["DELETE"])
+@require_user
+def delete_agent(agent_name: str):
+    if config.delete_agent(agent_name):
+        return jsonify({"message": "Agent deleted", "name": agent_name})
+    return jsonify({"error": "Agent not found"}), 404
 
 
 @api_bp.route("/embeddings/list", methods=["GET"])

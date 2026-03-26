@@ -284,6 +284,21 @@ def get_config():
     })
 
 
+@ui_bp.route("/api/agents", methods=["GET"])
+def get_agents():
+    url = f"{ui_config.backend_url}/api/agents"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/sessions", methods=["GET"])
 def list_sessions():
     url = f"{ui_config.backend_url}/api/sessions"
@@ -365,6 +380,23 @@ def get_session(session_id: str):
         response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         if response.status_code == 404:
             return jsonify({"provider": "", "model": "", "messages": []})
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/agent-role", methods=["POST"])
+def set_session_agent_role(session_id: str):
+    data = request.get_json() or {}
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/agent-role"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:

@@ -98,6 +98,7 @@ class Session:
     owner_id: str | None = None
     access: str = "owner"
     mcp_servers: list[dict[str, str]] = field(default_factory=list)
+    agent_role: str = ""
 
     def _ensure_main_branch(self) -> None:
         """Ensure main branch exists"""
@@ -151,13 +152,17 @@ class Session:
             "total_tokens": self.total_tokens,
         }
 
-    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None, tool_use: list[dict] | None = None, reasoning: str | None = None, group_id: str | None = None) -> None:
-        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch, status=self.status.copy() if self.status else None, tool_use=tool_use, reasoning=reasoning, group_id=group_id)
+    def add_assistant_message(self, content: str, usage: dict[str, int] | None = None, debug: dict | None = None, model: str | None = None, tool_use: list[dict] | None = None, reasoning: str | None = None, group_id: str | None = None, agent_role: str | None = None) -> None:
+        msg = Message(role="assistant", content=content, usage=usage or {}, debug=debug, model=model, branch_id=self.current_branch, status=self.status.copy() if self.status else None, tool_use=tool_use, reasoning=reasoning, group_id=group_id, agent_role=agent_role)
         self.messages.append(msg)
         if usage:
             self.total_tokens += usage.get("total_tokens", 0)
             self.input_tokens += usage.get("input_tokens", 0)
             self.output_tokens += usage.get("output_tokens", 0)
+        self.updated_at = datetime.now()
+
+    def set_agent_role(self, role: str) -> None:
+        self.agent_role = role
         self.updated_at = datetime.now()
 
     def update_status(self, status_data: dict[str, Any]) -> None:
@@ -881,6 +886,7 @@ class SessionManager:
                         tool_call_id=m.get("tool_call_id"),
                         tool_use=m.get("tool_use"),
                         group_id=m.get("group_id"),
+                        agent_role=m.get("agent_role"),
                     ))
 
                 branches = [
@@ -935,6 +941,7 @@ class SessionManager:
                     owner_id=data.get("owner_id"),
                     access=data.get("access", "owner"),
                     mcp_servers=data.get("mcp_servers", []),
+                    agent_role=data.get("agent_role", ""),
                 )
                 session._ensure_main_branch()
                 self._sessions[session_id] = session
@@ -968,6 +975,7 @@ class SessionManager:
                         tool_call_id=m.get("tool_call_id"),
                         tool_use=m.get("tool_use"),
                         group_id=m.get("group_id"),
+                        agent_role=m.get("agent_role"),
                     ))
                 
                 branches = []
@@ -1057,6 +1065,7 @@ class SessionManager:
                         tool_call_id=m.get("tool_call_id"),
                         tool_use=m.get("tool_use"),
                         group_id=m.get("group_id"),
+                        agent_role=m.get("agent_role"),
                     ))
                 
                 branches = []

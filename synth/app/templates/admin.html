@@ -11,6 +11,7 @@
         <button class="tab-btn" data-tab="mcp" onclick="switchTab('mcp')">MCP Серверы</button>
         <button class="tab-btn" data-tab="embeddings" onclick="switchTab('embeddings')">RAG</button>
         <button class="tab-btn" data-tab="users" onclick="switchTab('users')">Пользователи</button>
+        <button class="tab-btn" data-tab="agents" onclick="switchTab('agents')">Агенты</button>
         <button class="tab-btn" data-tab="debug" onclick="switchTab('debug')">Отладка</button>
     </div>
 
@@ -604,6 +605,21 @@
     </div>
 </div>
 
+<div class="tab-content" id="tab-agents">
+    <div class="settings-section">
+        <h3>Профили агентов</h3>
+        <p class="help-text">Настройка параметров агентов для разных ролей. Каждый агент имеет свой контекстный файл и параметры LLM.</p>
+        
+        <div id="agents-list" class="agents-cards">
+            <div class="loading">Загрузка...</div>
+        </div>
+        
+        <div class="settings-actions" style="margin-top: 1rem;">
+            <button class="btn btn-primary" onclick="openAgentModal()">+ Добавить агента</button>
+        </div>
+    </div>
+</div>
+
 <script>
     let config = {};
     let contextFiles = [];
@@ -715,6 +731,7 @@
         loadEmbeddingsConfig();
         loadRagSettings();
         loadUsers();
+        loadAgents();
         loadDebugConfig();
     }
 
@@ -1609,6 +1626,264 @@
                 loadConfig();
             } else {
                 alert('Ошибка сохранения');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function loadAgents() {
+        try {
+            const response = await fetch('/admin/agents', { headers: getAuthHeaders() });
+            if (response.ok) {
+                const data = await response.json();
+                agentsConfig = data.agents || {};
+                renderAgents(agentsConfig);
+            }
+        } catch (e) {
+            console.error('Failed to load agents:', e);
+        }
+    }
+
+    const BUILT_IN_AGENTS = ['developer', 'analyst', 'devops', 'qa', 'lead', 'pm', 'security_auditor'];
+
+    function renderAgents(agents) {
+        const container = document.getElementById('agents-list');
+        if (!container) return;
+        
+        const agentNames = Object.keys(agents);
+        if (agentNames.length === 0) {
+            container.innerHTML = '<p class="help-text">Нет настроенных агентов</p>';
+            return;
+        }
+        
+        let html = '<div class="agents-grid">';
+        for (const [name, cfg] of Object.entries(agents)) {
+            const isBuiltIn = BUILT_IN_AGENTS.includes(name);
+            html += `
+                <div class="agent-card">
+                    <h4>${cfg.display_name || name}</h4>
+                    <div class="agent-info">
+                        <div><strong>ID:</strong> ${name}</div>
+                        <div><strong>Провайдер:</strong> ${cfg.provider || 'по умолчанию'}</div>
+                        <div><strong>Модель:</strong> ${cfg.model || 'по умолчанию'}</div>
+                        <div><strong>Temperature:</strong> ${cfg.temperature}</div>
+                        <div><strong>Контекст:</strong> ${cfg.context_file || '-'}</div>
+                    </div>
+                    <div class="agent-actions">
+                        <button class="btn btn-small" onclick="openAgentModal('${name}')">Редактировать</button>
+                        ${isBuiltIn ? 
+                            '<button class="btn btn-small btn-disabled" disabled title="Встроенные агенты нельзя удалить">Удалить</button>' :
+                            `<button class="btn btn-small btn-danger-outline" onclick="deleteAgent('${name}')">Удалить</button>`
+                        }
+                    </div>
+                </div>
+            `;
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    let agentsConfig = {};
+
+    function openAgentModal(name = null) {
+        console.log('openAgentModal called with name:', name);
+        try {
+            const modalId = 'agent-modal-' + (name || 'new');
+            
+            let modal = document.getElementById(modalId);
+            
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = modalId;
+                modal.className = 'modal';
+                modal.innerHTML = getAgentModalHtml(name);
+                document.body.appendChild(modal);
+            }
+            
+            const titleEl = document.getElementById('agent-modal-title');
+            const editNameEl = document.getElementById('agent-modal-edit-name');
+            const nameEl = document.getElementById('agent-modal-name');
+            const displayNameEl = document.getElementById('agent-modal-display-name');
+            const providerEl = document.getElementById('agent-modal-provider');
+            const modelEl = document.getElementById('agent-modal-model');
+            const tempEl = document.getElementById('agent-modal-temperature');
+            const topPEl = document.getElementById('agent-modal-top-p');
+            const topKEl = document.getElementById('agent-modal-top-k');
+            const contextFileEl = document.getElementById('agent-modal-context-file');
+            const deleteBtn = document.getElementById('agent-modal-delete-btn');
+            
+            if (!name) {
+                if (titleEl) titleEl.textContent = 'Новый агент';
+                if (editNameEl) editNameEl.value = '';
+                if (nameEl) { nameEl.value = ''; nameEl.disabled = false; }
+                if (displayNameEl) displayNameEl.value = '';
+                if (providerEl) providerEl.value = '';
+                if (modelEl) modelEl.value = '';
+                if (tempEl) tempEl.value = '0.7';
+                if (topPEl) topPEl.value = '';
+                if (topKEl) topKEl.value = '';
+                if (contextFileEl) contextFileEl.value = '';
+                if (deleteBtn) deleteBtn.style.display = 'none';
+            } else {
+                const agent = agentsConfig[name];
+                if (!agent) {
+                    console.error('Agent not found in config:', name, agentsConfig);
+                    alert('Агент не найден. Возможно, данные не загружены.');
+                    return;
+                }
+                if (titleEl) titleEl.textContent = 'Редактировать агента';
+                if (editNameEl) editNameEl.value = name;
+                if (nameEl) { nameEl.value = name; nameEl.disabled = true; }
+                if (displayNameEl) displayNameEl.value = agent.display_name || name;
+                if (providerEl) providerEl.value = agent.provider || '';
+                if (modelEl) modelEl.value = agent.model || '';
+                if (tempEl) tempEl.value = agent.temperature || 0.7;
+                if (topPEl) topPEl.value = agent.top_p || '';
+                if (topKEl) topKEl.value = agent.top_k || '';
+                if (contextFileEl) contextFileEl.value = agent.context_file || `ROLE_${name.toUpperCase()}.md`;
+                const isBuiltIn = BUILT_IN_AGENTS.includes(name);
+                if (deleteBtn) deleteBtn.style.display = isBuiltIn ? 'none' : 'inline-block';
+            }
+            
+            if (providerEl) {
+                providerEl.innerHTML = '<option value="">По умолчанию</option>';
+                for (const pname of Object.keys(config.providers || {})) {
+                    const option = document.createElement('option');
+                    option.value = pname;
+                    option.textContent = pname;
+                    providerEl.appendChild(option);
+                }
+                if (name && agentsConfig[name]) {
+                    providerEl.value = agentsConfig[name].provider || '';
+                }
+            }
+            
+            modal.style.display = 'flex';
+        } catch (e) {
+            console.error('Error in openAgentModal:', e);
+            alert('Ошибка при открытии модального окна: ' + e.message);
+        }
+    }
+    
+    function getAgentModalHtml(name) {
+        return `
+            <div class="modal-content">
+                <h3 id="agent-modal-title">${name ? 'Редактировать агента' : 'Новый агент'}</h3>
+                <input type="hidden" id="agent-modal-edit-name" value="${name || ''}">
+                <div class="form-group">
+                    <label for="agent-modal-name">Внутреннее имя (ID)</label>
+                    <input type="text" id="agent-modal-name" class="form-input" placeholder="developer" value="${name || ''}">
+                </div>
+                <div class="form-group">
+                    <label for="agent-modal-display-name">Отображаемое имя</label>
+                    <input type="text" id="agent-modal-display-name" class="form-input" placeholder="Разработчик">
+                </div>
+                <div class="form-group">
+                    <label for="agent-modal-provider">Провайдер (пусто = по умолчанию)</label>
+                    <select id="agent-modal-provider" class="form-input">
+                        <option value="">По умолчанию</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="agent-modal-model">Модель (пусто = по умолчанию)</label>
+                    <input type="text" id="agent-modal-model" class="form-input" placeholder="gpt-4o">
+                </div>
+                <div class="form-group">
+                    <label for="agent-modal-temperature">Temperature</label>
+                    <input type="number" id="agent-modal-temperature" class="form-input" value="0.7" min="0" max="2" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label for="agent-modal-top-p">Top P (пусто = не используется)</label>
+                    <input type="number" id="agent-modal-top-p" class="form-input" value="" min="0" max="1" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label for="agent-modal-top-k">Top K (пусто = не используется)</label>
+                    <input type="number" id="agent-modal-top-k" class="form-input" value="" min="1">
+                </div>
+                <div class="form-group">
+                    <label for="agent-modal-context-file">Контекстный файл</label>
+                    <input type="text" id="agent-modal-context-file" class="form-input" placeholder="ROLE_DEVELOPER.md">
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-danger" id="agent-modal-delete-btn" onclick="deleteCurrentAgent()" style="display:none">Удалить</button>
+                    <button class="btn btn-secondary" onclick="closeAgentModal()">Отмена</button>
+                    <button class="btn btn-primary" onclick="saveCurrentAgent()">Сохранить</button>
+                </div>
+            </div>
+        `;
+    }
+    
+    function closeAgentModal() {
+        document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+    }
+    
+    function deleteCurrentAgent() {
+        const name = document.getElementById('agent-modal-edit-name').value;
+        if (name) deleteAgent(name);
+    }
+    
+    function saveCurrentAgent() {
+        const name = document.getElementById('agent-modal-name').value.trim();
+        if (!name) {
+            alert('Введите имя агента');
+            return;
+        }
+        
+        const agentData = {
+            name: name,
+            display_name: document.getElementById('agent-modal-display-name').value.trim() || name,
+            provider: document.getElementById('agent-modal-provider').value,
+            model: document.getElementById('agent-modal-model').value.trim(),
+            temperature: parseFloat(document.getElementById('agent-modal-temperature').value) || 0.7,
+            top_p: document.getElementById('agent-modal-top-p').value ? parseFloat(document.getElementById('agent-modal-top-p').value) : null,
+            top_k: document.getElementById('agent-modal-top-k').value ? parseInt(document.getElementById('agent-modal-top-k').value) : null,
+            context_file: document.getElementById('agent-modal-context-file').value.trim() || `ROLE_${name.toUpperCase()}.md`,
+        };
+        
+        saveAgentData(agentData);
+    }
+    
+    async function saveAgentData(agentData) {
+        try {
+            const response = await fetch('/admin/agents', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify(agentData)
+            });
+            
+            if (response.ok) {
+                closeAgentModal();
+                loadAgents();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Ошибка сохранения');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+    
+    async function deleteAgent(name) {
+        if (!name) {
+            name = document.getElementById('agent-modal-edit-name').value;
+        }
+        if (!confirm('Вы уверены, что хотите удалить агента ' + name + '?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/admin/agents/' + encodeURIComponent(name), {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                closeAgentModal();
+                loadAgents();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Ошибка удаления');
             }
         } catch (e) {
             alert('Ошибка: ' + e.message);
@@ -2795,6 +3070,61 @@
     .provider-actions {
         display: flex;
         gap: 0.5rem;
+    }
+
+    .agents-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+    }
+
+    .agent-card {
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem;
+    }
+
+    .agent-card h4 {
+        margin: 0 0 0.5rem 0;
+    }
+
+    .agent-info {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+        margin-bottom: 0.75rem;
+    }
+
+    .agent-info div {
+        margin-bottom: 0.25rem;
+    }
+
+    .agent-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+
+    .btn-danger-outline {
+        background: transparent;
+        color: #dc3545;
+        border: 1px solid #dc3545;
+    }
+
+    .btn-danger-outline:hover {
+        background: #dc3545;
+        color: white;
+    }
+
+    .btn-disabled,
+    .btn-disabled:hover,
+    .btn-disabled:disabled {
+        background: #6c757d;
+        color: #fff;
+        border-color: #6c757d;
+        cursor: not-allowed;
+        opacity: 0.65;
+    }
     }
 
     .modal {

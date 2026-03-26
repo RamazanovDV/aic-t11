@@ -380,5 +380,51 @@ class Config:
         self._config["rag"] = config
         self.save()
 
+    @property
+    def agents_config_path(self) -> Path:
+        return Path(__file__).parent.parent / "agents.yaml"
+
+    def _load_agents_config(self) -> dict[str, Any]:
+        agents_path = self.agents_config_path
+        if not agents_path.exists():
+            return {}
+        with open(agents_path, "r") as f:
+            return yaml.safe_load(f) or {}
+
+    def _save_agents_config(self, agents_config: dict[str, Any]) -> None:
+        with open(self.agents_config_path, "w") as f:
+            yaml.dump(agents_config, f, default_flow_style=False, allow_unicode=True)
+
+    @property
+    def agents(self) -> dict[str, dict[str, Any]]:
+        return self._load_agents_config().get("agents", {})
+
+    def get_agent(self, name: str) -> dict[str, Any] | None:
+        return self.agents.get(name)
+
+    def save_agent(self, name: str, agent_config: dict[str, Any]) -> None:
+        agents_config = self._load_agents_config()
+        if "agents" not in agents_config:
+            agents_config["agents"] = {}
+        agents_config["agents"][name] = agent_config
+        self._save_agents_config(agents_config)
+
+    def delete_agent(self, name: str) -> bool:
+        agents_config = self._load_agents_config()
+        if "agents" in agents_config and name in agents_config["agents"]:
+            del agents_config["agents"][name]
+            self._save_agents_config(agents_config)
+            return True
+        return False
+
+    def get_role_prompt(self, role_name: str) -> str | None:
+        agent = self.get_agent(role_name)
+        if not agent:
+            return None
+        context_file = agent.get("context_file")
+        if not context_file:
+            return None
+        return self.get_context_file(context_file)
+
 
 config = Config()

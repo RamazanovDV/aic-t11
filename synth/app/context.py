@@ -17,6 +17,13 @@ SYSTEM_CONTEXT_FILES = [
     "NEW_PROJECT.md",
     "SCHEDULER.md",
     "RAG_UNKNOWN.md",
+    "ROLE_DEVELOPER.md",
+    "ROLE_ANALYST.md",
+    "ROLE_DEVOPS.md",
+    "ROLE_QA.md",
+    "ROLE_LEAD.md",
+    "ROLE_PM.md",
+    "ROLE_SECURITY_AUDITOR.md",
 ]
 
 DEFAULT_CONTEXT_FILES = [
@@ -382,3 +389,9 @@ def should_show_interview(session, user_id: str | None = None) -> bool:
 def get_interview_prompt() -> str:
     """Получить промпт интервью"""
     return config.get_context_file("INTERVIEW.md") or ""
+
+
+def get_role_prompt(role_name: str) -> str:
+    """Получить промпт роли агента из контекстного файла"""
+    role_file = f"ROLE_{role_name.upper()}.md"
+    return config.get_context_file(role_file) or ""

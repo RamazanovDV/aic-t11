@@ -1,5 +1,6 @@
 """Stream handler for SSE streaming requests."""
 
+import re
 from typing import Generator
 
 from app.handlers.base import BaseHandler
@@ -7,6 +8,16 @@ from app.session import Session
 from app.debug import DebugCollector
 from app.llm.base import Message
 from app.project_updates import handle_project_updates
+
+
+TAGS_PATTERN = re.compile(r'@(\w+)')
+
+
+def parse_agent_tags(message: str) -> tuple[list[str], str]:
+    """Parse @tags from message and return (tags, clean_message)."""
+    tags = TAGS_PATTERN.findall(message)
+    clean_message = TAGS_PATTERN.sub('', message).strip()
+    return tags, clean_message
 
 
 class StreamHandler(BaseHandler):
@@ -20,7 +31,8 @@ class StreamHandler(BaseHandler):
         model: str | None = None,
         debug_mode: bool = False,
         user_id: str | None = None,
-        source: str | None = None
+        source: str | None = None,
+        agent_role: str | None = None
     ) -> Generator[str, None, None]:
         """Handle stream request.
         
@@ -32,19 +44,29 @@ class StreamHandler(BaseHandler):
         if provider_name or model:
             session.set_provider_model(provider_name or "", model or "")
         
-        session.add_user_message(message, source=source or "web")
+        tags, clean_message = parse_agent_tags(message)
+        
+        if agent_role:
+            session.set_agent_role(agent_role)
+        
+        session.add_user_message(clean_message, source=source or "web")
         
         debug_collector = self.create_debug_collector(session)
         
+        if tags:
+            yield from self._handle_with_tags(
+                session, clean_message, tags, provider_name, model,
+                debug_collector, user_id
+            )
+            return
+        
         context_builder = self.create_context_builder(session, user_id, debug_collector)
-        system_prompt = context_builder.build_system_prompt()
-        
-        system_prompt = context_builder.apply_rag_to_prompt(system_prompt, message)
-        
-        messages = context_builder.build_messages(message)
+        effective_role = session.agent_role or None
+        system_prompt = context_builder.build_system_prompt(effective_role)
+        system_prompt = context_builder.apply_rag_to_prompt(system_prompt, clean_message)
+        messages = context_builder.build_messages(clean_message, effective_role)
         mcp_tools = context_builder.build_mcp_tools(provider_name)
         
-        # Set default provider if not specified
         from app.config import config
         if not provider_name:
             provider_name = config.default_provider
@@ -56,12 +78,63 @@ class StreamHandler(BaseHandler):
         
         if tsm_mode == "orchestrator":
             yield from self._handle_orchestrator_stream(
-                session, messages, system_prompt, provider, debug_collector, message, provider_name, model, mcp_tools
+                session, messages, system_prompt, provider, debug_collector, clean_message, provider_name, model, mcp_tools, effective_role
             )
         else:
             yield from self._handle_simple_stream(
-                session, messages, system_prompt, provider, debug_collector, mcp_tools
+                session, messages, system_prompt, provider, debug_collector, mcp_tools, effective_role
             )
+    
+    def _handle_with_tags(
+        self,
+        session: Session,
+        clean_message: str,
+        tags: list[str],
+        provider_name: str | None,
+        model: str | None,
+        debug_collector: DebugCollector | None,
+        user_id: str | None
+    ) -> Generator[str, None, None]:
+        """Handle message with @tags - sequentially call each tagged agent."""
+        import json
+        from app.config import config
+        
+        valid_agents = config.agents
+        warnings = []
+        
+        for tag_idx, tag in enumerate(tags):
+            if tag not in valid_agents:
+                warnings.append(f"Роль @{tag} не найдена, пропускаем.")
+                continue
+            
+            effective_role = tag
+            
+            context_builder = self.create_context_builder(session, user_id, debug_collector)
+            system_prompt = context_builder.build_system_prompt(effective_role)
+            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, clean_message)
+            messages = context_builder.build_messages(clean_message, effective_role)
+            mcp_tools = context_builder.build_mcp_tools(provider_name)
+            
+            from app.config import config
+            if not provider_name:
+                provider_name = config.default_provider
+            
+            provider = self.create_provider(provider_name, model)
+            
+            from app import tsm
+            tsm_mode = tsm.get_tsm_mode(session)
+            
+            if tsm_mode == "orchestrator":
+                yield from self._handle_orchestrator_stream(
+                    session, messages, system_prompt, provider, debug_collector, clean_message, provider_name, model, mcp_tools, effective_role
+                )
+            else:
+                yield from self._handle_simple_stream(
+                    session, messages, system_prompt, provider, debug_collector, mcp_tools, effective_role
+                )
+        
+        if warnings:
+            yield f"data: {json.dumps({'type': 'warnings', 'warnings': warnings})}\n\n"
     
     def _handle_simple_stream(
         self,
@@ -70,11 +143,11 @@ class StreamHandler(BaseHandler):
         system_prompt: str,
         provider,
         debug_collector: DebugCollector | None,
-        mcp_tools: list
+        mcp_tools: list,
+        agent_role: str | None = None
     ) -> Generator[str, None, None]:
         """Handle simple mode with streaming."""
         import json
-        from app.llm.base import Message
         
         formatted_messages = []
         if system_prompt:
@@ -93,7 +166,6 @@ class StreamHandler(BaseHandler):
         llm_msgs = [Message(role=m["role"], content=m["content"], usage={}) for m in formatted_messages]
         
         tool_calls_handled = False
-        preliminary_saved = False
         full_content = ""
         full_reasoning = ""
         total_usage = {}
@@ -144,14 +216,15 @@ class StreamHandler(BaseHandler):
             total_usage,
             debug=debug_info,
             model=provider.model,
-            reasoning=full_reasoning
+            reasoning=full_reasoning,
+            agent_role=agent_role
         )
         
         self.save_session(session.session_id)
         
         disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
         
-        yield f"data: {json.dumps({'content': full_content, 'reasoning': full_reasoning, 'done': True, 'usage': total_usage, 'model': provider.model, 'debug': debug_info, 'disabled_indices': disabled_indices})}\n\n"
+        yield f"data: {json.dumps({'content': full_content, 'reasoning': full_reasoning, 'done': True, 'usage': total_usage, 'model': provider.model, 'debug': debug_info, 'disabled_indices': disabled_indices, 'agent_role': agent_role})}\n\n"
         
         yield "data: [DONE]\n\n"
     
@@ -179,7 +252,6 @@ class StreamHandler(BaseHandler):
             reasoning=chunk.reasoning,
             group_id=group_id
         )
-        preliminary_saved = True
         
         current_tool_calls = chunk.tool_calls
         max_tool_iterations = 10
@@ -240,7 +312,8 @@ class StreamHandler(BaseHandler):
         user_message: str,
         provider_name: str,
         model: str | None,
-        mcp_tools: list
+        mcp_tools: list,
+        agent_role: str | None = None
     ) -> Generator[str, None, None]:
         """Handle orchestrator mode with streaming events."""
         import json
@@ -252,7 +325,6 @@ class StreamHandler(BaseHandler):
         
         use_rag = session.session_settings.get("rag_settings", {}).get("enabled", False)
         if use_rag:
-            # context_builder was in handle() method, need to recreate or pass it
             pass  # RAG already applied in handle() method
         
         progress_queue = queue.Queue()
@@ -291,7 +363,8 @@ class StreamHandler(BaseHandler):
                             result.get("usage", {}),
                             debug=result.get("debug"),
                             model=provider.model,
-                            reasoning=result.get("reasoning")
+                            reasoning=result.get("reasoning"),
+                            agent_role=agent_role
                         )
                         handle_project_updates(session)
                         session_manager.save_session(session.session_id)
@@ -367,7 +440,7 @@ class StreamHandler(BaseHandler):
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
             
             try:
-                yield f"data: {json.dumps({'content': final_content, 'reasoning': final_reasoning, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices, 'aborted': was_aborted})}\n\n"
+                yield f"data: {json.dumps({'content': final_content, 'reasoning': final_reasoning, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices, 'aborted': was_aborted, 'agent_role': agent_role})}\n\n"
             except Exception:
                 pass
             

@@ -1,5 +1,6 @@
 """Chat handler for non-streaming requests."""
 
+import re
 from typing import Any
 
 from app.handlers.base import BaseHandler
@@ -7,6 +8,16 @@ from app.session import Session
 from app import tsm
 from app.debug import DebugCollector
 from app.project_updates import handle_project_updates
+
+
+TAGS_PATTERN = re.compile(r'@(\w+)')
+
+
+def parse_agent_tags(message: str) -> tuple[list[str], str]:
+    """Parse @tags from message and return (tags, clean_message)."""
+    tags = TAGS_PATTERN.findall(message)
+    clean_message = TAGS_PATTERN.sub('', message).strip()
+    return tags, clean_message
 
 
 class ChatHandler(BaseHandler):
@@ -24,7 +35,8 @@ class ChatHandler(BaseHandler):
         use_rag: bool = False,
         rag_index_name: str | None = None,
         rag_top_k: int = 5,
-        source: str | None = None
+        source: str | None = None,
+        agent_role: str | None = None
     ) -> dict[str, Any]:
         """Handle chat request.
         
@@ -42,14 +54,26 @@ class ChatHandler(BaseHandler):
             except ValueError as e:
                 return {"error": f"Invalid tsm_mode: {str(e)}"}
         
-        session.add_user_message(message, source=source or "web")
+        tags, clean_message = parse_agent_tags(message)
+        
+        if agent_role:
+            session.set_agent_role(agent_role)
+        
+        session.add_user_message(clean_message, source=source or "web")
         
         debug_collector = self.create_debug_collector(session)
         
+        if tags:
+            return self._handle_with_tags(
+                session, clean_message, tags, provider_name, model,
+                debug_collector, user_id, use_rag, rag_index_name, rag_top_k
+            )
+        
         context_builder = self.create_context_builder(session, user_id, debug_collector)
-        system_prompt = context_builder.build_system_prompt()
-        system_prompt = context_builder.apply_rag_to_prompt(system_prompt, message)
-        messages = context_builder.build_messages(message)
+        effective_role = session.agent_role or None
+        system_prompt = context_builder.build_system_prompt(effective_role)
+        system_prompt = context_builder.apply_rag_to_prompt(system_prompt, clean_message, use_rag)
+        messages = context_builder.build_messages(clean_message, effective_role)
         
         mcp_tools = context_builder.build_mcp_tools(provider_name)
         
@@ -57,14 +81,78 @@ class ChatHandler(BaseHandler):
         
         if tsm_mode == "orchestrator":
             return self._handle_orchestrator(
-                session, messages, system_prompt, provider_name, model, 
-                debug_collector, user_id, mcp_tools
+                session, messages, system_prompt, provider_name, model,
+                debug_collector, user_id, mcp_tools, effective_role
             )
         
         return self._handle_simple(
             session, messages, system_prompt, provider_name, model,
-            debug_collector, user_id, mcp_tools
+            debug_collector, user_id, mcp_tools, effective_role
         )
+    
+    def _handle_with_tags(
+        self,
+        session: Session,
+        clean_message: str,
+        tags: list[str],
+        provider_name: str | None,
+        model: str | None,
+        debug_collector: DebugCollector | None,
+        user_id: str | None,
+        use_rag: bool,
+        rag_index_name: str | None,
+        rag_top_k: int
+    ) -> dict[str, Any]:
+        """Handle message with @tags - sequentially call each tagged agent."""
+        from app.config import config
+        
+        valid_agents = config.agents
+        warnings = []
+        
+        for tag in tags:
+            if tag not in valid_agents:
+                warnings.append(f"Роль @{tag} не найдена, пропускаем.")
+                continue
+            
+            agent_config = valid_agents[tag]
+            effective_role = tag
+            
+            context_builder = self.create_context_builder(session, user_id, debug_collector)
+            system_prompt = context_builder.build_system_prompt(effective_role)
+            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, clean_message, use_rag)
+            messages = context_builder.build_messages(clean_message, effective_role)
+            
+            mcp_tools = context_builder.build_mcp_tools(provider_name)
+            
+            tsm_mode = tsm.get_tsm_mode(session)
+            
+            if tsm_mode == "orchestrator":
+                result = self._handle_orchestrator(
+                    session, messages, system_prompt, provider_name, model,
+                    debug_collector, user_id, mcp_tools, effective_role
+                )
+            else:
+                result = self._handle_simple(
+                    session, messages, system_prompt, provider_name, model,
+                    debug_collector, user_id, mcp_tools, effective_role
+                )
+            
+            if warnings:
+                result["warnings"] = warnings
+        
+        final_result = {
+            "message": session.messages[-1].content if session.messages else "",
+            "session_id": session.session_id,
+            "model": session.messages[-1].model if session.messages else model,
+            "usage": session.messages[-1].usage if session.messages else {},
+            "total_tokens": session.total_tokens,
+            "agent_role": session.agent_role,
+        }
+        
+        if warnings:
+            final_result["warnings"] = warnings
+        
+        return final_result
     
     def _handle_simple(
         self,
@@ -75,7 +163,8 @@ class ChatHandler(BaseHandler):
         model: str | None,
         debug_collector: DebugCollector | None,
         user_id: str | None,
-        mcp_tools: list
+        mcp_tools: list,
+        agent_role: str | None = None
     ) -> dict:
         """Handle simple mode."""
         from app.config import config
@@ -97,7 +186,6 @@ class ChatHandler(BaseHandler):
         
         message_for_user = response.content
         
-        # Сохраняем оригинальный контент ДО парсинга статуса
         raw_original = response.content
         parsed_status, cleaned_content = validate_status_block(response.content)
         if parsed_status:
@@ -123,7 +211,8 @@ class ChatHandler(BaseHandler):
             response.usage,
             debug=debug_info,
             model=response.model,
-            reasoning=response.reasoning
+            reasoning=response.reasoning,
+            agent_role=agent_role
         )
         
         self.save_session(session.session_id)
@@ -138,6 +227,7 @@ class ChatHandler(BaseHandler):
             "total_tokens": session.total_tokens,
             "disabled_indices": disabled_indices,
             "reasoning": response.reasoning,
+            "agent_role": agent_role,
         }
         
         if debug_info:
@@ -154,7 +244,8 @@ class ChatHandler(BaseHandler):
         model: str | None,
         debug_collector: DebugCollector | None,
         user_id: str | None,
-        mcp_tools: list
+        mcp_tools: list,
+        agent_role: str | None = None
     ) -> dict:
         """Handle orchestrator mode."""
         from app.config import config
@@ -189,7 +280,8 @@ class ChatHandler(BaseHandler):
             usage,
             debug=debug_info,
             model=provider.model,
-            reasoning=final_reasoning
+            reasoning=final_reasoning,
+            agent_role=agent_role
         )
         
         self.save_session(session.session_id)
@@ -201,6 +293,7 @@ class ChatHandler(BaseHandler):
             "usage": usage,
             "total_tokens": session.total_tokens,
             "reasoning": final_reasoning,
+            "agent_role": agent_role,
         }
         
         if debug_info:
