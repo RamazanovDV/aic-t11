@@ -937,7 +937,7 @@ def reset_chat():
 
 @api_bp.route("/agents", methods=["GET"])
 def get_agents_api():
-    agents = config.agents
+    agents = config.get_enabled_agents()
     result = {}
     for name, cfg in agents.items():
         result[name] = {
@@ -946,7 +946,8 @@ def get_agents_api():
             "provider": cfg.get("provider", ""),
             "model": cfg.get("model", ""),
         }
-    return jsonify({"agents": result})
+    default_agent = config.get_default_agent()
+    return jsonify({"agents": result, "default_agent": default_agent})
 
 
 @api_bp.route("/sessions", methods=["GET"])
@@ -1281,6 +1282,9 @@ def set_context_settings(session_id: str):
 
     if "model" in data:
         session.model = data["model"]
+
+    if "agent_role" in data:
+        session.set_agent_role(data["agent_role"])
 
     session_manager.save_session(session_id)
 
@@ -2227,6 +2231,8 @@ def get_agents():
             "top_k": cfg.get("top_k"),
             "context_file": context_file,
             "is_overridden": is_overridden,
+            "enabled": cfg.get("enabled", True),
+            "default": cfg.get("default", False),
         }
     return jsonify({"agents": result})
 
@@ -2275,6 +2281,8 @@ def get_agent(agent_name: str):
         "top_k": agent.get("top_k"),
         "context_file": context_file,
         "is_overridden": is_overridden,
+        "enabled": agent.get("enabled", True),
+        "default": agent.get("default", False),
     })
 
 
@@ -2284,6 +2292,27 @@ def delete_agent(agent_name: str):
     if config.delete_agent(agent_name):
         return jsonify({"message": "Agent deleted", "name": agent_name})
     return jsonify({"error": "Agent not found"}), 404
+
+
+@admin_bp.route("/agents/<agent_name>/enabled", methods=["PATCH"])
+@require_user
+def set_agent_enabled(agent_name: str):
+    """Enable or disable an agent."""
+    agent = config.get_agent(agent_name)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+
+    data = request.get_json()
+    if not data or "enabled" not in data:
+        return jsonify({"error": "Missing 'enabled' field"}), 400
+
+    enabled = bool(data["enabled"])
+    if enabled:
+        config.enable_agent(agent_name)
+    else:
+        config.disable_agent(agent_name)
+
+    return jsonify({"status": "ok", "name": agent_name, "enabled": enabled})
 
 
 @api_bp.route("/embeddings/list", methods=["GET"])

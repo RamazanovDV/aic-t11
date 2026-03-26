@@ -1645,7 +1645,7 @@
         }
     }
 
-    const BUILT_IN_AGENTS = ['developer', 'analyst', 'devops', 'qa', 'lead', 'pm', 'security_auditor'];
+    const BUILT_IN_AGENTS = ['developer', 'analyst', 'devops', 'qa', 'lead', 'pm', 'security_auditor', 'assistant'];
 
     function renderAgents(agents) {
         const container = document.getElementById('agents-list');
@@ -1660,15 +1660,28 @@
         let html = '<div class="agents-grid">';
         for (const [name, cfg] of Object.entries(agents)) {
             const isBuiltIn = BUILT_IN_AGENTS.includes(name);
+            const isDefault = cfg.default === true;
+            const isEnabled = cfg.enabled !== false;
+            const toggleId = 'agent-toggle-' + name;
             html += `
-                <div class="agent-card">
-                    <h4>${cfg.display_name || name}</h4>
+                <div class="agent-card ${!isEnabled ? 'agent-disabled' : ''}">
+                    <h4>
+                        ${cfg.display_name || name}
+                        ${isDefault ? '<span class="badge badge-success" style="margin-left: 8px;">по умолчанию</span>' : ''}
+                        ${!isEnabled ? '<span class="badge badge-warning" style="margin-left: 8px;">отключён</span>' : ''}
+                    </h4>
                     <div class="agent-info">
                         <div><strong>ID:</strong> ${name}</div>
                         <div><strong>Провайдер:</strong> ${cfg.provider || 'по умолчанию'}</div>
                         <div><strong>Модель:</strong> ${cfg.model || 'по умолчанию'}</div>
                         <div><strong>Temperature:</strong> ${cfg.temperature}</div>
                         <div><strong>Контекст:</strong> ${cfg.context_file || '-'}</div>
+                    </div>
+                    <div class="agent-toggle">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="${toggleId}" ${isEnabled ? 'checked' : ''} onchange="toggleAgent('${name}')">
+                            <span>Включён</span>
+                        </label>
                     </div>
                     <div class="agent-actions">
                         <button class="btn btn-small" onclick="openAgentModal('${name}')">Редактировать</button>
@@ -1689,7 +1702,8 @@
     function openAgentModal(name = null) {
         console.log('openAgentModal called with name:', name);
         try {
-            const modalId = 'agent-modal-' + (name || 'new');
+            const uniqueId = name || 'new';
+            const modalId = 'agent-modal-' + uniqueId;
             
             let modal = document.getElementById(modalId);
             
@@ -1697,21 +1711,21 @@
                 modal = document.createElement('div');
                 modal.id = modalId;
                 modal.className = 'modal';
-                modal.innerHTML = getAgentModalHtml(name);
+                modal.innerHTML = getAgentModalHtml(uniqueId, name);
                 document.body.appendChild(modal);
             }
             
-            const titleEl = document.getElementById('agent-modal-title');
-            const editNameEl = document.getElementById('agent-modal-edit-name');
-            const nameEl = document.getElementById('agent-modal-name');
-            const displayNameEl = document.getElementById('agent-modal-display-name');
-            const providerEl = document.getElementById('agent-modal-provider');
-            const modelEl = document.getElementById('agent-modal-model');
-            const tempEl = document.getElementById('agent-modal-temperature');
-            const topPEl = document.getElementById('agent-modal-top-p');
-            const topKEl = document.getElementById('agent-modal-top-k');
-            const contextFileEl = document.getElementById('agent-modal-context-file');
-            const deleteBtn = document.getElementById('agent-modal-delete-btn');
+            const titleEl = document.getElementById(modalId + '-title');
+            const editNameEl = document.getElementById(modalId + '-edit-name');
+            const nameEl = document.getElementById(modalId + '-name');
+            const displayNameEl = document.getElementById(modalId + '-display-name');
+            const providerEl = document.getElementById(modalId + '-provider');
+            const modelEl = document.getElementById(modalId + '-model');
+            const tempEl = document.getElementById(modalId + '-temperature');
+            const topPEl = document.getElementById(modalId + '-top-p');
+            const topKEl = document.getElementById(modalId + '-top-k');
+            const contextFileEl = document.getElementById(modalId + '-context-file');
+            const deleteBtn = document.getElementById(modalId + '-delete-btn');
             
             if (!name) {
                 if (titleEl) titleEl.textContent = 'Новый агент';
@@ -1766,49 +1780,49 @@
         }
     }
     
-    function getAgentModalHtml(name) {
+    function getAgentModalHtml(uniqueId, name) {
         return `
             <div class="modal-content">
-                <h3 id="agent-modal-title">${name ? 'Редактировать агента' : 'Новый агент'}</h3>
-                <input type="hidden" id="agent-modal-edit-name" value="${name || ''}">
+                <h3 id="agent-modal-${uniqueId}-title">${name ? 'Редактировать агента' : 'Новый агент'}</h3>
+                <input type="hidden" id="agent-modal-${uniqueId}-edit-name" value="${name || ''}">
                 <div class="form-group">
-                    <label for="agent-modal-name">Внутреннее имя (ID)</label>
-                    <input type="text" id="agent-modal-name" class="form-input" placeholder="developer" value="${name || ''}">
+                    <label for="agent-modal-${uniqueId}-name">Внутреннее имя (ID)</label>
+                    <input type="text" id="agent-modal-${uniqueId}-name" class="form-input" placeholder="developer" value="${name || ''}">
                 </div>
                 <div class="form-group">
-                    <label for="agent-modal-display-name">Отображаемое имя</label>
-                    <input type="text" id="agent-modal-display-name" class="form-input" placeholder="Разработчик">
+                    <label for="agent-modal-${uniqueId}-display-name">Отображаемое имя</label>
+                    <input type="text" id="agent-modal-${uniqueId}-display-name" class="form-input" placeholder="Разработчик">
                 </div>
                 <div class="form-group">
-                    <label for="agent-modal-provider">Провайдер (пусто = по умолчанию)</label>
-                    <select id="agent-modal-provider" class="form-input">
+                    <label for="agent-modal-${uniqueId}-provider">Провайдер (пусто = по умолчанию)</label>
+                    <select id="agent-modal-${uniqueId}-provider" class="form-input">
                         <option value="">По умолчанию</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="agent-modal-model">Модель (пусто = по умолчанию)</label>
-                    <input type="text" id="agent-modal-model" class="form-input" placeholder="gpt-4o">
+                    <label for="agent-modal-${uniqueId}-model">Модель (пусто = по умолчанию)</label>
+                    <input type="text" id="agent-modal-${uniqueId}-model" class="form-input" placeholder="gpt-4o">
                 </div>
                 <div class="form-group">
-                    <label for="agent-modal-temperature">Temperature</label>
-                    <input type="number" id="agent-modal-temperature" class="form-input" value="0.7" min="0" max="2" step="0.1">
+                    <label for="agent-modal-${uniqueId}-temperature">Temperature</label>
+                    <input type="number" id="agent-modal-${uniqueId}-temperature" class="form-input" value="0.7" min="0" max="2" step="0.1">
                 </div>
                 <div class="form-group">
-                    <label for="agent-modal-top-p">Top P (пусто = не используется)</label>
-                    <input type="number" id="agent-modal-top-p" class="form-input" value="" min="0" max="1" step="0.1">
+                    <label for="agent-modal-${uniqueId}-top-p">Top P (пусто = не используется)</label>
+                    <input type="number" id="agent-modal-${uniqueId}-top-p" class="form-input" value="" min="0" max="1" step="0.1">
                 </div>
                 <div class="form-group">
-                    <label for="agent-modal-top-k">Top K (пусто = не используется)</label>
-                    <input type="number" id="agent-modal-top-k" class="form-input" value="" min="1">
+                    <label for="agent-modal-${uniqueId}-top-k">Top K (пусто = не используется)</label>
+                    <input type="number" id="agent-modal-${uniqueId}-top-k" class="form-input" value="" min="1">
                 </div>
                 <div class="form-group">
-                    <label for="agent-modal-context-file">Контекстный файл</label>
-                    <input type="text" id="agent-modal-context-file" class="form-input" placeholder="ROLE_DEVELOPER.md">
+                    <label for="agent-modal-${uniqueId}-context-file">Контекстный файл</label>
+                    <input type="text" id="agent-modal-${uniqueId}-context-file" class="form-input" placeholder="ROLE_DEVELOPER.md">
                 </div>
                 <div class="modal-actions">
-                    <button class="btn btn-danger" id="agent-modal-delete-btn" onclick="deleteCurrentAgent()" style="display:none">Удалить</button>
+                    <button class="btn btn-danger" id="agent-modal-${uniqueId}-delete-btn" onclick="deleteCurrentAgent('${uniqueId}')" style="display:none">Удалить</button>
                     <button class="btn btn-secondary" onclick="closeAgentModal()">Отмена</button>
-                    <button class="btn btn-primary" onclick="saveCurrentAgent()">Сохранить</button>
+                    <button class="btn btn-primary" onclick="saveCurrentAgent('${uniqueId}')">Сохранить</button>
                 </div>
             </div>
         `;
@@ -1818,13 +1832,13 @@
         document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
     }
     
-    function deleteCurrentAgent() {
-        const name = document.getElementById('agent-modal-edit-name').value;
+    function deleteCurrentAgent(uniqueId) {
+        const name = document.getElementById('agent-modal-' + uniqueId + '-edit-name').value;
         if (name) deleteAgent(name);
     }
     
-    function saveCurrentAgent() {
-        const name = document.getElementById('agent-modal-name').value.trim();
+    function saveCurrentAgent(uniqueId) {
+        const name = document.getElementById('agent-modal-' + uniqueId + '-name').value.trim();
         if (!name) {
             alert('Введите имя агента');
             return;
@@ -1832,13 +1846,13 @@
         
         const agentData = {
             name: name,
-            display_name: document.getElementById('agent-modal-display-name').value.trim() || name,
-            provider: document.getElementById('agent-modal-provider').value,
-            model: document.getElementById('agent-modal-model').value.trim(),
-            temperature: parseFloat(document.getElementById('agent-modal-temperature').value) || 0.7,
-            top_p: document.getElementById('agent-modal-top-p').value ? parseFloat(document.getElementById('agent-modal-top-p').value) : null,
-            top_k: document.getElementById('agent-modal-top-k').value ? parseInt(document.getElementById('agent-modal-top-k').value) : null,
-            context_file: document.getElementById('agent-modal-context-file').value.trim() || `ROLE_${name.toUpperCase()}.md`,
+            display_name: document.getElementById('agent-modal-' + uniqueId + '-display-name').value.trim() || name,
+            provider: document.getElementById('agent-modal-' + uniqueId + '-provider').value,
+            model: document.getElementById('agent-modal-' + uniqueId + '-model').value.trim(),
+            temperature: parseFloat(document.getElementById('agent-modal-' + uniqueId + '-temperature').value) || 0.7,
+            top_p: document.getElementById('agent-modal-' + uniqueId + '-top-p').value ? parseFloat(document.getElementById('agent-modal-' + uniqueId + '-top-p').value) : null,
+            top_k: document.getElementById('agent-modal-' + uniqueId + '-top-k').value ? parseInt(document.getElementById('agent-modal-' + uniqueId + '-top-k').value) : null,
+            context_file: document.getElementById('agent-modal-' + uniqueId + '-context-file').value.trim() || `ROLE_${name.toUpperCase()}.md`,
         };
         
         saveAgentData(agentData);
@@ -1887,6 +1901,33 @@
             }
         } catch (e) {
             alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function toggleAgent(name) {
+        const toggleId = 'agent-toggle-' + name;
+        const toggle = document.getElementById(toggleId);
+        if (!toggle) return;
+        
+        const enabled = toggle.checked;
+        
+        try {
+            const response = await fetch('/admin/agents/' + encodeURIComponent(name) + '/enabled', {
+                method: 'PATCH',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: enabled })
+            });
+            
+            if (response.ok) {
+                loadAgents();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Ошибка сохранения');
+                toggle.checked = !enabled;
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+            toggle.checked = !enabled;
         }
     }
 
@@ -3103,6 +3144,44 @@
         display: flex;
         gap: 0.5rem;
         flex-wrap: wrap;
+    }
+
+    .agent-disabled {
+        opacity: 0.6;
+    }
+
+    .agent-toggle {
+        margin-bottom: 0.75rem;
+    }
+
+    .toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+    }
+
+    .toggle-label input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+    }
+
+    .badge-success {
+        background: #28a745;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: normal;
+    }
+
+    .badge-warning {
+        background: #ffc107;
+        color: #212529;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: normal;
     }
 
     .btn-danger-outline {

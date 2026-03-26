@@ -15,6 +15,15 @@ def _get_mcp_config():
         return None
 
 
+def _get_default_agent() -> str:
+    """Lazy import config to get default agent, avoiding circular imports"""
+    try:
+        from app.config import config
+        return config.get_default_agent() or ""
+    except ImportError:
+        return ""
+
+
 def _clean_message_content(content: str) -> str:
     """Удалить JSON-блок статуса из содержимого сообщения"""
     if not content:
@@ -1023,6 +1032,7 @@ class SessionManager:
                     owner_id=data.get("owner_id"),
                     access=data.get("access", "owner"),
                     mcp_servers=mcp_servers,
+                    agent_role=data.get("agent_role", ""),
                 )
                 session.session_settings["debug_enabled"] = data.get("debug_enabled", True)
                 session._ensure_main_branch()
@@ -1113,7 +1123,8 @@ class SessionManager:
                 session._ensure_main_branch()
                 self._sessions[session_id] = session
             else:
-                self._sessions[session_id] = Session(session_id=session_id)
+                default_agent = _get_default_agent()
+                self._sessions[session_id] = Session(session_id=session_id, agent_role=default_agent)
         return self._sessions[session_id]
 
     def reset_session(self, session_id: str) -> None:

@@ -735,7 +735,7 @@ class AnthropicProvider(BaseProvider):
                                 thinking = delta.get("thinking", "")
                                 full_reasoning += thinking
                                 yield LLMChunk(
-                                    content=full_content,
+                                    content="",
                                     is_final=False,
                                     reasoning=thinking if thinking else None
                                 )

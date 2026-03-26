@@ -17,6 +17,8 @@ SYSTEM_CONTEXT_FILES = [
     "NEW_PROJECT.md",
     "SCHEDULER.md",
     "RAG_UNKNOWN.md",
+    "ROLES_DESCRIPTION.md",
+    "ROLE_ASSISTANT.md",
     "ROLE_DEVELOPER.md",
     "ROLE_ANALYST.md",
     "ROLE_DEVOPS.md",
@@ -240,6 +242,15 @@ class ContextLoader:
         return "\n".join(context_parts)
 
 
+def get_additional_context() -> str:
+    """Returns the additional context from enabled context files (ABOUT.md, SOUL.md, etc)."""
+    loader = ContextLoader()
+    context = loader.load()
+    if context:
+        return f"\n\nДополнительный контекст:\n{context}"
+    return ""
+
+
 def get_system_prompt() -> str:
     loader = ContextLoader()
     context = loader.load()
@@ -395,3 +406,25 @@ def get_role_prompt(role_name: str) -> str:
     """Получить промпт роли агента из контекстного файла"""
     role_file = f"ROLE_{role_name.upper()}.md"
     return config.get_context_file(role_file) or ""
+
+
+def get_roles_description() -> str:
+    """Получить описание доступных ролей агентов для системного промпта."""
+    enabled_agents = config.get_enabled_agents()
+    if not enabled_agents:
+        return ""
+    
+    roles_list = []
+    for name, cfg in enabled_agents.items():
+        display_name = cfg.get("display_name", name)
+        roles_list.append(f"- {name} — {display_name}")
+    
+    if not roles_list:
+        return ""
+    
+    roles_text = "\n".join(roles_list)
+    base_content = config.get_context_file("ROLES_DESCRIPTION.md") or ""
+    if not base_content:
+        base_content = "Если понадобится, ты можешь предложить пользователю обратиться к специалистам:"
+    
+    return f"{base_content}\n{roles_text}"

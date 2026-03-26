@@ -18,6 +18,7 @@ def init_default_context_files() -> None:
     ctx_mgr = ContextManager()
     ctx_mgr.user_dir.mkdir(parents=True, exist_ok=True)
     
+    created_files = []
     for filename in DEFAULT_CONTEXT_FILES:
         user_path = ctx_mgr.user_dir / filename
         if not user_path.exists():
@@ -25,16 +26,18 @@ def init_default_context_files() -> None:
             default_path = ctx_mgr.system_dir / default_filename
             if default_path.exists():
                 user_path.write_text(default_path.read_text(encoding="utf-8"), encoding="utf-8")
+                created_files.append(filename)
                 info("INIT", f"Created default context file: {filename}")
     
-    enabled = config.get_enabled_context_files()
-    new_enabled = list(enabled)
-    for filename in DEFAULT_CONTEXT_FILES:
-        if filename not in new_enabled:
-            new_enabled.append(filename)
-    if new_enabled != enabled:
-        config.set_enabled_context_files(new_enabled)
-        info("INIT", f"Enabled default context files: {DEFAULT_CONTEXT_FILES}")
+    if created_files:
+        enabled = config.get_enabled_context_files()
+        new_enabled = list(enabled)
+        for filename in created_files:
+            if filename not in new_enabled:
+                new_enabled.append(filename)
+        if new_enabled != enabled:
+            config.set_enabled_context_files(new_enabled)
+            info("INIT", f"Enabled newly created default context files: {created_files}")
 
 
 def create_app() -> Flask:

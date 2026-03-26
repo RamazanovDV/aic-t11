@@ -20,27 +20,34 @@ class ContextBuilder:
     def build_system_prompt(self, agent_role: str | None = None) -> str:
         """Build full system prompt from components."""
         from app.context import (
-            get_system_prompt,
+            get_additional_context,
             get_profile_prompt,
             get_project_prompt,
             get_status_prompt,
             should_show_interview,
             get_interview_prompt,
-            get_role_prompt
+            get_role_prompt,
+            get_roles_description
         )
         
-        system_prompt = get_system_prompt()
+        if agent_role:
+            role_prompt = get_role_prompt(agent_role)
+            system_prompt = role_prompt if role_prompt else ""
+        else:
+            system_prompt = ""
+        
+        system_prompt += get_additional_context()
+        
+        roles_description = get_roles_description()
+        if roles_description:
+            system_prompt += "\n\n" + roles_description
+        
         system_prompt += get_profile_prompt(self.session, self.user_id)
         system_prompt += get_project_prompt(self.session)
         system_prompt += get_status_prompt(self.session)
         
         if should_show_interview(self.session, self.user_id):
             system_prompt += get_interview_prompt()
-        
-        if agent_role:
-            role_prompt = get_role_prompt(agent_role)
-            if role_prompt:
-                system_prompt += "\n\n" + role_prompt
         
         return system_prompt
     

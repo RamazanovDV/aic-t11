@@ -13,11 +13,17 @@ from app.project_updates import handle_project_updates
 TAGS_PATTERN = re.compile(r'@(\w+)')
 
 
-def parse_agent_tags(message: str) -> tuple[list[str], str]:
-    """Parse @tags from message and return (tags, clean_message)."""
+def parse_agent_tags(message: str) -> tuple[list[str], str, str]:
+    """Parse @tags from message and return (tags, clean_message, transformed_message).
+    
+    - tags: list of tag names found (e.g., ['developer', 'qa'])
+    - clean_message: message with @tags removed
+    - transformed_message: message with @tag replaced by 'to: tag' for LLM
+    """
     tags = TAGS_PATTERN.findall(message)
     clean_message = TAGS_PATTERN.sub('', message).strip()
-    return tags, clean_message
+    transformed_message = TAGS_PATTERN.sub(r'to: \1', message).strip()
+    return tags, clean_message, transformed_message
 
 
 class StreamHandler(BaseHandler):
@@ -44,18 +50,18 @@ class StreamHandler(BaseHandler):
         if provider_name or model:
             session.set_provider_model(provider_name or "", model or "")
         
-        tags, clean_message = parse_agent_tags(message)
+        tags, clean_message, transformed_message = parse_agent_tags(message)
         
         if agent_role:
             session.set_agent_role(agent_role)
         
-        session.add_user_message(clean_message, source=source or "web")
+        session.add_user_message(message, source=source or "web")
         
         debug_collector = self.create_debug_collector(session)
         
         if tags:
             yield from self._handle_with_tags(
-                session, clean_message, tags, provider_name, model,
+                session, transformed_message, tags, provider_name, model,
                 debug_collector, user_id
             )
             return
@@ -63,8 +69,8 @@ class StreamHandler(BaseHandler):
         context_builder = self.create_context_builder(session, user_id, debug_collector)
         effective_role = session.agent_role or None
         system_prompt = context_builder.build_system_prompt(effective_role)
-        system_prompt = context_builder.apply_rag_to_prompt(system_prompt, clean_message)
-        messages = context_builder.build_messages(clean_message, effective_role)
+        system_prompt = context_builder.apply_rag_to_prompt(system_prompt, transformed_message)
+        messages = context_builder.build_messages(None, effective_role)
         mcp_tools = context_builder.build_mcp_tools(provider_name)
         
         from app.config import config
@@ -78,7 +84,7 @@ class StreamHandler(BaseHandler):
         
         if tsm_mode == "orchestrator":
             yield from self._handle_orchestrator_stream(
-                session, messages, system_prompt, provider, debug_collector, clean_message, provider_name, model, mcp_tools, effective_role
+                session, messages, system_prompt, provider, debug_collector, transformed_message, provider_name, model, mcp_tools, effective_role
             )
         else:
             yield from self._handle_simple_stream(
@@ -88,7 +94,7 @@ class StreamHandler(BaseHandler):
     def _handle_with_tags(
         self,
         session: Session,
-        clean_message: str,
+        llm_message: str,
         tags: list[str],
         provider_name: str | None,
         model: str | None,
@@ -111,8 +117,8 @@ class StreamHandler(BaseHandler):
             
             context_builder = self.create_context_builder(session, user_id, debug_collector)
             system_prompt = context_builder.build_system_prompt(effective_role)
-            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, clean_message)
-            messages = context_builder.build_messages(clean_message, effective_role)
+            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, llm_message)
+            messages = context_builder.build_messages(None, effective_role)
             mcp_tools = context_builder.build_mcp_tools(provider_name)
             
             from app.config import config
@@ -126,7 +132,7 @@ class StreamHandler(BaseHandler):
             
             if tsm_mode == "orchestrator":
                 yield from self._handle_orchestrator_stream(
-                    session, messages, system_prompt, provider, debug_collector, clean_message, provider_name, model, mcp_tools, effective_role
+                    session, messages, system_prompt, provider, debug_collector, llm_message, provider_name, model, mcp_tools, effective_role
                 )
             else:
                 yield from self._handle_simple_stream(
@@ -220,11 +226,17 @@ class StreamHandler(BaseHandler):
             agent_role=agent_role
         )
         
+        from app.status_validator import validate_status_block
+        parsed_status, cleaned_content = validate_status_block(full_content)
+        if parsed_status:
+            session.update_status(parsed_status)
+            handle_project_updates(session)
+        
         self.save_session(session.session_id)
         
         disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
         
-        yield f"data: {json.dumps({'content': full_content, 'reasoning': full_reasoning, 'done': True, 'usage': total_usage, 'model': provider.model, 'debug': debug_info, 'disabled_indices': disabled_indices, 'agent_role': agent_role})}\n\n"
+        yield f"data: {json.dumps({'content': full_content, 'reasoning': full_reasoning, 'done': True, 'usage': total_usage, 'model': provider.model, 'debug': debug_info, 'disabled_indices': disabled_indices, 'agent_role': agent_role, 'project': session.status.get('project'), 'task_name': session.status.get('task_name', 'conversation'), 'state': session.status.get('state')})}\n\n"
         
         yield "data: [DONE]\n\n"
     
@@ -440,7 +452,7 @@ class StreamHandler(BaseHandler):
             disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
             
             try:
-                yield f"data: {json.dumps({'content': final_content, 'reasoning': final_reasoning, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices, 'aborted': was_aborted, 'agent_role': agent_role})}\n\n"
+                yield f"data: {json.dumps({'content': final_content, 'reasoning': final_reasoning, 'done': True, 'usage': usage, 'model': provider.model, 'subtask_results': subtask_results, 'debug': debug_info, 'disabled_indices': disabled_indices, 'aborted': was_aborted, 'agent_role': agent_role, 'project': session.status.get('project'), 'task_name': session.status.get('task_name', 'conversation'), 'state': session.status.get('state')})}\n\n"
             except Exception:
                 pass
             

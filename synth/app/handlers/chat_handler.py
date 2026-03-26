@@ -13,11 +13,17 @@ from app.project_updates import handle_project_updates
 TAGS_PATTERN = re.compile(r'@(\w+)')
 
 
-def parse_agent_tags(message: str) -> tuple[list[str], str]:
-    """Parse @tags from message and return (tags, clean_message)."""
+def parse_agent_tags(message: str) -> tuple[list[str], str, str]:
+    """Parse @tags from message and return (tags, clean_message, transformed_message).
+    
+    - tags: list of tag names found (e.g., ['developer', 'qa'])
+    - clean_message: message with @tags removed
+    - transformed_message: message with @tag replaced by 'to: tag' for LLM
+    """
     tags = TAGS_PATTERN.findall(message)
     clean_message = TAGS_PATTERN.sub('', message).strip()
-    return tags, clean_message
+    transformed_message = TAGS_PATTERN.sub(r'to: \1', message).strip()
+    return tags, clean_message, transformed_message
 
 
 class ChatHandler(BaseHandler):
@@ -54,26 +60,26 @@ class ChatHandler(BaseHandler):
             except ValueError as e:
                 return {"error": f"Invalid tsm_mode: {str(e)}"}
         
-        tags, clean_message = parse_agent_tags(message)
+        tags, clean_message, transformed_message = parse_agent_tags(message)
         
         if agent_role:
             session.set_agent_role(agent_role)
         
-        session.add_user_message(clean_message, source=source or "web")
+        session.add_user_message(message, source=source or "web")
         
         debug_collector = self.create_debug_collector(session)
         
         if tags:
             return self._handle_with_tags(
-                session, clean_message, tags, provider_name, model,
+                session, transformed_message, tags, provider_name, model,
                 debug_collector, user_id, use_rag, rag_index_name, rag_top_k
             )
         
         context_builder = self.create_context_builder(session, user_id, debug_collector)
         effective_role = session.agent_role or None
         system_prompt = context_builder.build_system_prompt(effective_role)
-        system_prompt = context_builder.apply_rag_to_prompt(system_prompt, clean_message, use_rag)
-        messages = context_builder.build_messages(clean_message, effective_role)
+        system_prompt = context_builder.apply_rag_to_prompt(system_prompt, transformed_message, use_rag)
+        messages = context_builder.build_messages(None, effective_role)
         
         mcp_tools = context_builder.build_mcp_tools(provider_name)
         
@@ -93,7 +99,7 @@ class ChatHandler(BaseHandler):
     def _handle_with_tags(
         self,
         session: Session,
-        clean_message: str,
+        llm_message: str,
         tags: list[str],
         provider_name: str | None,
         model: str | None,
@@ -119,8 +125,8 @@ class ChatHandler(BaseHandler):
             
             context_builder = self.create_context_builder(session, user_id, debug_collector)
             system_prompt = context_builder.build_system_prompt(effective_role)
-            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, clean_message, use_rag)
-            messages = context_builder.build_messages(clean_message, effective_role)
+            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, llm_message, use_rag)
+            messages = context_builder.build_messages(None, effective_role)
             
             mcp_tools = context_builder.build_mcp_tools(provider_name)
             
@@ -228,6 +234,9 @@ class ChatHandler(BaseHandler):
             "disabled_indices": disabled_indices,
             "reasoning": response.reasoning,
             "agent_role": agent_role,
+            "project": session.status.get("project"),
+            "task_name": session.status.get("task_name", "conversation"),
+            "state": session.status.get("state"),
         }
         
         if debug_info:
@@ -294,6 +303,9 @@ class ChatHandler(BaseHandler):
             "total_tokens": session.total_tokens,
             "reasoning": final_reasoning,
             "agent_role": agent_role,
+            "project": session.status.get("project"),
+            "task_name": session.status.get("task_name", "conversation"),
+            "state": session.status.get("state"),
         }
         
         if debug_info:

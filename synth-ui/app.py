@@ -134,6 +134,9 @@ def chat():
     source = data.get("source")
     if source:
         payload["source"] = source
+    agent_role = data.get("agent_role")
+    if agent_role:
+        payload["agent_role"] = agent_role
 
     try:
         response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=payload, timeout=60)
@@ -175,6 +178,9 @@ def chat_stream():
     source = data.get("source")
     if source:
         payload["source"] = source
+    agent_role = data.get("agent_role")
+    if agent_role:
+        payload["agent_role"] = agent_role
 
     try:
         response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=payload, timeout=120, stream=True)
@@ -392,6 +398,7 @@ def set_session_agent_role(session_id: str):
     url = f"{ui_config.backend_url}/api/sessions/{session_id}/agent-role"
     headers = {
         "X-API-Key": ui_config.backend_api_key,
+        "X-User-Id": request.headers.get("X-User-Id", ""),
         "Content-Type": "application/json",
     }
 

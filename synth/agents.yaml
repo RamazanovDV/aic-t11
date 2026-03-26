@@ -2,6 +2,17 @@ agents:
   analyst:
     context_file: ROLE_ANALYST.md
     display_name: Аналитик
+    enabled: true
+    model: ''
+    provider: ''
+    temperature: 0.7
+    top_k: null
+    top_p: null
+  assistant:
+    context_file: ROLE_ASSISTANT.md
+    default: true
+    display_name: Ассистент
+    enabled: true
     model: ''
     provider: ''
     temperature: 0.7
@@ -10,6 +21,7 @@ agents:
   developer:
     context_file: ROLE_DEVELOPER.md
     display_name: Разработчик
+    enabled: true
     model: ''
     provider: ''
     temperature: 0.7
@@ -18,14 +30,24 @@ agents:
   devops:
     context_file: ROLE_DEVOPS.md
     display_name: DevOps-инженер
+    enabled: true
     model: ''
     provider: ''
     temperature: 0.7
     top_k: null
     top_p: null
+  friend:
+    context_file: DRUNKEN_FRIEND.md
+    display_name: Дружище
+    model: ''
+    provider: ''
+    temperature: 1
+    top_k: null
+    top_p: null
   lead:
     context_file: ROLE_LEAD.md
     display_name: Тимлид
+    enabled: true
     model: ''
     provider: ''
     temperature: 0.7
@@ -34,6 +56,7 @@ agents:
   pm:
     context_file: ROLE_PM.md
     display_name: Продакт менеджер
+    enabled: true
     model: ''
     provider: ''
     temperature: 0.7
@@ -42,6 +65,7 @@ agents:
   qa:
     context_file: ROLE_QA.md
     display_name: Тестировщик
+    enabled: true
     model: ''
     provider: ''
     temperature: 0.7
@@ -50,6 +74,7 @@ agents:
   security_auditor:
     context_file: ROLE_SECURITY_AUDITOR.md
     display_name: Аудитор ИБ
+    enabled: true
     model: ''
     provider: ''
     temperature: 0.7

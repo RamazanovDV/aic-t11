@@ -542,7 +542,6 @@
                     <button class="btn btn-icon btn-refresh" onclick="loadPanelModels(${index})" title="Обновить модели">↻</button>
                     <span class="panel-label">Профиль:</span>
                     <select class="agent-select panel-agent-select" data-panel="${index}" onchange="onPanelAgentChange(${index})">
-                        <option value="">Без профиля</option>
                     </select>
                     <div class="chat-header-right">
                         <label class="debug-toggle">
@@ -777,6 +776,7 @@
     }
 
     let availableAgents = {};
+    let defaultAgent = '';
 
     async function loadAgents() {
         try {
@@ -784,19 +784,17 @@
             if (response.ok) {
                 const data = await response.json();
                 availableAgents = data.agents || {};
+                defaultAgent = data.default_agent || '';
                 
                 panels.forEach((panel, idx) => {
                     const agentSelect = document.querySelector(`.panel-agent-select[data-panel="${idx}"]`);
                     if (agentSelect) {
-                        agentSelect.innerHTML = '<option value="">Без профиля</option>';
+                        agentSelect.innerHTML = '';
                         for (const [name, cfg] of Object.entries(availableAgents)) {
                             const option = document.createElement('option');
                             option.value = name;
                             option.textContent = cfg.display_name || name;
                             agentSelect.appendChild(option);
-                        }
-                        if (panel.agentRole && availableAgents[panel.agentRole]) {
-                            agentSelect.value = panel.agentRole;
                         }
                     }
                 });
@@ -873,7 +871,18 @@
                 panel.currentBranch = data.current_branch || 'main';
                 panel.branches = data.branches || [];
                 panel.checkpoints = data.checkpoints || [];
-                panel.tsmMode = data.tsm_mode || null;
+                panel.tsmMode = data.session_settings?.tsm_mode || null;
+                
+                const agentSelect = document.querySelector(`.panel-agent-select[data-panel="${panelIndex}"]`);
+                if (agentSelect && availableAgents) {
+                    if (panel.agentRole && availableAgents[panel.agentRole]) {
+                        agentSelect.value = panel.agentRole;
+                    } else if (defaultAgent && availableAgents[defaultAgent]) {
+                        panel.agentRole = defaultAgent;
+                        agentSelect.value = defaultAgent;
+                        saveAgentRole(panelIndex, defaultAgent);
+                    }
+                }
                 
                 if (data.project || data.task_name || data.state) {
                     updatePanelProjectStatus(panelIndex, {
@@ -1701,6 +1710,14 @@
                     });
                 }
                 
+                if (data.project || data.task_name || data.state) {
+                    updatePanelProjectStatus(panelIndex, {
+                        project: data.project,
+                        task_name: data.task_name || 'conversation',
+                        state: data.state
+                    });
+                }
+                
                 await loadPanelMessages(panelIndex);
             }
         } catch (err) {
@@ -2021,6 +2038,14 @@
                                 if (data.disabled_indices && data.disabled_indices.length > 0) {
                                     data.disabled_indices.forEach(idx => {
                                         updateMessageDisabledState(panelIndex, idx, true);
+                                    });
+                                }
+                                
+                                if (data.project || data.task_name || data.state) {
+                                    updatePanelProjectStatus(panelIndex, {
+                                        project: data.project,
+                                        task_name: data.task_name || 'conversation',
+                                        state: data.state
                                     });
                                 }
                                 

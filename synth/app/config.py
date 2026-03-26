@@ -399,6 +399,17 @@ class Config:
     def agents(self) -> dict[str, dict[str, Any]]:
         return self._load_agents_config().get("agents", {})
 
+    def get_enabled_agents(self) -> dict[str, dict[str, Any]]:
+        """Return only enabled agents."""
+        return {name: cfg for name, cfg in self.agents.items() if cfg.get("enabled", True)}
+
+    def get_default_agent(self) -> str | None:
+        """Return the name of the default agent."""
+        for name, cfg in self.agents.items():
+            if cfg.get("default", False):
+                return name
+        return None
+
     def get_agent(self, name: str) -> dict[str, Any] | None:
         return self.agents.get(name)
 
@@ -406,8 +417,27 @@ class Config:
         agents_config = self._load_agents_config()
         if "agents" not in agents_config:
             agents_config["agents"] = {}
-        agents_config["agents"][name] = agent_config
+        current = agents_config["agents"].get(name, {})
+        for key, value in agent_config.items():
+            current[key] = value
+        agents_config["agents"][name] = current
         self._save_agents_config(agents_config)
+
+    def enable_agent(self, name: str) -> bool:
+        agents_config = self._load_agents_config()
+        if "agents" not in agents_config or name not in agents_config["agents"]:
+            return False
+        agents_config["agents"][name]["enabled"] = True
+        self._save_agents_config(agents_config)
+        return True
+
+    def disable_agent(self, name: str) -> bool:
+        agents_config = self._load_agents_config()
+        if "agents" not in agents_config or name not in agents_config["agents"]:
+            return False
+        agents_config["agents"][name]["enabled"] = False
+        self._save_agents_config(agents_config)
+        return True
 
     def delete_agent(self, name: str) -> bool:
         agents_config = self._load_agents_config()
