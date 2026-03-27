@@ -778,6 +778,13 @@
     let availableAgents = {};
     let defaultAgent = '';
 
+    function getAgentDisplayName(agentId) {
+        if (availableAgents[agentId]) {
+            return availableAgents[agentId].display_name || agentId;
+        }
+        return agentId;
+    }
+
     async function loadAgents() {
         try {
             const response = await authFetch('/api/agents');
@@ -1092,7 +1099,7 @@
                 
                 const groupId = msg.group_id || null;
                 const groupInfo = groupId ? groupInfoMap.get(groupId) : null;
-                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass, msg.reasoning || null, groupId, groupInfo);
+                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass, msg.reasoning || null, groupId, groupInfo, msg.agent_role || null);
                 panel.messages[idx]._renderIndex = idx;
                 panel.messages[idx].messageIndex = idx;
                 panel.messages[idx].group_id = msg.group_id || null;
@@ -1799,7 +1806,15 @@
                 for (const line of lines) {
                     if (line.startsWith('data: ')) {
                         const dataStr = line.slice(6);
-                        if (dataStr === '[DONE]') continue;
+                        if (dataStr === '[DONE]') {
+                            // Final cleanup - ensure all pending rows are removed
+                            if (rowDiv && !panel.messagesContainer.contains(rowDiv)) {
+                                rowDiv.remove();
+                            }
+                            // Call loadPanelMessages once at the end to sync with server
+                            await loadPanelMessages(panelIndex);
+                            continue;
+                        }
 
                         try {
                             const data = JSON.parse(dataStr);
@@ -2059,7 +2074,41 @@
                                     });
                                 }
                                 
-                                await loadPanelMessages(panelIndex);
+                                if (data.agent_role) {
+                                    const badge = document.createElement('div');
+                                    badge.className = 'message-agent-badge';
+                                    badge.textContent = getAgentDisplayName(data.agent_role);
+                                    div.insertBefore(badge, messageContent);
+                                }
+                                
+                                if (data.done && !panel.messagesContainer.contains(rowDiv)) {
+                                    panel.messagesContainer.appendChild(rowDiv);
+                                    
+                                    // Create new rowDiv for next agent
+                                    const newRowDiv = document.createElement('div');
+                                    newRowDiv.className = 'message-row message-assistant';
+                                    
+                                    const newDiv = document.createElement('div');
+                                    newDiv.className = `message message-assistant ${panel.currentStatusClass || 'state-free'}`;
+                                    const newMessageContent = document.createElement('div');
+                                    newMessageContent.className = 'message-content';
+                                    newMessageContent.innerHTML = '';
+                                    
+                                    newDiv.appendChild(newMessageContent);
+                                    newRowDiv.appendChild(newDiv);
+                                    
+                                    // Update variables for next agent
+                                    rowDiv = newRowDiv;
+                                    div = newDiv;
+                                    messageContent = newMessageContent;
+                                    thinkingBlock = null;
+                                    fullContent = '';
+                                    fullReasoning = '';
+                                }
+                                
+                                if (!data.done) {
+                                    await loadPanelMessages(panelIndex);
+                                }
                             }
                         } catch (e) {
                             console.error('Parse error:', e);

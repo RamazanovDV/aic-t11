@@ -39,8 +39,8 @@ agents:
   friend:
     context_file: DRUNKEN_FRIEND.md
     display_name: Дружище
-    model: omn.deepseek-r1:14b
-    provider: itphx
+    model: deepseek-r1:14b
+    provider: ollama
     temperature: 1
     top_k: null
     top_p: null

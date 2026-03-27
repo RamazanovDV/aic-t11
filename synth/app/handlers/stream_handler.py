@@ -113,26 +113,44 @@ class StreamHandler(BaseHandler):
                 warnings.append(f"Роль @{tag} не найдена, пропускаем.")
                 continue
             
+            agent_config = valid_agents[tag]
             effective_role = tag
+            
+            effective_provider = agent_config.get('provider') or provider_name
+            effective_model = agent_config.get('model') or model
+            
+            agent_settings = {}
+            if agent_config.get('temperature') is not None:
+                agent_settings['temperature'] = agent_config['temperature']
+            if agent_config.get('top_p') is not None:
+                agent_settings['top_p'] = agent_config['top_p']
+            if agent_config.get('top_k') is not None:
+                agent_settings['top_k'] = agent_config['top_k']
             
             context_builder = self.create_context_builder(session, user_id, debug_collector)
             system_prompt = context_builder.build_system_prompt(effective_role)
             system_prompt = context_builder.apply_rag_to_prompt(system_prompt, llm_message)
             messages = context_builder.build_messages(None, effective_role)
-            mcp_tools = context_builder.build_mcp_tools(provider_name)
+            mcp_tools = context_builder.build_mcp_tools(effective_provider)
             
-            from app.config import config
-            if not provider_name:
-                provider_name = config.default_provider
+            if not effective_provider:
+                effective_provider = config.default_provider
             
-            provider = self.create_provider(provider_name, model)
+            provider_config = config.get_provider_config(effective_provider)
+            if agent_settings:
+                provider_config = provider_config.copy()
+                for key, value in agent_settings.items():
+                    if value is not None:
+                        provider_config[key] = value
+            
+            provider = self.create_provider(effective_provider, effective_model, provider_config)
             
             from app import tsm
             tsm_mode = tsm.get_tsm_mode(session)
             
             if tsm_mode == "orchestrator":
                 yield from self._handle_orchestrator_stream(
-                    session, messages, system_prompt, provider, debug_collector, llm_message, provider_name, model, mcp_tools, effective_role
+                    session, messages, system_prompt, provider, debug_collector, llm_message, effective_provider, effective_model, mcp_tools, effective_role
                 )
             else:
                 yield from self._handle_simple_stream(

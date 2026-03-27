@@ -1699,7 +1699,7 @@
 
     let agentsConfig = {};
 
-    function openAgentModal(name = null) {
+    async function openAgentModal(name = null) {
         console.log('openAgentModal called with name:', name);
         try {
             const uniqueId = name || 'new';
@@ -1775,7 +1775,7 @@
             
             if (modelEl) {
                 const selectedProvider = name && agentsConfig[name] ? agentsConfig[name].provider || '' : '';
-                loadAgentModelSelect(uniqueId, selectedProvider || null);
+                await loadAgentModelSelect(uniqueId, selectedProvider || null);
                 if (name && agentsConfig[name] && agentsConfig[name].model) {
                     modelEl.value = agentsConfig[name].model || '';
                 }
@@ -1851,13 +1851,20 @@
     
     function onAgentProviderChange(uniqueId) {
         const provider = document.getElementById('agent-modal-' + uniqueId + '-provider').value;
-        loadAgentModelSelect(uniqueId, provider || null);
+        const modelEl = document.getElementById('agent-modal-' + uniqueId + '-model');
+        const currentModel = modelEl ? modelEl.value : '';
+        loadAgentModelSelect(uniqueId, provider || null).then(() => {
+            if (modelEl && currentModel && modelEl.querySelector('option[value="' + currentModel + '"]')) {
+                modelEl.value = currentModel;
+            }
+        });
     }
     
     async function loadAgentModelSelect(uniqueId, providerFilter) {
         const select = document.getElementById('agent-modal-' + uniqueId + '-model');
         if (!select) return;
         
+        const currentValue = select.value;
         select.innerHTML = '<option value="">Загрузка...</option>';
         
         try {
@@ -1880,6 +1887,10 @@
                 option.value = name;
                 option.textContent = `${name} (${models[name].provider || '*'})`;
                 select.appendChild(option);
+            }
+            
+            if (currentValue) {
+                select.value = currentValue;
             }
         } catch (e) {
             console.error('Failed to load models:', e);

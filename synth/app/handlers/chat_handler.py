@@ -123,24 +123,35 @@ class ChatHandler(BaseHandler):
             agent_config = valid_agents[tag]
             effective_role = tag
             
+            effective_provider = agent_config.get('provider') or provider_name
+            effective_model = agent_config.get('model') or model
+            
+            agent_settings = {}
+            if agent_config.get('temperature') is not None:
+                agent_settings['temperature'] = agent_config['temperature']
+            if agent_config.get('top_p') is not None:
+                agent_settings['top_p'] = agent_config['top_p']
+            if agent_config.get('top_k') is not None:
+                agent_settings['top_k'] = agent_config['top_k']
+            
             context_builder = self.create_context_builder(session, user_id, debug_collector)
             system_prompt = context_builder.build_system_prompt(effective_role)
             system_prompt = context_builder.apply_rag_to_prompt(system_prompt, llm_message, use_rag)
             messages = context_builder.build_messages(None, effective_role)
             
-            mcp_tools = context_builder.build_mcp_tools(provider_name)
+            mcp_tools = context_builder.build_mcp_tools(effective_provider)
             
             tsm_mode = tsm.get_tsm_mode(session)
             
             if tsm_mode == "orchestrator":
                 result = self._handle_orchestrator(
-                    session, messages, system_prompt, provider_name, model,
-                    debug_collector, user_id, mcp_tools, effective_role
+                    session, messages, system_prompt, effective_provider, effective_model,
+                    debug_collector, user_id, mcp_tools, effective_role, agent_settings
                 )
             else:
                 result = self._handle_simple(
-                    session, messages, system_prompt, provider_name, model,
-                    debug_collector, user_id, mcp_tools, effective_role
+                    session, messages, system_prompt, effective_provider, effective_model,
+                    debug_collector, user_id, mcp_tools, effective_role, agent_settings
                 )
             
             if warnings:
@@ -170,7 +181,8 @@ class ChatHandler(BaseHandler):
         debug_collector: DebugCollector | None,
         user_id: str | None,
         mcp_tools: list,
-        agent_role: str | None = None
+        agent_role: str | None = None,
+        agent_settings: dict | None = None
     ) -> dict:
         """Handle simple mode."""
         from app.config import config
@@ -179,7 +191,14 @@ class ChatHandler(BaseHandler):
         if not provider_name:
             provider_name = config.default_provider
         
-        provider = self.create_provider(provider_name, model)
+        provider_config = config.get_provider_config(provider_name)
+        if agent_settings:
+            provider_config = provider_config.copy()
+            for key, value in agent_settings.items():
+                if value is not None:
+                    provider_config[key] = value
+        
+        provider = self.create_provider(provider_name, model, provider_config)
         
         orchestrator = self.create_orchestration_controller(
             provider, session, debug_collector
@@ -254,7 +273,8 @@ class ChatHandler(BaseHandler):
         debug_collector: DebugCollector | None,
         user_id: str | None,
         mcp_tools: list,
-        agent_role: str | None = None
+        agent_role: str | None = None,
+        agent_settings: dict | None = None
     ) -> dict:
         """Handle orchestrator mode."""
         from app.config import config
@@ -262,7 +282,14 @@ class ChatHandler(BaseHandler):
         if not provider_name:
             provider_name = config.default_provider
         
-        provider = self.create_provider(provider_name, model)
+        provider_config = config.get_provider_config(provider_name)
+        if agent_settings:
+            provider_config = provider_config.copy()
+            for key, value in agent_settings.items():
+                if value is not None:
+                    provider_config[key] = value
+        
+        provider = self.create_provider(provider_name, model, provider_config)
         
         result = tsm.process_orchestrator_response(
             session=session,
