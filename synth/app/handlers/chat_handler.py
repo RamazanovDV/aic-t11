@@ -26,6 +26,36 @@ def parse_agent_tags(message: str) -> tuple[list[str], str, str]:
     return tags, clean_message, transformed_message
 
 
+def split_message_by_tags(message: str, tags: list[str]) -> dict[str, str]:
+    """Split message by @tags so each agent gets only their relevant portion.
+    
+    For "to: analyst to: developer hello":
+    - 'analyst' gets "to: analyst hello"
+    - 'developer' gets "to: developer hello"
+    
+    Each agent sees only their 'to:' tag and the user's question (content after last tag).
+    """
+    if not tags:
+        return {}
+    
+    result = {}
+    
+    trailing_content = message.split(f'to: {tags[-1]}')[-1].strip() if tags else ""
+    
+    for tag in tags:
+        to_pattern = f'to: {tag}'
+        pos = message.find(to_pattern)
+        if pos == -1:
+            continue
+        
+        if trailing_content:
+            result[tag] = f"to: {tag} {trailing_content}"
+        else:
+            result[tag] = f"to: {tag}"
+    
+    return result
+
+
 class ChatHandler(BaseHandler):
     """Handler for /chat endpoint (non-streaming)."""
     
@@ -114,11 +144,14 @@ class ChatHandler(BaseHandler):
         
         valid_agents = config.agents
         warnings = []
+        per_agent_messages = split_message_by_tags(llm_message, tags)
         
         for tag in tags:
             if tag not in valid_agents:
                 warnings.append(f"Роль @{tag} не найдена, пропускаем.")
                 continue
+            
+            agent_message = per_agent_messages.get(tag, f"to: {tag}")
             
             agent_config = valid_agents[tag]
             effective_role = tag
@@ -136,8 +169,8 @@ class ChatHandler(BaseHandler):
             
             context_builder = self.create_context_builder(session, user_id, debug_collector)
             system_prompt = context_builder.build_system_prompt(effective_role)
-            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, llm_message, use_rag)
-            messages = context_builder.build_messages(None, effective_role)
+            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, agent_message, use_rag)
+            messages = context_builder.build_messages(agent_message, effective_role)
             
             mcp_tools = context_builder.build_mcp_tools(effective_provider)
             

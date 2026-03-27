@@ -26,6 +26,36 @@ def parse_agent_tags(message: str) -> tuple[list[str], str, str]:
     return tags, clean_message, transformed_message
 
 
+def split_message_by_tags(message: str, tags: list[str]) -> dict[str, str]:
+    """Split message by @tags so each agent gets only their relevant portion.
+    
+    For "to: analyst to: developer hello":
+    - 'analyst' gets "to: analyst hello"
+    - 'developer' gets "to: developer hello"
+    
+    Each agent sees only their 'to:' tag and the user's question (content after last tag).
+    """
+    if not tags:
+        return {}
+    
+    result = {}
+    
+    trailing_content = message.split(f'to: {tags[-1]}')[-1].strip() if tags else ""
+    
+    for tag in tags:
+        to_pattern = f'to: {tag}'
+        pos = message.find(to_pattern)
+        if pos == -1:
+            continue
+        
+        if trailing_content:
+            result[tag] = f"to: {tag} {trailing_content}"
+        else:
+            result[tag] = f"to: {tag}"
+    
+    return result
+
+
 class StreamHandler(BaseHandler):
     """Handler for /chat/stream endpoint (SSE streaming)."""
     
@@ -107,11 +137,18 @@ class StreamHandler(BaseHandler):
         
         valid_agents = config.agents
         warnings = []
+        per_agent_messages = split_message_by_tags(llm_message, tags)
+        
+        valid_tag_indices = [i for i, tag in enumerate(tags) if tag in valid_agents]
+        has_valid_agents = len(valid_tag_indices) > 0
         
         for tag_idx, tag in enumerate(tags):
             if tag not in valid_agents:
                 warnings.append(f"Роль @{tag} не найдена, пропускаем.")
                 continue
+            
+            is_last_agent = (tag_idx == valid_tag_indices[-1])
+            agent_message = per_agent_messages.get(tag, f"to: {tag}")
             
             agent_config = valid_agents[tag]
             effective_role = tag
@@ -129,8 +166,8 @@ class StreamHandler(BaseHandler):
             
             context_builder = self.create_context_builder(session, user_id, debug_collector)
             system_prompt = context_builder.build_system_prompt(effective_role)
-            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, llm_message)
-            messages = context_builder.build_messages(None, effective_role)
+            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, agent_message)
+            messages = context_builder.build_messages(agent_message, effective_role)
             mcp_tools = context_builder.build_mcp_tools(effective_provider)
             
             if not effective_provider:
@@ -150,12 +187,17 @@ class StreamHandler(BaseHandler):
             
             if tsm_mode == "orchestrator":
                 yield from self._handle_orchestrator_stream(
-                    session, messages, system_prompt, provider, debug_collector, llm_message, effective_provider, effective_model, mcp_tools, effective_role
+                    session, messages, system_prompt, provider, debug_collector, agent_message, effective_provider, effective_model, mcp_tools, effective_role,
+                    send_done_marker=is_last_agent
                 )
             else:
                 yield from self._handle_simple_stream(
-                    session, messages, system_prompt, provider, debug_collector, mcp_tools, effective_role
+                    session, messages, system_prompt, provider, debug_collector, mcp_tools, effective_role,
+                    send_done_marker=is_last_agent
                 )
+        
+        if has_valid_agents:
+            yield "data: [DONE]\n\n"
         
         if warnings:
             yield f"data: {json.dumps({'type': 'warnings', 'warnings': warnings})}\n\n"
@@ -168,7 +210,8 @@ class StreamHandler(BaseHandler):
         provider,
         debug_collector: DebugCollector | None,
         mcp_tools: list,
-        agent_role: str | None = None
+        agent_role: str | None = None,
+        send_done_marker: bool = True
     ) -> Generator[str, None, None]:
         """Handle simple mode with streaming."""
         import json
@@ -218,7 +261,7 @@ class StreamHandler(BaseHandler):
                 full_content += chunk.content
             
             if chunk.reasoning:
-                full_reasoning = chunk.reasoning
+                full_reasoning += chunk.reasoning
             
             total_usage = chunk.usage
             
@@ -256,7 +299,8 @@ class StreamHandler(BaseHandler):
         
         yield f"data: {json.dumps({'content': full_content, 'reasoning': full_reasoning, 'done': True, 'usage': total_usage, 'model': provider.model, 'debug': debug_info, 'disabled_indices': disabled_indices, 'agent_role': agent_role, 'project': session.status.get('project'), 'task_name': session.status.get('task_name', 'conversation'), 'state': session.status.get('state')})}\n\n"
         
-        yield "data: [DONE]\n\n"
+        if send_done_marker:
+            yield "data: [DONE]\n\n"
     
     def _handle_tool_calls(
         self,
@@ -343,7 +387,8 @@ class StreamHandler(BaseHandler):
         provider_name: str,
         model: str | None,
         mcp_tools: list,
-        agent_role: str | None = None
+        agent_role: str | None = None,
+        send_done_marker: bool = True
     ) -> Generator[str, None, None]:
         """Handle orchestrator mode with streaming events."""
         import json
@@ -475,7 +520,8 @@ class StreamHandler(BaseHandler):
                 pass
             
             try:
-                yield "data: [DONE]\n\n"
+                if send_done_marker:
+                    yield "data: [DONE]\n\n"
             except Exception:
                 pass
         except Exception:

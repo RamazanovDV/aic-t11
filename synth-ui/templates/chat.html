@@ -2100,6 +2100,9 @@
                                     newDiv.appendChild(newMessageContent);
                                     newRowDiv.appendChild(newDiv);
                                     
+                                    // Add newRowDiv to DOM immediately
+                                    panel.messagesContainer.appendChild(newRowDiv);
+                                    
                                     // Update variables for next agent
                                     rowDiv = newRowDiv;
                                     div = newDiv;

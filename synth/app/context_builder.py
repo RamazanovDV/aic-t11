@@ -35,12 +35,11 @@ class ContextBuilder:
             system_prompt = role_prompt if role_prompt else ""
         else:
             system_prompt = ""
+            roles_description = get_roles_description()
+            if roles_description:
+                system_prompt += roles_description
         
         system_prompt += get_additional_context()
-        
-        roles_description = get_roles_description()
-        if roles_description:
-            system_prompt += "\n\n" + roles_description
         
         system_prompt += get_profile_prompt(self.session, self.user_id)
         system_prompt += get_project_prompt(self.session)
@@ -52,22 +51,30 @@ class ContextBuilder:
         return system_prompt
     
     def build_messages(self, include_user_message: str | None = None, current_agent_role: str | None = None) -> list[Message]:
-        """Build messages for LLM."""
+        """Build messages for LLM.
+        
+        When include_user_message is provided (tagged agent mode), skip the last
+        user message from session (it's the original multi-tag message).
+        """
+        import re
         llm_messages = self.session.get_messages_for_llm()
         
         formatted_messages = []
-        for msg in llm_messages:
+        skip_last_user = include_user_message is not None
+        
+        for i, msg in enumerate(llm_messages):
             if msg.role == "summary":
                 summary_text = f"До этого вы обсудили следующее:\n{msg.content}"
                 if formatted_messages and formatted_messages[0]["role"] == "system":
                     formatted_messages[0]["content"] += f"\n\n{summary_text}"
                 else:
                     formatted_messages.insert(0, {"role": "system", "content": summary_text})
-            elif msg.role in ("user", "assistant"):
-                content = msg.content
-                if msg.role == "assistant" and msg.agent_role and msg.agent_role != current_agent_role:
-                    content = f"Ответ ассистента с ролью {msg.agent_role}:\n{content}"
-                formatted_messages.append({"role": msg.role, "content": content})
+            elif msg.role == "user":
+                if skip_last_user and i == len(llm_messages) - 1:
+                    continue
+                formatted_messages.append({"role": msg.role, "content": msg.content})
+            elif msg.role == "assistant":
+                formatted_messages.append({"role": msg.role, "content": msg.content})
         
         if include_user_message:
             formatted_messages.append({"role": "user", "content": include_user_message})
