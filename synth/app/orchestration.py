@@ -148,7 +148,7 @@ class OrchestrationController:
             if chunk.content:
                 full_content += chunk.content
             if chunk.reasoning:
-                full_reasoning += chunk.reasoning
+                full_reasoning = chunk.reasoning  # Используем последнее значение
             
             if self.debug_collector and chunk.reasoning:
                 self.debug_collector.capture_reasoning(chunk.reasoning)

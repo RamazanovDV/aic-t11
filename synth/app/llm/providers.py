@@ -733,7 +733,7 @@ class AnthropicProvider(BaseProvider):
                             
                             elif delta.get("type") == "thinking_delta":
                                 thinking = delta.get("thinking", "")
-                                full_reasoning += thinking
+                                full_reasoning = thinking  # Используем последнее значение
                                 yield LLMChunk(
                                     content="",
                                     is_final=False,
@@ -1009,7 +1009,7 @@ class OllamaProvider(BaseProvider):
                         if content_delta:
                             full_content += content_delta
                         if thinking_delta:
-                            full_thinking += thinking_delta
+                            full_thinking = thinking_delta  # Используем последнее значение, не накапливаем
                         if content_delta or thinking_delta:
                             yield LLMChunk(
                                 content=content_delta,

@@ -2081,10 +2081,13 @@
                                     div.insertBefore(badge, messageContent);
                                 }
                                 
-                                if (data.done && !panel.messagesContainer.contains(rowDiv)) {
-                                    panel.messagesContainer.appendChild(rowDiv);
+                                if (data.done) {
+                                    // Ensure rowDiv is in DOM (for first agent)
+                                    if (!panel.messagesContainer.contains(rowDiv)) {
+                                        panel.messagesContainer.appendChild(rowDiv);
+                                    }
                                     
-                                    // Create new rowDiv for next agent
+                                    // Create new rowDiv for next agent response
                                     const newRowDiv = document.createElement('div');
                                     newRowDiv.className = 'message-row message-assistant';
                                     

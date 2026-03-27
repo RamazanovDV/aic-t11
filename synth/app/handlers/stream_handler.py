@@ -218,7 +218,7 @@ class StreamHandler(BaseHandler):
                 full_content += chunk.content
             
             if chunk.reasoning:
-                full_reasoning += chunk.reasoning
+                full_reasoning = chunk.reasoning
             
             total_usage = chunk.usage
             
