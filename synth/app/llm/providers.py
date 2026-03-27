@@ -728,22 +728,22 @@ class AnthropicProvider(BaseProvider):
                                     yield LLMChunk(
                                         content=content,
                                         is_final=False,
-                                        reasoning=full_reasoning if full_reasoning else None
+                                        reasoning=None
                                     )
                             
                             elif delta.get("type") == "thinking_delta":
                                 thinking = delta.get("thinking", "")
-                                full_reasoning = thinking  # Используем последнее значение
+                                full_reasoning += thinking
                                 yield LLMChunk(
                                     content="",
                                     is_final=False,
                                     reasoning=thinking if thinking else None
                                 )
-                            
+
                             elif delta.get("type") == "input_json_delta":
                                 partial_json = delta.get("partial_json", "")
                                 current_tool_input += partial_json
-                        
+
                         elif data.get("type") == "content_block_stop":
                             if current_tool:
                                 try:
@@ -753,7 +753,7 @@ class AnthropicProvider(BaseProvider):
                                 tool_calls.append(current_tool)
                                 current_tool = None
                                 current_tool_input = ""
-                        
+
                         elif data.get("type") == "message_delta":
                             if "usage" in data:
                                 total_usage = extract_usage(data)
@@ -1009,7 +1009,7 @@ class OllamaProvider(BaseProvider):
                         if content_delta:
                             full_content += content_delta
                         if thinking_delta:
-                            full_thinking = thinking_delta  # Используем последнее значение, не накапливаем
+                            full_thinking += thinking_delta
                         if content_delta or thinking_delta:
                             yield LLMChunk(
                                 content=content_delta,
