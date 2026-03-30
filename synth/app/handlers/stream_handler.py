@@ -56,6 +56,65 @@ def split_message_by_tags(message: str, tags: list[str]) -> dict[str, str]:
     return result
 
 
+def _format_mcp_tools_for_prompt(tools: list[dict]) -> str:
+    """Format MCP tools list as a readable section for the system prompt.
+    
+    This helps models understand what tools are available even if they
+    don't automatically use the tools parameter.
+    """
+    if not tools:
+        return ""
+    
+    lines = [
+        "",
+        "",
+        "# Доступные инструменты (MCP Tools)",
+        "",
+        "У тебя есть доступ к следующим инструментам. Используй их когда это необходимо:",
+        ""
+    ]
+    
+    for tool in tools:
+        if "function" in tool:
+            name = tool["function"].get("name", "unknown")
+            desc = tool["function"].get("description", "")
+            params = tool["function"].get("parameters", {})
+        else:
+            # Anthropic format
+            name = tool.get("name", "unknown")
+            desc = tool.get("description", "")
+            params = tool.get("input_schema", {})
+        
+        lines.append(f"## {name}")
+        lines.append(f"{desc}")
+        
+        # Add parameter info if available
+        if params and isinstance(params, dict):
+            properties = params.get("properties", {})
+            required = params.get("required", [])
+            if properties:
+                lines.append("Параметры:")
+                for param_name, param_info in properties.items():
+                    param_type = param_info.get("type", "any")
+                    param_desc = param_info.get("description", "")
+                    required_marker = " (обязательный)" if param_name in required else ""
+                    lines.append(f"  - {param_name}: {param_type}{required_marker} - {param_desc}")
+        lines.append("")
+    
+    lines.extend([
+        "",
+        "## Инструкция по использованию инструментов",
+        "",
+        "Когда пользователь просит выполнить действие, которое может быть выполнено с помощью доступных инструментов,",
+        "ты ДОЛЖЕН использовать соответствующий инструмент вместо того, чтобы делать это вручную.",
+        "",
+        "Для вызова инструмента верни ответ с инструментом (function call) в формате API.",
+        ""
+    ])
+    
+    return "\n".join(lines)
+
+
 class StreamHandler(BaseHandler):
     """Handler for /chat/stream endpoint (SSE streaming)."""
     
@@ -102,6 +161,18 @@ class StreamHandler(BaseHandler):
         system_prompt = context_builder.apply_rag_to_prompt(system_prompt, transformed_message)
         messages = context_builder.build_messages(None, effective_role)
         mcp_tools = context_builder.build_mcp_tools(provider_name)
+
+        # Debug logging for MCP tools
+        from app.logger import debug as dbg
+        server_names = session.get_mcp_servers()
+        dbg("MCP", f"Session MCP servers: {server_names}")
+        dbg("MCP", f"Provider: {provider_name}, MCP tools count: {len(mcp_tools) if mcp_tools else 0}")
+        
+        # Add MCP tools description to system prompt
+        if mcp_tools:
+            mcp_tools_description = _format_mcp_tools_for_prompt(mcp_tools)
+            if mcp_tools_description:
+                system_prompt += mcp_tools_description
         
         from app.config import config
         if not provider_name:
@@ -169,6 +240,12 @@ class StreamHandler(BaseHandler):
             system_prompt = context_builder.apply_rag_to_prompt(system_prompt, agent_message)
             messages = context_builder.build_messages(agent_message, effective_role)
             mcp_tools = context_builder.build_mcp_tools(effective_provider)
+            
+            # Add MCP tools description to system prompt
+            if mcp_tools:
+                mcp_tools_description = _format_mcp_tools_for_prompt(mcp_tools)
+                if mcp_tools_description:
+                    system_prompt += mcp_tools_description
             
             if not effective_provider:
                 effective_provider = config.default_provider

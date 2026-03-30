@@ -17,8 +17,14 @@ class ContextBuilder:
         self.user_id = user_id
         self.debug_collector = debug_collector
     
-    def build_system_prompt(self, agent_role: str | None = None) -> str:
-        """Build full system prompt from components."""
+    def build_system_prompt(self, agent_role: str | None = None, include_mcp_tools: bool = False, provider_name: str | None = None) -> str:
+        """Build full system prompt from components.
+        
+        Args:
+            agent_role: Optional agent role to include
+            include_mcp_tools: If True, includes MCP tool descriptions in the prompt
+            provider_name: Provider name for formatting MCP tools (required if include_mcp_tools=True)
+        """
         from app.context import (
             get_additional_context,
             get_profile_prompt,
@@ -48,7 +54,71 @@ class ContextBuilder:
         if should_show_interview(self.session, self.user_id):
             system_prompt += get_interview_prompt()
         
+        # Add MCP tools description if requested
+        if include_mcp_tools and provider_name:
+            mcp_tools = self.build_mcp_tools(provider_name)
+            if mcp_tools:
+                system_prompt += self._format_mcp_tools_for_prompt(mcp_tools)
+        
         return system_prompt
+    
+    def _format_mcp_tools_for_prompt(self, tools: list[dict]) -> str:
+        """Format MCP tools list as a readable section for the system prompt.
+        
+        This helps models understand what tools are available even if they
+        don't automatically use the tools parameter.
+        """
+        if not tools:
+            return ""
+        
+        lines = [
+            "",
+            "",
+            "# Доступные инструменты (MCP Tools)",
+            "",
+            "У тебя есть доступ к следующим инструментам. Используй их когда это необходимо:",
+            ""
+        ]
+        
+        for tool in tools:
+            if "function" in tool:
+                name = tool["function"].get("name", "unknown")
+                desc = tool["function"].get("description", "")
+                params = tool["function"].get("parameters", {})
+            else:
+                # Anthropic format
+                name = tool.get("name", "unknown")
+                desc = tool.get("description", "")
+                params = tool.get("input_schema", {})
+            
+            lines.append(f"## {name}")
+            lines.append(f"{desc}")
+            
+            # Add parameter info if available
+            if params and isinstance(params, dict):
+                properties = params.get("properties", {})
+                required = params.get("required", [])
+                if properties:
+                    lines.append("Параметры:")
+                    for param_name, param_info in properties.items():
+                        param_type = param_info.get("type", "any")
+                        param_desc = param_info.get("description", "")
+                        required_marker = " (обязательный)" if param_name in required else ""
+                        lines.append(f"  - {param_name}: {param_type}{required_marker} - {param_desc}")
+            lines.append("")
+        
+        lines.extend([
+            "",
+            "## Инструкция по использованию инструментов",
+            "",
+            "Когда пользователь просит выполнить действие, которое может быть выполнено с помощью доступных инструментов,",
+            "ты ДОЛЖЕН использовать соответствующий инструмент вместо того, чтобы делать это вручную.",
+            "",
+            "Для вызова инструмента верни ответ с инструментом (function call) в формате API.",
+            ""
+        ])
+        
+        return "\n".join(lines)
     
     def build_messages(self, include_user_message: str | None = None, current_agent_role: str | None = None) -> list[Message]:
         """Build messages for LLM.
@@ -200,6 +270,10 @@ class ContextBuilder:
         import asyncio
         
         server_names = self.session.get_mcp_servers()
+
+        # Debug logging
+        from app.logger import debug as dbg
+        dbg("MCP", f"build_mcp_tools: server_names={server_names}, provider={provider_name}")
         if not server_names:
             return []
         

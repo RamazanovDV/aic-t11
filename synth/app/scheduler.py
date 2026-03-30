@@ -15,6 +15,59 @@ from app.logger import debug, info, warning, error
 logger = logging.getLogger(__name__)
 
 
+
+# MCP Tools formatting
+def _format_mcp_tools_for_prompt(tools: list) -> str:
+    """Format MCP tools list as a readable section for the system prompt."""
+    if not tools:
+        return ""
+    
+    lines = [
+        "",
+        "",
+        "# Доступные инструменты (MCP Tools)",
+        "",
+        "У тебя есть доступ к следующим инструментам. Используй их когда это необходимо:",
+        ""
+    ]
+    
+    for tool in tools:
+        if "function" in tool:
+            name = tool["function"].get("name", "unknown")
+            desc = tool["function"].get("description", "")
+            params = tool["function"].get("parameters", {})
+        else:
+            name = tool.get("name", "unknown")
+            desc = tool.get("description", "")
+            params = tool.get("input_schema", {})
+        
+        lines.append(f"## {name}")
+        lines.append(f"{desc}")
+        
+        if params and isinstance(params, dict):
+            properties = params.get("properties", {})
+            required = params.get("required", [])
+            if properties:
+                lines.append("Параметры:")
+                for param_name, param_info in properties.items():
+                    param_type = param_info.get("type", "any")
+                    param_desc = param_info.get("description", "")
+                    required_marker = " (обязательный)" if param_name in required else ""
+                    lines.append(f"  - {param_name}: {param_type}{required_marker} - {param_desc}")
+        lines.append("")
+    
+    lines.extend([
+        "",
+        "## Инструкция по использованию инструментов",
+        "",
+        "Когда пользователь просит выполнить действие, которое может быть выполнено с помощью доступных инструментов,",
+        "ты ДОЛЖЕН использовать соответствующий инструмент вместо того, чтобы делать это вручную.",
+        "",
+        "Для вызова инструмента верни ответ с инструментом (function call) в формате API.",
+        ""
+    ])
+    
+    return "\n".join(lines)
 @dataclass
 class Schedule:
     id: str
@@ -252,7 +305,7 @@ class Scheduler:
             response = self._handle_tool_calls(
                 client=client,
                 messages=llm_messages,
-                system_prompt="",
+                system_prompt=_format_mcp_tools_for_prompt(mcp_tools),
                 mcp_tools=mcp_tools,
             )
 
