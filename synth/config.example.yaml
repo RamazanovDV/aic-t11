@@ -78,3 +78,25 @@ rag:
     multiplier: 1.5            # для relative: best_distance * multiplier
     std_multiplier: 2.0        # для statistical: mean + n*std
     top_k_before: 20           # fetch больше чем нужно до фильтрации
+
+# MCP Git Server (для работы с Git репозиториями)
+mcp:
+  servers:
+    git:
+      type: stdio
+      command: "python"
+      args:
+        - "/path/to/synth-mcp-git/server.py"
+      env:
+        ALLOWED_DIRS: "/home:/workspace:/projects"
+        GIT_REPO_PATH: "/path/to/default/repo"
+
+# Project RAG Configuration
+project_rag:
+  enabled: true
+  auto_index_on_connect: true  # Автоматически индексировать при /project
+  default_doc_types:
+    - "readme"
+    - "docs"
+    - "schema"
+    - "api"

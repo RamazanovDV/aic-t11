@@ -11,6 +11,7 @@ from app.project_updates import handle_project_updates
 
 
 TAGS_PATTERN = re.compile(r'@(\w+)')
+SLASH_COMMAND_PATTERN = re.compile(r'^/(\w+)(?:\s+(.*))?$', re.DOTALL)
 
 
 def parse_agent_tags(message: str) -> tuple[list[str], str, str]:
@@ -115,6 +116,155 @@ def _format_mcp_tools_for_prompt(tools: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def parse_slash_command(message: str) -> tuple[str | None, str | None, str]:
+    """Parse slash command from message.
+    
+    Returns:
+        (command, args, clean_message)
+        - command: command name (e.g., 'help')
+        - args: arguments after command
+        - clean_message: original message (unchanged)
+    """
+    match = SLASH_COMMAND_PATTERN.match(message.strip())
+    if match:
+        command = match.group(1).lower()
+        args = match.group(2) or ""
+        return command, args, message
+    return None, None, message
+
+
+class SlashCommandHandler:
+    """Handler for slash commands like /help."""
+    
+    @staticmethod
+    def handle_help(
+        session: Session,
+        args: str,
+        provider_name: str | None,
+        model: str | None
+    ) -> dict[str, Any]:
+        """Handle /help command.
+        
+        Uses Project RAG and MCP to answer questions about the project.
+        """
+        from app.config import config
+        from app.project_rag import ProjectRAGManager
+        from app.llm import ProviderFactory
+        from app.llm.base import Message
+        
+        # Get project path from session status
+        project_path = session.status.get("project_path")
+        git_repo_path = session.status.get("git_repo_path") or project_path
+        
+        # Initialize Project RAG Manager
+        try:
+            rag_manager = ProjectRAGManager()
+        except Exception as e:
+            return {
+                "message": f"Project RAG не доступен: {str(e)}",
+                "session_id": session.session_id,
+                "is_help_response": True
+            }
+        
+        # Extract question from args
+        question = args.strip() if args else "project overview"
+        
+        # Build context from project documentation
+        help_context = rag_manager.build_help_context(
+            project_path=project_path or "",
+            git_repo_path=git_repo_path
+        )
+        
+        # Search for relevant docs if there's a specific question
+        if question and question != "project overview":
+            help_result = rag_manager.answer_help_question(
+                project_path=project_path or "",
+                question=question,
+                use_mcp=True,
+                git_repo_path=git_repo_path
+            )
+            additional_context = help_result.get("context", "")
+        else:
+            additional_context = ""
+        
+        # Build the prompt for LLM
+        if not project_path:
+            return {
+                "message": "Проект не подключён. Используйте команду /project <path> для подключения проекта.",
+                "session_id": session.session_id,
+                "is_help_response": True
+            }
+        
+        # Build help system prompt
+        help_system_prompt = f"""Ты - помощник по проекту. Отвечай на вопросы о проекте на основе предоставленной документации.
+
+## Контекст проекта
+{help_context}
+
+## Дополнительная информация
+{additional_context}
+
+Отвечай на русском языке. Если информации недостаточно - так и скажи.
+"""
+        
+        # Create LLM request
+        if not provider_name:
+            provider_name = config.default_provider
+        
+        provider_config = config.get_provider_config(provider_name)
+        provider = ProviderFactory.create(provider_name, provider_config)
+        
+        user_message = Message(
+            role="user",
+            content=question
+        )
+        
+        try:
+            response = provider.chat(
+                messages=[user_message],
+                system_prompt=help_system_prompt
+            )
+            
+            return {
+                "message": response.content,
+                "session_id": session.session_id,
+                "model": response.model,
+                "usage": response.usage,
+                "is_help_response": True,
+                "sources": rag_manager.search_project(
+                    project_path, question, limit=3
+                ) if question != "project overview" else []
+            }
+        except Exception as e:
+            return {
+                "message": f"Ошибка при получении ответа: {str(e)}",
+                "session_id": session.session_id,
+                "is_help_response": True,
+                "error": str(e)
+            }
+    
+    @staticmethod
+    def get_available_commands() -> list[dict[str, str]]:
+        """Get list of available slash commands."""
+        return [
+            {
+                "command": "help",
+                "description": "Ответить на вопрос о проекте",
+                "usage": "/help <вопрос>"
+            },
+            {
+                "command": "index",
+                "description": "Переиндексировать документацию проекта",
+                "usage": "/index"
+            },
+            {
+                "command": "project",
+                "description": "Подключить проект",
+                "usage": "/project <путь>"
+            },
+        ]
+
+
 class ChatHandler(BaseHandler):
     """Handler for /chat endpoint (non-streaming)."""
     
@@ -148,6 +298,14 @@ class ChatHandler(BaseHandler):
                 tsm.set_tsm_mode(session, tsm_mode)
             except ValueError as e:
                 return {"error": f"Invalid tsm_mode: {str(e)}"}
+        
+        # Check for slash commands
+        command, args, original_message = parse_slash_command(message)
+        
+        if command:
+            return self._handle_slash_command(
+                session, command, args, provider_name, model
+            )
         
         tags, clean_message, transformed_message = parse_agent_tags(message)
         
@@ -200,6 +358,171 @@ class ChatHandler(BaseHandler):
             session, messages, system_prompt, provider_name, model,
             debug_collector, user_id, mcp_tools, effective_role
         )
+    
+    def _handle_slash_command(
+        self,
+        session: Session,
+        command: str,
+        args: str,
+        provider_name: str | None,
+        model: str | None
+    ) -> dict[str, Any]:
+        """Handle slash commands."""
+        from app.project_rag import ProjectRAGManager
+        
+        if command == "help":
+            return SlashCommandHandler.handle_help(session, args, provider_name, model)
+        
+        elif command == "index":
+            # Re-index project documentation
+            project_path = session.status.get("project_path")
+            if not project_path:
+                return {
+                    "message": "Проект не подключён. Используйте /project <path>",
+                    "session_id": session.session_id,
+                    "is_command_response": True
+                }
+            
+            try:
+                rag_manager = ProjectRAGManager()
+                result = rag_manager.index_project(project_path)
+                
+                total = sum(result.get("indexed", {}).values())
+                return {
+                    "message": f"Документация проиндексирована: {total} файлов.\n\n"
+                              f"- README: {result['indexed'].get('readme', 0)}\n"
+                              f"- docs/: {result['indexed'].get('docs', 0)}\n"
+                              f"- schemas: {result['indexed'].get('schemas', 0)}\n"
+                              f"- API: {result['indexed'].get('api', 0)}",
+                    "session_id": session.session_id,
+                    "is_command_response": True,
+                    "index_result": result
+                }
+            except Exception as e:
+                return {
+                    "message": f"Ошибка индексации: {str(e)}",
+                    "session_id": session.session_id,
+                    "is_command_response": True,
+                    "error": str(e)
+                }
+        
+        elif command == "project":
+            # Connect to a project
+            if not args:
+                return {
+                    "message": "Укажите путь к проекту: /project <путь>",
+                    "session_id": session.session_id,
+                    "is_command_response": True
+                }
+            
+            from pathlib import Path
+            project_path = Path(args.strip()).resolve()
+            
+            if not project_path.exists():
+                return {
+                    "message": f"Проект не найден: {project_path}",
+                    "session_id": session.session_id,
+                    "is_command_response": True
+                }
+            
+            # Update session status
+            session.status["project_path"] = str(project_path)
+            session.status["git_repo_path"] = str(project_path)
+            
+            # Index the project
+            try:
+                rag_manager = ProjectRAGManager()
+                index_result = rag_manager.index_project(str(project_path))
+                total = sum(index_result.get("indexed", {}).values())
+                
+                return {
+                    "message": f"Проект подключён: {project_path}\n\n"
+                              f"Проиндексировано файлов: {total}\n\n"
+                              f"Используйте /help для вопросов о проекте.",
+                    "session_id": session.session_id,
+                    "is_command_response": True,
+                    "project_path": str(project_path),
+                    "index_result": index_result
+                }
+            except Exception as e:
+                return {
+                    "message": f"Проект подключён: {project_path}\n"
+                              f"Ошибка индексации: {str(e)}\n\n"
+                              f"Используйте /index для повторной индексации.",
+                    "session_id": session.session_id,
+                    "is_command_response": True,
+                    "project_path": str(project_path),
+                    "index_error": str(e)
+                }
+        
+        elif command == "git":
+            # Git operations via MCP
+            from app.mcp import MCPManager
+            
+            project_path = session.status.get("git_repo_path") or session.status.get("project_path")
+            
+            if not project_path:
+                return {
+                    "message": "Git репозиторий не подключён.",
+                    "session_id": session.session_id,
+                    "is_command_response": True
+                }
+            
+            subcommand = args.strip().split()[0] if args.strip() else "status"
+            
+            try:
+                if subcommand == "branch":
+                    result = MCPManager.call_tool("git_git_branch", {"repo_path": project_path})
+                elif subcommand == "status":
+                    result = MCPManager.call_tool("git_git_status", {"repo_path": project_path, "short": True})
+                elif subcommand == "diff":
+                    result = MCPManager.call_tool("git_git_diff", {"repo_path": project_path})
+                elif subcommand == "log":
+                    result = MCPManager.call_tool("git_git_log", {"repo_path": project_path, "max_count": 5})
+                else:
+                    result = MCPManager.call_tool("git_git_status", {"repo_path": project_path})
+                
+                if result.is_error:
+                    return {
+                        "message": f"Ошибка: {result.content}",
+                        "session_id": session.session_id,
+                        "is_command_response": True
+                    }
+                
+                return {
+                    "message": result.content,
+                    "session_id": session.session_id,
+                    "is_command_response": True
+                }
+            except Exception as e:
+                return {
+                    "message": f"Git MCP не доступен: {str(e)}\n\n"
+                              f"Используйте /help <вопрос о git> для получения справки.",
+                    "session_id": session.session_id,
+                    "is_command_response": True
+                }
+        
+        elif command == "commands":
+            # List available commands
+            commands = SlashCommandHandler.get_available_commands()
+            msg_parts = ["Доступные команды:"]
+            for cmd in commands:
+                msg_parts.append(f"\n**{cmd['usage']}** - {cmd['description']}")
+            
+            return {
+                "message": "".join(msg_parts),
+                "session_id": session.session_id,
+                "is_command_response": True,
+                "commands": commands
+            }
+        
+        else:
+            return {
+                "message": f"Неизвестная команда: /{command}\n\n"
+                          f"Используйте /commands для списка доступных команд.",
+                "session_id": session.session_id,
+                "is_command_response": True
+            }
     
     def _handle_with_tags(
         self,
@@ -455,8 +778,3 @@ class ChatHandler(BaseHandler):
             result["debug"] = debug_info
         
         return result
-
-
-def data():
-    """Placeholder for request data - should be passed in."""
-    pass
