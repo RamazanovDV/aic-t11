@@ -8,6 +8,7 @@ from app.session import Session
 from app import tsm
 from app.debug import DebugCollector
 from app.project_updates import handle_project_updates
+from app.logger import debug as dbg
 
 
 TAGS_PATTERN = re.compile(r'@(\w+)')
@@ -57,7 +58,7 @@ def split_message_by_tags(message: str, tags: list[str]) -> dict[str, str]:
     return result
 
 
-def _format_mcp_tools_for_prompt(tools: list[dict]) -> str:
+def _format_mcp_tools_for_prompt(tools: list) -> str:
     """Format MCP tools list as a readable section for the system prompt.
     
     This helps models understand what tools are available even if they
@@ -76,15 +77,15 @@ def _format_mcp_tools_for_prompt(tools: list[dict]) -> str:
     ]
     
     for tool in tools:
-        if "function" in tool:
+        if isinstance(tool, dict) and "function" in tool:
             name = tool["function"].get("name", "unknown")
             desc = tool["function"].get("description", "")
             params = tool["function"].get("parameters", {})
         else:
             # Anthropic format
-            name = tool.get("name", "unknown")
-            desc = tool.get("description", "")
-            params = tool.get("input_schema", {})
+            name = getattr(tool, "name", tool.get("name", "unknown"))
+            desc = getattr(tool, "description", tool.get("description", ""))
+            params = getattr(tool, "input_schema", tool.get("input_schema", {}))
         
         lines.append(f"## {name}")
         lines.append(f"{desc}")

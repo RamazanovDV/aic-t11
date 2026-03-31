@@ -6,7 +6,7 @@ from typing import Generator
 from app.handlers.base import BaseHandler
 from app.session import Session
 from app.debug import DebugCollector
-from app.llm.base import Message
+from app.llm.base import Message, LLMChunk
 from app.project_updates import handle_project_updates
 
 
@@ -322,12 +322,21 @@ class StreamHandler(BaseHandler):
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
             return
         
+        tool_group_id = None
+        tool_debug_info = None
+        
         for chunk in stream_generator:
             if chunk.tool_calls and not tool_calls_handled:
                 tool_calls_handled = True
-                yield from self._handle_tool_calls(
+                result = yield from self._handle_tool_calls(
                     session, provider, chunk, debug_collector, mcp_tools, llm_msgs
                 )
+                if result:
+                    final_chunk, tool_group_id, tool_debug_info = result
+                    if final_chunk:
+                        full_content = final_chunk.content or ""
+                        full_reasoning = final_chunk.reasoning or ""
+                        total_usage = final_chunk.usage or {}
                 continue
             
             if chunk.is_final:
@@ -353,16 +362,17 @@ class StreamHandler(BaseHandler):
             if session.status:
                 debug_collector.capture_status(session.status)
         
-        debug_info = debug_collector.get_debug_info() if debug_collector else None
+        debug_info = tool_debug_info if tool_debug_info else (debug_collector.get_debug_info() if debug_collector else None)
         
-        session.add_assistant_message(
-            full_content,
-            total_usage,
-            debug=debug_info,
-            model=provider.model,
-            reasoning=full_reasoning,
-            agent_role=agent_role
-        )
+        if not tool_calls_handled:
+            session.add_assistant_message(
+                full_content,
+                total_usage,
+                debug=debug_info,
+                model=provider.model,
+                reasoning=full_reasoning,
+                agent_role=agent_role
+            )
         
         from app.status_validator import validate_status_block
         parsed_status, cleaned_content = validate_status_block(full_content)
@@ -387,12 +397,11 @@ class StreamHandler(BaseHandler):
         debug_collector: DebugCollector | None,
         mcp_tools: list,
         llm_msgs: list
-    ) -> Generator[str, None, None]:
-        """Handle tool calls."""
+    ) -> Generator[str, tuple[LLMChunk | None, str | None, dict | None], None]:
+        """Handle tool calls. Yields tool results, returns (final_chunk, group_id, debug_info)."""
         import json
         import uuid
         
-        tool_use = chunk.tool_calls
         group_id = str(uuid.uuid4())
         
         session.add_assistant_message(
@@ -401,6 +410,7 @@ class StreamHandler(BaseHandler):
             debug={"usage": chunk.usage or {}, "model": provider.model},
             model=provider.model,
             reasoning=chunk.reasoning,
+            tool_use=chunk.tool_calls,
             group_id=group_id
         )
         
@@ -408,12 +418,18 @@ class StreamHandler(BaseHandler):
         max_tool_iterations = 10
         tool_iteration = 0
         
+        accumulated_msgs = list(llm_msgs)
+        final_response = None
+        
         while current_tool_calls and tool_iteration < max_tool_iterations:
             tool_iteration += 1
+            
+            tool_results = []
             
             for tc in current_tool_calls:
                 tool_name = tc.get("function", {}).get("name") or tc.get("name", "")
                 tool_args = tc.get("function", {}).get("arguments") or tc.get("arguments", {}) or {}
+                tool_call_id = tc.get("id", "")
                 
                 if isinstance(tool_args, str):
                     try:
@@ -422,36 +438,78 @@ class StreamHandler(BaseHandler):
                         tool_args = {}
                 
                 from app.mcp import MCPManager
-                import asyncio
+                from app.routes import run_mcp_async
                 
                 try:
-                    result = asyncio.run(MCPManager.call_tool(tool_name, tool_args))
+                    result = run_mcp_async(MCPManager.call_tool(tool_name, tool_args))
                     tool_result_content = result.content
                 except Exception as e:
                     tool_result_content = f"Error: {str(e)}"
                 
-                tool_result_msg = {
-                    "role": "tool",
-                    "content": tool_result_content
-                }
+                if debug_collector and debug_collector.enabled:
+                    debug_collector.capture_mcp_call(
+                        tool=tool_name,
+                        arguments=tool_args,
+                        result=tool_result_content,
+                        is_error=tool_result_content.startswith("Error:")
+                    )
+                
+                tool_msg = Message(role="tool", content=tool_result_content, tool_call_id=tool_call_id, group_id=group_id)
+                tool_results.append(tool_msg)
+                session.messages.append(tool_msg)
                 
                 yield f"data: {json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result_content[:500]})}\n\n"
             
-            tool_messages = [
-                {"role": "tool", "content": tr.get("content", "")}
-                for tr in [tool_result_msg]
-            ]
+            assistant_msg = Message(
+                role="assistant",
+                content=chunk.content or "",
+                tool_use=chunk.tool_calls if hasattr(chunk, 'tool_calls') else None,
+                reasoning=chunk.reasoning if hasattr(chunk, 'reasoning') else None,
+                usage=chunk.usage if hasattr(chunk, 'usage') else {}
+            )
             
-            continuation = llm_msgs + [chunk] + [Message(role="tool", content=tool_result_msg["content"])]
+            accumulated_msgs.append(assistant_msg)
+            accumulated_msgs.extend(tool_results)
             
-            response = provider.chat(continuation, None, debug_collector=debug_collector, tools=mcp_tools)
+            response = provider.chat(accumulated_msgs, None, debug_collector=debug_collector, tools=mcp_tools)
+            
+            final_response = response
             
             if response.tool_calls:
                 current_tool_calls = response.tool_calls
+                chunk = response
             else:
                 break
         
+        if final_response:
+            debug_info = None
+            if debug_collector and debug_collector.enabled:
+                debug_info = debug_collector.get_debug_info()
+            
+            session.add_assistant_message(
+                final_response.content or "",
+                final_response.usage or {},
+                debug=debug_info,
+                model=provider.model,
+                reasoning=final_response.reasoning if hasattr(final_response, 'reasoning') else None,
+                group_id=group_id
+            )
+            
+            yield "data: [DONE]\n\n"
+            return (
+                LLMChunk(
+                    content=final_response.content or "",
+                    is_final=True,
+                    usage=final_response.usage or {},
+                    tool_calls=None,
+                    reasoning=final_response.reasoning if hasattr(final_response, 'reasoning') else None
+                ),
+                group_id,
+                debug_info
+            )
+        
         yield "data: [DONE]\n\n"
+        return None, None, None
     
     def _handle_orchestrator_stream(
         self,

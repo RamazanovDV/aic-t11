@@ -1282,21 +1282,28 @@
         if (!container) return;
         
         for (const groupId of groupIds) {
-            const groupMsgs = panel.messages.filter(m => m.group_id === groupId && m.role === 'assistant');
-            const groupMsgIndices = groupMsgs
+            // Найти ВСЕ сообщения с group_id (включая tool messages)
+            const groupAllMessages = panel.messages.filter(m => m.group_id === groupId);
+            const groupAssistantMessages = groupAllMessages.filter(m => m.role === 'assistant');
+            
+            if (groupAssistantMessages.length <= 1) continue;
+            
+            // Найти диапазон: от первого до последнего assistant
+            const assistantIndices = groupAssistantMessages
                 .map(m => m.messageIndex)
                 .filter(idx => idx !== undefined && idx !== null)
                 .sort((a, b) => a - b);
             
-            if (groupMsgIndices.length <= 1) continue;
+            if (assistantIndices.length <= 1) continue;
             
-            const lastIndex = groupMsgIndices[groupMsgIndices.length - 1];
+            const firstAssistantIdx = assistantIndices[0];
+            const lastAssistantIdx = assistantIndices[assistantIndices.length - 1];
             
-            // Найти предсозданный блок
+            // Найти предсозданный блок (для последнего assistant)
             const allRows = Array.from(container.querySelectorAll('.message-row'));
             const lastRow = allRows.find(row => {
                 const idx = row.dataset.messageIndex;
-                return idx !== undefined && parseInt(idx) === lastIndex;
+                return idx !== undefined && parseInt(idx) === lastAssistantIdx;
             });
             
             if (!lastRow) continue;
@@ -1308,23 +1315,30 @@
             const contentContainer = groupBlock.querySelector('.group-toggle-content');
             if (!contentContainer) continue;
             
-            // Добавить промежуточные сообщения в блок и удалить оригинальные
-            for (let i = 0; i < groupMsgIndices.length - 1; i++) {
-                const idx = groupMsgIndices[i];
-                const msgRow = allRows.find(row => {
-                    const rowIdx = row.dataset.messageIndex;
-                    return rowIdx !== undefined && parseInt(rowIdx) === idx;
-                });
-                if (msgRow) {
-                    // Клонируем для блока
-                    const clonedContent = msgRow.cloneNode(true);
-                    clonedContent.style.display = '';
-                    clonedContent.classList.add('group-nested-message');
-                    contentContainer.appendChild(clonedContent);
-                    
-                    // Удаляем оригинальный ряд
-                    msgRow.remove();
+            // Найти ВСЕ rows между firstAssistantIdx и lastAssistantIdx (включительно)
+            // и переместить их в group-toggle-content (кроме последнего assistant)
+            const rowsToMove = [];
+            for (const row of allRows) {
+                const rowIdx = parseInt(row.dataset.messageIndex);
+                if (rowIdx !== undefined && rowIdx !== null) {
+                    // Включаем все сообщения от firstAssistantIdx до lastAssistantIdx,
+                    // но НЕ последний assistant (он остаётся видимым)
+                    if (rowIdx >= firstAssistantIdx && rowIdx < lastAssistantIdx) {
+                        rowsToMove.push({ row, idx: rowIdx });
+                    }
                 }
+            }
+            
+            // Сортируем по индексу
+            rowsToMove.sort((a, b) => a.idx - b.idx);
+            
+            // Перемещаем в блок
+            for (const { row } of rowsToMove) {
+                const clonedContent = row.cloneNode(true);
+                clonedContent.style.display = '';
+                clonedContent.classList.add('group-nested-message');
+                contentContainer.appendChild(clonedContent);
+                row.remove();
             }
             
             // Показать блок
