@@ -25,7 +25,7 @@ def tool_to_anthropic_format(tool: MCPTool) -> dict[str, Any]:
 def tools_to_provider_format(tools: list[MCPTool], provider: str) -> list[dict[str, Any]]:
     if provider in ("openai", "generic"):
         return [tool_to_openai_format(t) for t in tools]
-    elif provider == "anthropic":
+    elif provider in ("anthropic", "minimax"):
         return [tool_to_anthropic_format(t) for t in tools]
     else:
         return [tool_to_openai_format(t) for t in tools]

@@ -32,6 +32,9 @@ class ProjectManager:
     def _get_invariants_path(self, project_name: str) -> Path:
         return self._get_project_dir(project_name) / "invariants.yaml"
 
+    def _get_config_path(self, project_name: str) -> Path:
+        return self._get_project_dir(project_name) / "config.yaml"
+
     def project_exists(self, project_name: str) -> bool:
         return self._get_project_dir(project_name).exists()
 
@@ -126,6 +129,29 @@ class ProjectManager:
         try:
             with open(self._get_invariants_path(project_name), "w", encoding="utf-8") as f:
                 yaml.safe_dump(invariants, f, allow_unicode=True, sort_keys=False)
+            return True
+        except Exception:
+            return False
+
+    def get_project_config(self, project_name: str) -> dict[str, Any]:
+        if not self.project_exists(project_name):
+            return {}
+        config_path = self._get_config_path(project_name)
+        if not config_path.exists():
+            return {}
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            return {}
+
+    def save_project_config(self, project_name: str, project_config: dict[str, Any]) -> bool:
+        if not self.project_exists(project_name):
+            return False
+        try:
+            config_path = self._get_config_path(project_name)
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(project_config, f, allow_unicode=True, sort_keys=False)
             return True
         except Exception:
             return False

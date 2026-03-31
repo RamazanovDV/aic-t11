@@ -267,26 +267,19 @@ class ContextBuilder:
     def build_mcp_tools(self, provider_name: str) -> list[dict]:
         """Build MCP tools for provider."""
         from app.mcp.processor import get_mcp_tools
-        import asyncio
+        from app.async_utils import run_mcp_async
         
         server_names = self.session.get_mcp_servers()
 
-        # Debug logging
         from app.logger import debug as dbg
         dbg("MCP", f"build_mcp_tools: server_names={server_names}, provider={provider_name}")
         if not server_names:
             return []
         
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, get_mcp_tools(server_names, provider_name))
-                    return future.result()
-            else:
-                return asyncio.run(get_mcp_tools(server_names, provider_name))
-        except Exception:
+            return run_mcp_async(get_mcp_tools(server_names, provider_name))
+        except Exception as e:
+            dbg("MCP", f"build_mcp_tools failed: {e}")
             return []
     
     def apply_rag_to_prompt(self, prompt: str, query: str, use_rag: bool = True) -> str:
@@ -362,11 +355,5 @@ class MCPToolLoader:
     @staticmethod
     def get_tools_sync(session: Session, provider_name: str) -> list[dict]:
         """Get MCP tools synchronously."""
-        import asyncio
-        try:
-            return asyncio.run(MCPToolLoader.get_tools(session, provider_name))
-        except RuntimeError:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, MCPToolLoader.get_tools(session, provider_name))
-                return future.result()
+        from app.async_utils import run_mcp_async
+        return run_mcp_async(MCPToolLoader.get_tools(session, provider_name))

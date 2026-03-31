@@ -1,10 +1,8 @@
-import os
 from pathlib import Path
 
 from flask import Flask
 
 from app.routes import api_bp, admin_bp, auth_bp, mcp_bp
-from app.routes_project import project_rag_bp
 from app.embeddings.routes import embeddings_bp
 from app.config import config
 from app.scheduler import scheduler
@@ -53,7 +51,6 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(mcp_bp, url_prefix="/api")
     app.register_blueprint(embeddings_bp, url_prefix="/api")
-    app.register_blueprint(project_rag_bp, url_prefix="/api")
 
     init_default_context_files()
     scheduler.start()

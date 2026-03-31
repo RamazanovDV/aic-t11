@@ -1301,6 +1301,20 @@ def list_mcp_servers():
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/mcp/builtin-tools", methods=["GET"])
+def list_builtin_mcp_tools():
+    url = f"{ui_config.backend_url}/api/mcp/builtin-tools"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/session/mcp", methods=["GET"])
 def get_session_mcp():
     session_id = get_session_id()

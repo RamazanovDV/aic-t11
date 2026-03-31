@@ -146,69 +146,78 @@ class SlashCommandHandler:
     ) -> dict[str, Any]:
         """Handle /help command.
         
-        Uses Project RAG and MCP to answer questions about the project.
+        Uses embeddings-based RAG to answer questions about the project.
         """
         from app.config import config
-        from app.project_rag import ProjectRAGManager
+        from app.project_manager import project_manager
         from app.llm import ProviderFactory
         from app.llm.base import Message
+        from app.embeddings.search import EmbeddingSearch
         
-        # Get project path from session status
-        project_path = session.status.get("project_path")
-        git_repo_path = session.status.get("git_repo_path") or project_path
-        
-        # Initialize Project RAG Manager
-        try:
-            rag_manager = ProjectRAGManager()
-        except Exception as e:
+        project_name = session.status.get("project")
+        if not project_name:
             return {
-                "message": f"Project RAG не доступен: {str(e)}",
+                "message": "Проект не выбран. Сначала выберите проект в статусе задачи (поле 'project').",
                 "session_id": session.session_id,
                 "is_help_response": True
             }
         
-        # Extract question from args
+        project_config = project_manager.get_project_config(project_name)
+        embeddings_index = project_config.get("embeddings_index")
+        
         question = args.strip() if args else "project overview"
         
-        # Build context from project documentation
-        help_context = rag_manager.build_help_context(
-            project_path=project_path or "",
-            git_repo_path=git_repo_path
-        )
+        rag_settings = session.session_settings.get("rag_settings", {})
+        rag_enabled = rag_settings.get("enabled", False)
+        index_name = rag_settings.get("index_name") or embeddings_index
         
-        # Search for relevant docs if there's a specific question
-        if question and question != "project overview":
-            help_result = rag_manager.answer_help_question(
-                project_path=project_path or "",
-                question=question,
-                use_mcp=True,
-                git_repo_path=git_repo_path
-            )
-            additional_context = help_result.get("context", "")
-        else:
-            additional_context = ""
-        
-        # Build the prompt for LLM
-        if not project_path:
+        if not rag_enabled or not index_name:
             return {
-                "message": "Проект не подключён. Используйте команду /project <path> для подключения проекта.",
+                "message": f"Для проекта '{project_name}' не настроен embeddings индекс. "
+                           f"Используйте MCP tool 'embeddings_create' для создания индекса.",
                 "session_id": session.session_id,
                 "is_help_response": True
             }
         
-        # Build help system prompt
+        try:
+            search_engine = EmbeddingSearch()
+            results, _ = search_engine.search(
+                query=question,
+                index_name=index_name,
+                top_k=5
+            )
+        except Exception as e:
+            return {
+                "message": f"Ошибка поиска по индексу: {str(e)}",
+                "session_id": session.session_id,
+                "is_help_response": True,
+                "error": str(e)
+            }
+        
+        if not results:
+            return {
+                "message": f"По запросу '{question}' ничего не найдено в индексе '{index_name}'.",
+                "session_id": session.session_id,
+                "is_help_response": True
+            }
+        
+        context_parts = []
+        for i, result in enumerate(results, 1):
+            metadata = result.get("metadata", {})
+            source = metadata.get("source", "unknown")
+            content = result.get("content", "")[:500]
+            context_parts.append(f"### [{i}] {source}\n{content}")
+        
+        context = "\n\n".join(context_parts)
+        
         help_system_prompt = f"""Ты - помощник по проекту. Отвечай на вопросы о проекте на основе предоставленной документации.
 
-## Контекст проекта
-{help_context}
-
-## Дополнительная информация
-{additional_context}
+## Найденная документация
+{context}
 
 Отвечай на русском языке. Если информации недостаточно - так и скажи.
 """
         
-        # Create LLM request
         if not provider_name:
             provider_name = config.default_provider
         
@@ -232,9 +241,10 @@ class SlashCommandHandler:
                 "model": response.model,
                 "usage": response.usage,
                 "is_help_response": True,
-                "sources": rag_manager.search_project(
-                    project_path, question, limit=3
-                ) if question != "project overview" else []
+                "sources": [
+                    {"source": r.get("metadata", {}).get("source", "unknown"), "similarity": r.get("similarity", 0)}
+                    for r in results
+                ]
             }
         except Exception as e:
             return {
@@ -250,18 +260,8 @@ class SlashCommandHandler:
         return [
             {
                 "command": "help",
-                "description": "Ответить на вопрос о проекте",
+                "description": "Ответить на вопрос о проекте с помощью RAG",
                 "usage": "/help <вопрос>"
-            },
-            {
-                "command": "index",
-                "description": "Переиндексировать документацию проекта",
-                "usage": "/index"
-            },
-            {
-                "command": "project",
-                "description": "Подключить проект",
-                "usage": "/project <путь>"
             },
         ]
 
@@ -369,142 +369,11 @@ class ChatHandler(BaseHandler):
         model: str | None
     ) -> dict[str, Any]:
         """Handle slash commands."""
-        from app.project_rag import ProjectRAGManager
         
         if command == "help":
             return SlashCommandHandler.handle_help(session, args, provider_name, model)
         
-        elif command == "index":
-            # Re-index project documentation
-            project_path = session.status.get("project_path")
-            if not project_path:
-                return {
-                    "message": "Проект не подключён. Используйте /project <path>",
-                    "session_id": session.session_id,
-                    "is_command_response": True
-                }
-            
-            try:
-                rag_manager = ProjectRAGManager()
-                result = rag_manager.index_project(project_path)
-                
-                total = sum(result.get("indexed", {}).values())
-                return {
-                    "message": f"Документация проиндексирована: {total} файлов.\n\n"
-                              f"- README: {result['indexed'].get('readme', 0)}\n"
-                              f"- docs/: {result['indexed'].get('docs', 0)}\n"
-                              f"- schemas: {result['indexed'].get('schemas', 0)}\n"
-                              f"- API: {result['indexed'].get('api', 0)}",
-                    "session_id": session.session_id,
-                    "is_command_response": True,
-                    "index_result": result
-                }
-            except Exception as e:
-                return {
-                    "message": f"Ошибка индексации: {str(e)}",
-                    "session_id": session.session_id,
-                    "is_command_response": True,
-                    "error": str(e)
-                }
-        
-        elif command == "project":
-            # Connect to a project
-            if not args:
-                return {
-                    "message": "Укажите путь к проекту: /project <путь>",
-                    "session_id": session.session_id,
-                    "is_command_response": True
-                }
-            
-            from pathlib import Path
-            project_path = Path(args.strip()).resolve()
-            
-            if not project_path.exists():
-                return {
-                    "message": f"Проект не найден: {project_path}",
-                    "session_id": session.session_id,
-                    "is_command_response": True
-                }
-            
-            # Update session status
-            session.status["project_path"] = str(project_path)
-            session.status["git_repo_path"] = str(project_path)
-            
-            # Index the project
-            try:
-                rag_manager = ProjectRAGManager()
-                index_result = rag_manager.index_project(str(project_path))
-                total = sum(index_result.get("indexed", {}).values())
-                
-                return {
-                    "message": f"Проект подключён: {project_path}\n\n"
-                              f"Проиндексировано файлов: {total}\n\n"
-                              f"Используйте /help для вопросов о проекте.",
-                    "session_id": session.session_id,
-                    "is_command_response": True,
-                    "project_path": str(project_path),
-                    "index_result": index_result
-                }
-            except Exception as e:
-                return {
-                    "message": f"Проект подключён: {project_path}\n"
-                              f"Ошибка индексации: {str(e)}\n\n"
-                              f"Используйте /index для повторной индексации.",
-                    "session_id": session.session_id,
-                    "is_command_response": True,
-                    "project_path": str(project_path),
-                    "index_error": str(e)
-                }
-        
-        elif command == "git":
-            # Git operations via MCP
-            from app.mcp import MCPManager
-            
-            project_path = session.status.get("git_repo_path") or session.status.get("project_path")
-            
-            if not project_path:
-                return {
-                    "message": "Git репозиторий не подключён.",
-                    "session_id": session.session_id,
-                    "is_command_response": True
-                }
-            
-            subcommand = args.strip().split()[0] if args.strip() else "status"
-            
-            try:
-                if subcommand == "branch":
-                    result = MCPManager.call_tool("git_git_branch", {"repo_path": project_path})
-                elif subcommand == "status":
-                    result = MCPManager.call_tool("git_git_status", {"repo_path": project_path, "short": True})
-                elif subcommand == "diff":
-                    result = MCPManager.call_tool("git_git_diff", {"repo_path": project_path})
-                elif subcommand == "log":
-                    result = MCPManager.call_tool("git_git_log", {"repo_path": project_path, "max_count": 5})
-                else:
-                    result = MCPManager.call_tool("git_git_status", {"repo_path": project_path})
-                
-                if result.is_error:
-                    return {
-                        "message": f"Ошибка: {result.content}",
-                        "session_id": session.session_id,
-                        "is_command_response": True
-                    }
-                
-                return {
-                    "message": result.content,
-                    "session_id": session.session_id,
-                    "is_command_response": True
-                }
-            except Exception as e:
-                return {
-                    "message": f"Git MCP не доступен: {str(e)}\n\n"
-                              f"Используйте /help <вопрос о git> для получения справки.",
-                    "session_id": session.session_id,
-                    "is_command_response": True
-                }
-        
         elif command == "commands":
-            # List available commands
             commands = SlashCommandHandler.get_available_commands()
             msg_parts = ["Доступные команды:"]
             for cmd in commands:

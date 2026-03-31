@@ -8,6 +8,7 @@ from enum import Enum
 from app.llm.base import BaseProvider, Message, LLMResponse
 from app.session import Session
 from app.debug import DebugCollector
+from app.async_utils import run_mcp_async
 
 
 class OrchestratorMode(Enum):
@@ -137,7 +138,6 @@ class OrchestrationController:
             )
         
         full_content = ""
-        full_reasoning = ""
         
         for chunk in self.provider.stream_chat(
             messages,
@@ -147,8 +147,6 @@ class OrchestrationController:
         ):
             if chunk.content:
                 full_content += chunk.content
-            if chunk.reasoning:
-                full_reasoning = chunk.reasoning  # Используем последнее значение
             
             if self.debug_collector and chunk.reasoning:
                 self.debug_collector.capture_reasoning(chunk.reasoning)
@@ -219,6 +217,8 @@ class OrchestrationController:
     def handle_tools(
         self,
         response: LLMResponse,
+        messages: list[Message],
+        system_prompt: str,
         tools: list,
         max_iterations: int = 10
     ) -> tuple[list[Message], list[dict]]:
@@ -249,10 +249,9 @@ class OrchestrationController:
                         tool_args = {}
                 
                 try:
-                    from app.mcp import MCPManager
-                    result = run_mcp_async(MCPManager.call_tool(tool_name, tool_args))
-                    tool_result_content = result.content
-                    is_error = getattr(result, 'is_error', False)
+                    from app.mcp.processor import call_mcp_tool
+                    tool_result_content = run_mcp_async(call_mcp_tool(tool_name, tool_args))
+                    is_error = tool_result_content.startswith("Error:")
                 except Exception as e:
                     tool_result_content = f"Error: {str(e)}"
                     is_error = True
@@ -287,23 +286,3 @@ class OrchestrationController:
             current_tool_calls = response.tool_calls
         
         return tool_messages, tool_results
-
-
-def run_mcp_async(coro):
-    """Run async coroutine in sync context."""
-    import asyncio
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    
-    if loop and loop.is_running():
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(asyncio.run, coro)
-            return future.result()
-    else:
-        return asyncio.run(coro)
-
-
-import json

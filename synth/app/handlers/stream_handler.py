@@ -443,12 +443,11 @@ class StreamHandler(BaseHandler):
                     except:
                         tool_args = {}
                 
-                from app.mcp import MCPManager
+                from app.mcp.processor import call_mcp_tool
                 from app.routes import run_mcp_async
                 
                 try:
-                    result = run_mcp_async(MCPManager.call_tool(tool_name, tool_args))
-                    tool_result_content = result.content
+                    tool_result_content = run_mcp_async(call_mcp_tool(tool_name, tool_args))
                 except Exception as e:
                     tool_result_content = f"Error: {str(e)}"
                 

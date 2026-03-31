@@ -417,11 +417,8 @@ class Scheduler:
                 debug("SCHEDULER", f"Calling tool: {tool_name}")
                 
                 try:
-                    async def call_tool_async():
-                        return await MCPManager.call_tool(tool_name, tool_args)
-                    
-                    result = run_mcp_async(call_tool_async())
-                    tool_result_content = result.content
+                    from app.mcp.processor import call_mcp_tool
+                    tool_result_content = run_mcp_async(call_mcp_tool(tool_name, tool_args))
                 except Exception as e:
                     tool_result_content = f"Error: {str(e)}"
                     error("SCHEDULER", f"Tool error: {e}")

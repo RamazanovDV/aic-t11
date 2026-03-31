@@ -326,6 +326,7 @@ def get_project_prompt(session) -> str:
     project_info = project_manager.project_manager.get_project_info(project_name)
     current_task = project_manager.project_manager.get_current_task(project_name)
     invariants = project_manager.project_manager.get_invariants(project_name)
+    project_config = project_manager.project_manager.get_project_config(project_name)
     
     result = f"\n\n[ПРОЕКТ: {project_name}]\n"
     
@@ -344,6 +345,12 @@ def get_project_prompt(session) -> str:
                 result += f"- {key}: {', '.join(str(v) for v in value)}\n"
             else:
                 result += f"- {key}: {value}\n"
+    
+    embeddings_index = project_config.get("embeddings_index")
+    if embeddings_index:
+        result += f"\n[EMBEDDINGS INDEX]\n"
+        result += f"Подключенный индекс: {embeddings_index}\n"
+        result += "RAG для семантического поиска активен.\n"
     
     schedules = scheduler.get_schedules(project_name)
     enabled_schedules = [s for s in schedules if s.enabled]

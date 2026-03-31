@@ -27,19 +27,7 @@ from app.logger import debug, info, warning, error
 from app.debug import DebugCollector
 from app.context_builder import ContextBuilder
 from app.orchestration import OrchestrationController
-
-_mcp_event_loop: asyncio.AbstractEventLoop | None = None
-
-def get_mcp_loop() -> asyncio.AbstractEventLoop:
-    global _mcp_event_loop
-    if _mcp_event_loop is None or _mcp_event_loop.is_closed():
-        _mcp_event_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(_mcp_event_loop)
-    return _mcp_event_loop
-
-def run_mcp_async(coro):
-    loop = get_mcp_loop()
-    return loop.run_until_complete(coro)
+from app.async_utils import get_mcp_loop, run_mcp_async
 
 
 def _cleanup_orphan_tool_results(session) -> int:
@@ -440,6 +428,22 @@ def get_mcp_server_tools(server_name):
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@mcp_bp.route("/mcp/builtin-tools", methods=["GET"])
+@require_user
+def get_builtin_mcp_tools():
+    from app.mcp.processor import BUILTIN_TOOLS
+    return jsonify({
+        "tools": [
+            {
+                "name": t.name,
+                "description": t.description,
+                "input_schema": t.input_schema
+            }
+            for t in BUILTIN_TOOLS
+        ]
+    })
 
 
 @mcp_bp.route("/session/mcp", methods=["GET"])

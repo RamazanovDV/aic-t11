@@ -1,8 +1,13 @@
 import asyncio
 import os
 from contextlib import AsyncExitStack
-from dataclasses import dataclass, field
-from typing import Any, Generator
+from dataclasses import dataclass
+from typing import Any
+
+try:
+    ExceptionGroup
+except NameError:
+    from exceptiongroup import ExceptionGroup  # type: ignore
 
 try:
     from mcp import ClientSession, StdioServerParameters
@@ -167,10 +172,21 @@ class MCPClient:
         if self._exit_stack:
             try:
                 await self._exit_stack.aclose()
-            except (RuntimeError, GeneratorExit, ExceptionGroup, StopIteration, StopAsyncIteration) as e:
-                error_str = str(e).lower()
-                if "generator" not in error_str and "cancel scope" not in error_str and "asyncgen" not in error_str:
-                    error("MCP", f"Cleanup error: {e}")
+            except asyncio.CancelledError:
+                pass
+            except GeneratorExit:
+                pass
+            except StopAsyncIteration:
+                pass
+            except ExceptionGroup as e:
+                suppressed = (GeneratorExit, StopAsyncIteration, asyncio.CancelledError)
+                if not all(isinstance(exc, suppressed) for exc in e.exceptions):
+                    warning("MCP", f"Cleanup warning (mixed): {e}")
+            except RuntimeError as e:
+                if "cancel scope" not in str(e).lower():
+                    warning("MCP", f"Cleanup warning: {e}")
+            except StopIteration:
+                pass
             except Exception as e:
                 warning("MCP", f"Cleanup warning: {e}")
         
@@ -218,9 +234,9 @@ class MCPManager:
                     tool.name = f"{server_name}_{tool.name}"
                 all_tools.extend(tools)
             except asyncio.TimeoutError:
-                error("MCP", f"Timeout connecting to '{server_name}'")
+                warning("MCP", f"Timeout connecting to '{server_name}'")
             except Exception as e:
-                error("MCP", f"Failed to get tools from '{server_name}': {e}")
+                warning("MCP", f"Failed to get tools from '{server_name}': {e}")
         return all_tools
 
     @classmethod
