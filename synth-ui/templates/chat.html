@@ -242,7 +242,10 @@
             <div id="rag-options" style="display: none; margin-top: 1rem;">
                 <hr style="margin: 1rem 0; border: none; border-top: 1px solid var(--border);">
                 
-                <h4 style="margin-bottom: 0.5rem;">Настройки для чата</h4>
+                <h4 id="rag-session-settings-title" style="margin-bottom: 0.5rem;">Настройки для чата (вне проекта)</h4>
+                <p id="rag-session-settings-hint" class="help-text" style="display: none;">У проекта есть активные индексы. Эти настройки не используются.</p>
+                
+                <div id="rag-session-settings-fields">
                 
                 <div class="form-group">
                     <label for="rag-index">Индекс:</label>
@@ -262,6 +265,8 @@
                     <label for="rag-top-k">Количество результатов (top_k):</label>
                     <input type="number" id="rag-top-k" class="form-input" value="5" min="1" max="20">
                 </div>
+                
+                </div><!-- end rag-session-settings-fields -->
                 
                 <hr style="margin: 1rem 0; border: none; border-top: 1px solid var(--border);">
                 
@@ -3664,7 +3669,9 @@
                 }
                 
                 let html = '<div style="display: flex; flex-direction: column; gap: 0.5rem;">';
+                let hasActiveIndexes = false;
                 for (const idx of indexes) {
+                    if (idx.enabled) hasActiveIndexes = true;
                     const statusIcon = idx.enabled ? '✓' : '✗';
                     const statusClass = idx.enabled ? 'color: var(--success);' : 'color: var(--error);';
                     const versionStr = idx.version ? `v${idx.version}` : '';
@@ -3689,6 +3696,20 @@
                 }
                 html += '</div>';
                 container.innerHTML = html;
+                
+                const sessionFields = document.getElementById('rag-session-settings-fields');
+                const sessionTitle = document.getElementById('rag-session-settings-title');
+                const sessionHint = document.getElementById('rag-session-settings-hint');
+                
+                if (hasActiveIndexes) {
+                    sessionFields.style.display = 'none';
+                    sessionTitle.textContent = 'Настройки для чата (отключены)';
+                    sessionHint.style.display = 'block';
+                } else {
+                    sessionFields.style.display = 'block';
+                    sessionTitle.textContent = 'Настройки для чата (вне проекта)';
+                    sessionHint.style.display = 'none';
+                }
             } else {
                 container.innerHTML = '<div class="help-text">Ошибка загрузки индексов</div>';
             }
