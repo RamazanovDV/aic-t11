@@ -147,5 +147,25 @@ class EmbeddingStorage:
 
         return True
 
+    def delete_index_by_name(self, name: str, delete_all_versions: bool = True) -> bool:
+        """Delete index(es) by name. Deletes all versions if delete_all_versions=True."""
+        indexes_data = self._load_index_list()
+        to_delete = [idx for idx in indexes_data if idx.get("name") == name]
+        
+        if not to_delete:
+            return False
+        
+        for idx_data in to_delete:
+            index_id = idx_data.get("id")
+            index_dir = self._get_index_dir(index_id)
+            if index_dir.exists():
+                import shutil
+                shutil.rmtree(index_dir)
+        
+        remaining = [idx for idx in indexes_data if idx.get("name") != name]
+        self._save_index_list(remaining)
+        
+        return True
+
 
 embedding_storage = EmbeddingStorage()

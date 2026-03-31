@@ -162,31 +162,18 @@ class ContextBuilder:
         saved_rag = self.session.session_settings.get("rag_settings", {})
         global_rag_config = config.get_rag_config()
         
-        rag_index_name = saved_rag.get("index_name") or global_rag_config.get("default_index", "")
-        
-        if not rag_index_name:
-            project_name = self.session.status.get("project")
-            if project_name:
-                project_config = project_manager.get_project_config(project_name)
-                rag_index_name = project_config.get("embeddings_index", "")
-                if rag_index_name:
-                    self.session.session_settings.setdefault("rag_settings", {})
-                    self.session.session_settings["rag_settings"]["enabled"] = True
-                    self.session.session_settings["rag_settings"]["index_name"] = rag_index_name
-        
-        rag_enabled = saved_rag.get("enabled", global_rag_config.get("enabled", False))
-        if not rag_enabled:
-            rag_enabled = bool(self.session.session_settings.get("rag_settings", {}).get("enabled", False))
-        if not rag_enabled:
+        project_name = self.session.status.get("project")
+        if not project_name:
             return ""
         
-        if not rag_index_name:
+        project_indexes = project_manager.get_embeddings_indexes(project_name)
+        active_indexes = [i for i in project_indexes if i.get("enabled", True)]
+        
+        if not active_indexes:
             return ""
         
-        rag_version = saved_rag.get("version") or global_rag_config.get("version")
         rag_top_k = saved_rag.get("top_k", global_rag_config.get("top_k", 5))
         rag_reranker = saved_rag.get("reranker", global_rag_config.get("reranker", {}))
-        
         say_unknown_enabled = saved_rag.get("say_unknown_enabled", global_rag_config.get("say_unknown_enabled", False))
         say_unknown_threshold = saved_rag.get("say_unknown_threshold", global_rag_config.get("say_unknown_threshold", 0.3))
         
@@ -197,61 +184,80 @@ class ContextBuilder:
         try:
             from app.embeddings.search import EmbeddingSearch
             search_engine = EmbeddingSearch()
-            results, reranker_meta = search_engine.search(
-                query=query,
-                index_name=rag_index_name,
-                version=rag_version,
-                top_k=rag_top_k,
-                reranker_config=reranker_config,
-            )
             
-            max_similarity = max((r.get("similarity", 0) for r in results), default=0) if results else 0
+            all_results = []
+            for idx in active_indexes:
+                index_name = idx.get("name")
+                try:
+                    results, _ = search_engine.search(
+                        query=query,
+                        index_name=index_name,
+                        top_k=rag_top_k,
+                        reranker_config=reranker_config,
+                    )
+                    for r in results:
+                        r["weight"] = r.get("similarity", 0)
+                        r["index_name"] = index_name
+                    all_results.extend(results)
+                except Exception:
+                    pass
+            
+            if not all_results:
+                return ""
+            
+            combined = self._combine_results_with_weights(all_results, rag_top_k * 2)
+            
+            max_weight = max((r.get("weight", 0) for r in combined), default=0) if combined else 0
             
             say_unknown_triggered = False
-            if say_unknown_enabled and results and max_similarity < say_unknown_threshold:
+            if say_unknown_enabled and combined and max_weight < say_unknown_threshold:
                 say_unknown_triggered = True
                 unknown_context = config.context_manager.get_context_file("RAG_UNKNOWN.md")
                 if unknown_context:
                     if self.debug_collector and self.debug_collector.enabled:
                         self.debug_collector.capture_rag_info(
                             query=query,
-                            index_name=rag_index_name,
-                            version=rag_version,
+                            index_name=",".join(i.get("name") for i in active_indexes),
+                            version=None,
                             top_k=rag_top_k,
-                            results=results or [],
+                            results=combined or [],
                             context_added=unknown_context,
                             reranker_config=reranker_config,
-                            reranker_meta=reranker_meta,
+                            reranker_meta=None,
                             say_unknown_triggered=say_unknown_triggered,
-                            max_similarity=max_similarity,
+                            max_similarity=max_weight,
                             say_unknown_threshold=say_unknown_threshold,
                         )
                     return unknown_context
                 return ""
-            elif results:
+            elif combined:
                 rag_context = "\n\n## Relevant Context\n"
-                for i, result in enumerate(results, 1):
+                for i, result in enumerate(combined[:rag_top_k], 1):
                     metadata = result.get("metadata", {})
                     source = metadata.get("source", "unknown")
                     section = metadata.get("section", "")
                     content = result.get("content", "")
+                    weight = result.get("weight", 0)
+                    index_name = result.get("index_name", "")
+                    
                     rag_context += f"[{i}] Source: {source}"
                     if section:
                         rag_context += f", Section: {section}"
-                    rag_context += f"\n{content}\n\n---\n"
+                    rag_context += f" (weight: {weight:.2f}, index: {index_name})\n"
+                    rag_context += f"{content}\n\n---\n"
                 
                 if self.debug_collector and self.debug_collector.enabled:
                     self.debug_collector.capture_rag_info(
                         query=query,
-                        index_name=rag_index_name,
-                        version=rag_version,
+                        index_name=",".join(i.get("name") for i in active_indexes),
+                        version=None,
                         top_k=rag_top_k,
-                        results=results or [],
+                        results=combined or [],
                         context_added=rag_context,
                         reranker_config=reranker_config,
-                        reranker_meta=reranker_meta,
+                        reranker_meta=None,
                         say_unknown_triggered=say_unknown_triggered,
-                        max_similarity=max_similarity,
+                        max_similarity=max_weight,
                         say_unknown_threshold=say_unknown_threshold,
                     )
                 
@@ -260,13 +266,13 @@ class ContextBuilder:
             if self.debug_collector and self.debug_collector.enabled:
                 self.debug_collector.capture_rag_info(
                     query=query,
-                    index_name=rag_index_name,
-                    version=rag_version,
+                    index_name=",".join(i.get("name") for i in active_indexes),
+                    version=None,
                     top_k=rag_top_k,
                     results=[],
                     context_added="",
                     reranker_config=reranker_config,
-                    reranker_meta=reranker_meta,
+                    reranker_meta=None,
                     say_unknown_triggered=False,
                     max_similarity=0,
                     say_unknown_threshold=say_unknown_threshold,
@@ -277,6 +283,19 @@ class ContextBuilder:
             warning("RAG", f"RAG search error: {e}")
         
         return ""
+    
+    def _combine_results_with_weights(self, results: list[dict], top_k: int) -> list[dict]:
+        """Combine and deduplicate search results by source, keeping highest weight."""
+        seen = {}
+        for r in results:
+            metadata = r.get("metadata", {})
+            source = metadata.get("source", "")
+            if source not in seen or r.get("weight", 0) > seen[source].get("weight", 0):
+                seen[source] = r
+        
+        combined = list(seen.values())
+        combined.sort(key=lambda x: x.get("weight", 0), reverse=True)
+        return combined[:top_k]
     
     def build_mcp_tools(self, provider_name: str) -> list[dict]:
         """Build MCP tools for provider."""

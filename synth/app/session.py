@@ -215,7 +215,6 @@ class Session:
         
         if new_project and new_project != prev_project:
             self.add_info_message(f"📁 Открыт проект: {new_project}")
-            self._connect_rag_for_project(new_project)
         elif new_state and new_state != prev_state:
             state_emoji = {"planning": "📋", "execution": "⚙️", "validation": "🔍", "done": "✅"}
             state_name = {"planning": "Планирование", "execution": "Выполнение", "validation": "Проверка", "done": "Готово"}
@@ -271,15 +270,6 @@ class Session:
                 return
         self.mcp_servers.append({"name": server_name, "active": active})
         self.updated_at = datetime.now()
-
-    def _connect_rag_for_project(self, project_name: str) -> None:
-        from app.project_manager import project_manager
-        project_config = project_manager.get_project_config(project_name)
-        embeddings_index = project_config.get("embeddings_index")
-        if embeddings_index:
-            self.session_settings.setdefault("rag_settings", {})
-            self.session_settings["rag_settings"]["enabled"] = True
-            self.session_settings["rag_settings"]["index_name"] = embeddings_index
 
     def get_current_usage(self) -> dict[str, int]:
         return {

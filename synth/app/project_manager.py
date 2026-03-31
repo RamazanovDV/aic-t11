@@ -156,5 +156,18 @@ class ProjectManager:
         except Exception:
             return False
 
+    def get_embeddings_indexes(self, project_name: str) -> list[dict[str, Any]]:
+        if not self.project_exists(project_name):
+            return []
+        project_config = self.get_project_config(project_name)
+        return project_config.get("embeddings_indexes", [])
+
+    def save_embeddings_indexes(self, project_name: str, indexes: list[dict[str, Any]]) -> bool:
+        if not self.project_exists(project_name):
+            return False
+        project_config = self.get_project_config(project_name)
+        project_config["embeddings_indexes"] = indexes
+        return self.save_project_config(project_name, project_config)
+
 
 project_manager = ProjectManager()

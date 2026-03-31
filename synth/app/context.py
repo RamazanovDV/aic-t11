@@ -346,11 +346,37 @@ def get_project_prompt(session) -> str:
             else:
                 result += f"- {key}: {value}\n"
     
-    embeddings_index = project_config.get("embeddings_index")
-    if embeddings_index:
-        result += f"\n[EMBEDDINGS INDEX]\n"
-        result += f"Подключенный индекс: {embeddings_index}\n"
-        result += "RAG для семантического поиска активен.\n"
+    from app.embeddings.storage import embedding_storage
+    embeddings_indexes = project_manager.project_manager.get_embeddings_indexes(project_name)
+    if embeddings_indexes:
+        result += f"\n[EMBEDDINGS INDEXES]\n"
+        active_count = 0
+        for idx in embeddings_indexes:
+            name = idx.get("name", "unknown")
+            desc = idx.get("description", "")
+            enabled = idx.get("enabled", True)
+            
+            faiss_index = embedding_storage.get_index_by_name(name)
+            if faiss_index:
+                version = faiss_index.version
+                chunk_count = faiss_index.chunk_count
+                status = "✓" if enabled else "✗"
+                result += f"{status} {name} (v{version}, {chunk_count} chunks)"
+            else:
+                status = "✗"
+                result += f"{status} {name} - FAISS missing"
+            
+            if desc:
+                result += f" - {desc}"
+            result += "\n"
+            
+            if enabled:
+                active_count += 1
+        
+        if active_count > 0:
+            result += f"RAG активен ({active_count} индексов).\n"
+        else:
+            result += "Все индексы отключены. RAG неактивен.\n"
     
     schedules = scheduler.get_schedules(project_name)
     enabled_schedules = [s for s in schedules if s.enabled]

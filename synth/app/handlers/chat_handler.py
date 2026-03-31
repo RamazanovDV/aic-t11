@@ -162,30 +162,39 @@ class SlashCommandHandler:
                 "is_help_response": True
             }
         
-        project_config = project_manager.get_project_config(project_name)
-        embeddings_index = project_config.get("embeddings_index")
-        
         question = args.strip() if args else "project overview"
         
-        rag_settings = session.session_settings.get("rag_settings", {})
-        rag_enabled = rag_settings.get("enabled", False)
-        index_name = rag_settings.get("index_name") or embeddings_index
+        project_indexes = project_manager.get_embeddings_indexes(project_name)
+        active_indexes = [i for i in project_indexes if i.get("enabled", True)]
         
-        if not rag_enabled or not index_name:
+        if not active_indexes:
             return {
                 "message": f"Для проекта '{project_name}' не настроен embeddings индекс. "
-                           f"Используйте MCP tool 'embeddings_create' для создания индекса.",
+                           f"Используйте MCP tool 'manageembeddings' (action=create) для создания индекса.",
                 "session_id": session.session_id,
                 "is_help_response": True
             }
         
         try:
             search_engine = EmbeddingSearch()
-            results, _ = search_engine.search(
-                query=question,
-                index_name=index_name,
-                top_k=5
-            )
+            all_results = []
+            
+            for idx in active_indexes:
+                index_name = idx.get("name")
+                try:
+                    results, _ = search_engine.search(
+                        query=question,
+                        index_name=index_name,
+                        top_k=5
+                    )
+                    for r in results:
+                        r["index_name"] = index_name
+                    all_results.extend(results)
+                except Exception:
+                    pass
+            
+            combined = SlashCommandHandler._combine_results_with_weights(all_results, top_k=5)
+            
         except Exception as e:
             return {
                 "message": f"Ошибка поиска по индексу: {str(e)}",
@@ -194,19 +203,20 @@ class SlashCommandHandler:
                 "error": str(e)
             }
         
-        if not results:
+        if not combined:
             return {
-                "message": f"По запросу '{question}' ничего не найдено в индексе '{index_name}'.",
+                "message": f"По запросу '{question}' ничего не найдено.",
                 "session_id": session.session_id,
                 "is_help_response": True
             }
         
         context_parts = []
-        for i, result in enumerate(results, 1):
+        for i, result in enumerate(combined[:5], 1):
             metadata = result.get("metadata", {})
             source = metadata.get("source", "unknown")
             content = result.get("content", "")[:500]
-            context_parts.append(f"### [{i}] {source}\n{content}")
+            index_name = result.get("index_name", "")
+            context_parts.append(f"### [{i}] {source} (index: {index_name})\n{content}")
         
         context = "\n\n".join(context_parts)
         
@@ -242,8 +252,12 @@ class SlashCommandHandler:
                 "usage": response.usage,
                 "is_help_response": True,
                 "sources": [
-                    {"source": r.get("metadata", {}).get("source", "unknown"), "similarity": r.get("similarity", 0)}
-                    for r in results
+                    {
+                        "source": r.get("metadata", {}).get("source", "unknown"),
+                        "similarity": r.get("similarity", 0),
+                        "index": r.get("index_name", "")
+                    }
+                    for r in combined[:5]
                 ]
             }
         except Exception as e:
@@ -253,6 +267,20 @@ class SlashCommandHandler:
                 "is_help_response": True,
                 "error": str(e)
             }
+    
+    @staticmethod
+    def _combine_results_with_weights(results: list[dict], top_k: int) -> list[dict]:
+        """Combine and deduplicate search results by source, keeping highest weight."""
+        seen = {}
+        for r in results:
+            metadata = r.get("metadata", {})
+            source = metadata.get("source", "")
+            if source not in seen or r.get("similarity", 0) > seen[source].get("similarity", 0):
+                seen[source] = r
+        
+        combined = list(seen.values())
+        combined.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+        return combined[:top_k]
     
     @staticmethod
     def get_available_commands() -> list[dict[str, str]]:

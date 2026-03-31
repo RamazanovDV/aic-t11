@@ -8,25 +8,36 @@ from app.logger import debug, warning
 
 BUILTIN_TOOLS: list[MCPTool] = [
     MCPTool(
-        name="createembeddings",
-        description="Creates an embeddings index for a project directory. "
-                    "The index will be stored globally and can be used for RAG. "
-                    "After creation, it will be automatically connected to the project.",
+        name="manageembeddings",
+        description="Manage project embeddings indexes: list, create, delete, enable, disable",
         input_schema={
             "type": "object",
             "properties": {
-                "name": {
+                "action": {
                     "type": "string",
-                    "description": "Name for the embeddings index (e.g., 'my-project-knowledge')"
+                    "enum": ["list", "create", "delete", "enable", "disable"],
+                    "description": "Action to perform"
+                },
+                "project_name": {
+                    "type": "string",
+                    "description": "Name of the Synth project"
+                },
+                "index_name": {
+                    "type": "string",
+                    "description": "Name of the embeddings index (for create, delete, enable, disable)"
                 },
                 "source_dir": {
                     "type": "string",
-                    "description": "Absolute path to the directory with files to index"
+                    "description": "Absolute path to directory with files to index (for create)"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Description for the index (for create)"
                 },
                 "chunking_strategy": {
                     "type": "string",
                     "enum": ["fixed", "structure"],
-                    "description": "Chunking strategy: 'fixed' (fixed size) or 'structure' (by headers)",
+                    "description": "Chunking strategy for create",
                     "default": "structure"
                 },
                 "chunk_size": {
@@ -36,15 +47,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
                 },
                 "overlap": {
                     "type": "integer",
-                    "description": "Overlap between chunks in tokens",
+                    "description": "Overlap between chunks",
                     "default": 5
-                },
-                "project_name": {
-                    "type": "string",
-                    "description": "Name of the Synth project to associate this index with"
                 }
             },
-            "required": ["name", "source_dir", "project_name"]
+            "required": ["action", "project_name"]
         }
     ),
 ]
@@ -166,8 +173,8 @@ async def process_tool_calls(
 
 
 async def handle_builtin_tool(tool_name: str, args: dict[str, Any]) -> str:
-    if tool_name == "createembeddings":
-        return await builtin_embeddings_create(args)
+    if tool_name == "manageembeddings":
+        return await builtin_manage_embeddings(args)
     return f"Unknown built-in tool: {tool_name}"
 
 
@@ -184,7 +191,7 @@ async def call_mcp_tool(tool_name: str, tool_args: dict[str, Any]) -> str:
             return f"Error: {str(e)}"
 
 
-async def builtin_embeddings_create(args: dict[str, Any]) -> str:
+async def builtin_manage_embeddings(args: dict[str, Any]) -> str:
     from pathlib import Path
     from app.embeddings.config import embeddings_config
     from app.embeddings.embedder import create_embedder
@@ -192,17 +199,87 @@ async def builtin_embeddings_create(args: dict[str, Any]) -> str:
     from app.embeddings.storage import embedding_storage
     from app.project_manager import project_manager
     
-    name = args.get("name")
-    source_dir = args.get("source_dir")
+    action = args.get("action")
     project_name = args.get("project_name")
-    chunking_strategy = args.get("chunking_strategy", "structure")
+    index_name = args.get("index_name")
     
-    if not name:
-        return "Error: 'name' is required"
-    if not source_dir:
-        return "Error: 'source_dir' is required"
+    if not action:
+        return "Error: 'action' is required"
     if not project_name:
         return "Error: 'project_name' is required"
+    
+    if action == "list":
+        return await _manage_list(project_name)
+    elif action == "create":
+        return await _manage_create(args, project_name)
+    elif action == "delete":
+        return await _manage_delete(project_name, index_name)
+    elif action == "enable":
+        return await _manage_enable_disable(project_name, index_name, True)
+    elif action == "disable":
+        return await _manage_enable_disable(project_name, index_name, False)
+    else:
+        return f"Error: Unknown action '{action}'. Use: list, create, delete, enable, disable"
+
+
+async def _manage_list(project_name: str) -> str:
+    from app.project_manager import project_manager
+    from app.embeddings.storage import embedding_storage
+    
+    if not project_manager.project_exists(project_name):
+        return f"Error: Project '{project_name}' does not exist"
+    
+    indexes = project_manager.get_embeddings_indexes(project_name)
+    
+    if not indexes:
+        return f"No embeddings indexes configured for project '{project_name}'"
+    
+    result = [f"Embeddings indexes for project '{project_name}':\n"]
+    
+    for idx in indexes:
+        name = idx.get("name", "unknown")
+        desc = idx.get("description", "")
+        enabled = idx.get("enabled", True)
+        
+        faiss_index = embedding_storage.get_index_by_name(name)
+        if faiss_index:
+            version = faiss_index.version
+            chunk_count = faiss_index.chunk_count
+            status_icon = "✓" if enabled else "✗"
+            result.append(f"{status_icon} {name} (v{version}, {chunk_count} chunks)")
+        else:
+            status_icon = "✗" if enabled else "✗"
+            result.append(f"{status_icon} {name} - FAISS file missing!")
+        
+        if desc:
+            result.append(f"   Description: {desc}")
+    
+    enabled_count = sum(1 for i in indexes if i.get("enabled", True))
+    result.append(f"\nTotal: {len(indexes)} ({enabled_count} active)")
+    
+    return "\n".join(result)
+
+
+async def _manage_create(args: dict, project_name: str) -> str:
+    from pathlib import Path
+    from app.embeddings.config import embeddings_config
+    from app.embeddings.embedder import create_embedder
+    from app.embeddings.indexer import EmbeddingIndexer
+    from app.embeddings.storage import embedding_storage
+    from app.project_manager import project_manager
+    
+    index_name = args.get("index_name")
+    source_dir = args.get("source_dir")
+    description = args.get("description", "")
+    chunking_strategy = args.get("chunking_strategy", "structure")
+    
+    if not index_name:
+        return "Error: 'index_name' is required for create"
+    if not source_dir:
+        return "Error: 'source_dir' is required for create"
+    
+    if not project_manager.project_exists(project_name):
+        return f"Error: Project '{project_name}' does not exist"
     
     source_path = Path(source_dir)
     if not source_path.exists():
@@ -234,12 +311,12 @@ async def builtin_embeddings_create(args: dict[str, Any]) -> str:
             chunking_params=chunking_params,
         )
         
-        existing_index = embedding_storage.get_index_by_name(name)
+        existing_index = embedding_storage.get_index_by_name(index_name)
         version = 1
         if existing_index:
             version = existing_index.version + 1
         
-        index_meta.name = name
+        index_meta.name = index_name
         index_meta.version = version
         index_meta.provider = provider
         index_meta.model = model
@@ -247,25 +324,77 @@ async def builtin_embeddings_create(args: dict[str, Any]) -> str:
         index_meta.chunking_params = chunking_params
         index_meta.source_dir = str(source_path)
         
-        saved_index = embedding_storage.save_index(index_meta, chunks, faiss_index)
+        embedding_storage.save_index(index_meta, chunks, faiss_index)
         
-        if project_name and project_manager.project_exists(project_name):
-            project_config = project_manager.get_project_config(project_name)
-            project_config["embeddings_index"] = name
-            project_manager.save_project_config(project_name, project_config)
+        indexes = project_manager.get_embeddings_indexes(project_name)
+        indexes.append({
+            "name": index_name,
+            "description": description,
+            "enabled": True
+        })
+        project_manager.save_embeddings_indexes(project_name, indexes)
         
         return (
-            f"Successfully created embeddings index '{name}'\n"
+            f"Successfully created embeddings index '{index_name}'\n"
             f"Version: {version}\n"
             f"Chunk count: {len(chunks)}\n"
             f"Provider: {provider}\n"
             f"Model: {model}\n"
-            f"Chunking strategy: {chunking_strategy}\n"
-            f"Associated with project: {project_name}"
+            f"Added to project: {project_name}"
         )
     
     except Exception as e:
         return f"Error creating embeddings index: {str(e)}"
+
+
+async def _manage_delete(project_name: str, index_name: str) -> str:
+    from app.embeddings.storage import embedding_storage
+    from app.project_manager import project_manager
+    
+    if not index_name:
+        return "Error: 'index_name' is required for delete"
+    
+    if not project_manager.project_exists(project_name):
+        return f"Error: Project '{project_name}' does not exist"
+    
+    indexes = project_manager.get_embeddings_indexes(project_name)
+    index_exists = any(i.get("name") == index_name for i in indexes)
+    
+    if not index_exists:
+        return f"Error: Index '{index_name}' not found in project '{project_name}'"
+    
+    embedding_storage.delete_index_by_name(index_name, delete_all_versions=True)
+    
+    indexes = [i for i in indexes if i.get("name") != index_name]
+    project_manager.save_embeddings_indexes(project_name, indexes)
+    
+    return f"Successfully deleted embeddings index '{index_name}' (all versions)"
+
+
+async def _manage_enable_disable(project_name: str, index_name: str, enable: bool) -> str:
+    from app.project_manager import project_manager
+    
+    if not index_name:
+        return "Error: 'index_name' is required for enable/disable"
+    
+    if not project_manager.project_exists(project_name):
+        return f"Error: Project '{project_name}' does not exist"
+    
+    indexes = project_manager.get_embeddings_indexes(project_name)
+    
+    found = False
+    for idx in indexes:
+        if idx.get("name") == index_name:
+            idx["enabled"] = enable
+            found = True
+    
+    if not found:
+        return f"Error: Index '{index_name}' not found in project '{project_name}'"
+    
+    project_manager.save_embeddings_indexes(project_name, indexes)
+    
+    action = "enabled" if enable else "disabled"
+    return f"Index '{index_name}' {action} for project '{project_name}'"
 
 
 def has_tool_calls(response, provider_name: str) -> bool:
