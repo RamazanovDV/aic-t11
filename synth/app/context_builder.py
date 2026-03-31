@@ -152,7 +152,13 @@ class ContextBuilder:
         return [Message(role=m["role"], content=m["content"], usage={}) for m in formatted_messages]
     
     def build_rag_context(self, query: str, use_rag: bool = True) -> str:
-        """Build RAG context for query."""
+        """Build RAG context for query.
+        
+        Priority:
+        1. If project has active indexes → use them (ignore session index_name)
+        2. Else if session has index_name → use it
+        3. Else → no RAG
+        """
         if not use_rag:
             return ""
         
@@ -163,13 +169,20 @@ class ContextBuilder:
         global_rag_config = config.get_rag_config()
         
         project_name = self.session.status.get("project")
-        if not project_name:
-            return ""
         
-        project_indexes = project_manager.get_embeddings_indexes(project_name)
-        active_indexes = [i for i in project_indexes if i.get("enabled", True)]
+        indexes_to_use = []
         
-        if not active_indexes:
+        if project_name:
+            project_indexes = project_manager.get_embeddings_indexes(project_name)
+            active_indexes = [i for i in project_indexes if i.get("enabled", True)]
+            if active_indexes:
+                indexes_to_use = active_indexes
+            elif saved_rag.get("index_name"):
+                indexes_to_use = [{"name": saved_rag["index_name"], "version": saved_rag.get("version")}]
+        elif saved_rag.get("index_name"):
+            indexes_to_use = [{"Name": saved_rag["index_name"], "version": saved_rag.get("version")}]
+        
+        if not indexes_to_use:
             return ""
         
         rag_top_k = saved_rag.get("top_k", global_rag_config.get("top_k", 5))
@@ -186,7 +199,7 @@ class ContextBuilder:
             search_engine = EmbeddingSearch()
             
             all_results = []
-            for idx in active_indexes:
+            for idx in indexes_to_use:
                 index_name = idx.get("name")
                 try:
                     results, _ = search_engine.search(
@@ -217,7 +230,7 @@ class ContextBuilder:
                     if self.debug_collector and self.debug_collector.enabled:
                         self.debug_collector.capture_rag_info(
                             query=query,
-                            index_name=",".join(i.get("name") for i in active_indexes),
+                            index_name=",".join(i.get("name") for i in indexes_to_use),
                             version=None,
                             top_k=rag_top_k,
                             results=combined or [],
@@ -249,7 +262,7 @@ class ContextBuilder:
                 if self.debug_collector and self.debug_collector.enabled:
                     self.debug_collector.capture_rag_info(
                         query=query,
-                        index_name=",".join(i.get("name") for i in active_indexes),
+                        index_name=",".join(i.get("name") for i in indexes_to_use),
                         version=None,
                         top_k=rag_top_k,
                         results=combined or [],
@@ -266,7 +279,7 @@ class ContextBuilder:
             if self.debug_collector and self.debug_collector.enabled:
                 self.debug_collector.capture_rag_info(
                     query=query,
-                    index_name=",".join(i.get("name") for i in active_indexes),
+                    index_name=",".join(i.get("name") for i in indexes_to_use),
                     version=None,
                     top_k=rag_top_k,
                     results=[],

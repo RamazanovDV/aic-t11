@@ -236,6 +236,7 @@
                 <div id="rag-project-indexes-list">
                     <div class="loading">Загрузка...</div>
                 </div>
+                <button class="btn btn-small" style="margin-top: 0.5rem;" onclick="showAddIndexModal()">+ Добавить существующий индекс</button>
             </div>
             
             <div id="rag-options" style="display: none; margin-top: 1rem;">
@@ -398,6 +399,32 @@
         <div class="modal-actions">
             <button class="btn btn-secondary" onclick="closeScheduleFormModal()">Отмена</button>
             <button class="btn btn-primary" onclick="saveSchedule()">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+<div id="add-index-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+        <h3>Добавить индекс к проекту</h3>
+        
+        <div class="settings-section">
+            <div class="form-group">
+                <label for="add-index-select">Выберите индекс:</label>
+                <select id="add-index-select" class="form-input" onchange="onSelectIndexToAdd()">
+                    <option value="">Загрузка...</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="add-index-description">Описание:</label>
+                <input type="text" id="add-index-description" class="form-input" placeholder="Описание индекса">
+                <p class="help-text">Опционально. Можете изменить или оставить пустым.</p>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeAddIndexModal()">Отмена</button>
+            <button class="btn btn-primary" onclick="confirmAddIndex()">Добавить</button>
         </div>
     </div>
 </div>
@@ -3738,6 +3765,112 @@
         } catch (err) {
             console.error('Failed to delete index:', err);
             alert('Ошибка удаления индекса');
+        }
+    }
+    
+    let addIndexProjectName = null;
+    let availableIndexesToAdd = [];
+    
+    async function showAddIndexModal() {
+        const projectName = getProjectFromPanel(currentRagPanelIndex);
+        if (!projectName) {
+            alert('Сначала выберите проект в чате');
+            return;
+        }
+        
+        addIndexProjectName = projectName;
+        
+        const select = document.getElementById('add-index-select');
+        const descInput = document.getElementById('add-index-description');
+        
+        select.innerHTML = '<option value="">Загрузка...</option>';
+        descInput.value = '';
+        
+        try {
+            const response = await authFetch('/api/embeddings/list');
+            if (response.ok) {
+                const indexes = await response.json();
+                
+                const projResponse = await authFetch(`/api/projects/${encodeURIComponent(projectName)}/embeddings`);
+                let projectIndexNames = new Set();
+                if (projResponse.ok) {
+                    const projData = await projResponse.json();
+                    projectIndexNames = new Set((projData.indexes || []).map(i => i.name));
+                }
+                
+                availableIndexesToAdd = indexes.filter(idx => !projectIndexNames.has(idx.name));
+                
+                if (availableIndexesToAdd.length === 0) {
+                    select.innerHTML = '<option value="">Все индексы уже добавлены</option>';
+                } else {
+                    select.innerHTML = '<option value="">Выберите индекс</option>';
+                    for (const idx of availableIndexesToAdd) {
+                        select.innerHTML += `<option value="${idx.name}">${idx.name} (v${idx.version || 1})</option>`;
+                    }
+                }
+            } else {
+                select.innerHTML = '<option value="">Ошибка загрузки</option>';
+            }
+        } catch (err) {
+            console.error('Failed to load indexes:', err);
+            select.innerHTML = '<option value="">Ошибка загрузки</option>';
+        }
+        
+        document.getElementById('add-index-modal').style.display = 'flex';
+    }
+    
+    function onSelectIndexToAdd() {
+        const select = document.getElementById('add-index-select');
+        const descInput = document.getElementById('add-index-description');
+        const selectedName = select.value;
+        
+        if (!selectedName) {
+            descInput.value = '';
+            return;
+        }
+        
+        const idx = availableIndexesToAdd.find(i => i.name === selectedName);
+        if (idx && idx.description) {
+            descInput.value = idx.description;
+        } else {
+            descInput.value = '';
+        }
+    }
+    
+    function closeAddIndexModal() {
+        document.getElementById('add-index-modal').style.display = 'none';
+        addIndexProjectName = null;
+        availableIndexesToAdd = [];
+    }
+    
+    async function confirmAddIndex() {
+        const select = document.getElementById('add-index-select');
+        const descInput = document.getElementById('add-index-description');
+        const indexName = select.value;
+        const description = descInput.value.trim();
+        
+        if (!indexName) {
+            alert('Выберите индекс');
+            return;
+        }
+        
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(addIndexProjectName)}/embeddings/add`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index_name: indexName, description: description })
+            });
+            
+            if (response.ok) {
+                closeAddIndexModal();
+                await loadProjectIndexes(addIndexProjectName);
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            }
+        } catch (err) {
+            console.error('Failed to add index:', err);
+            alert('Ошибка добавления индекса');
         }
     }
 

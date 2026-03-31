@@ -907,6 +907,46 @@ def enable_project_embeddings(project_name, index_name):
     return jsonify({"message": f"Index '{index_name}' {action}"})
 
 
+@api_bp.route("/projects/<project_name>/embeddings/add", methods=["POST"])
+@require_user
+def add_project_embeddings(project_name):
+    """Add an existing embeddings index to a project."""
+    from app.project_manager import project_manager
+    from app.embeddings.storage import embedding_storage
+    
+    data = request.get_json() or {}
+    index_name = data.get("index_name")
+    description = data.get("description", "")
+    
+    if not index_name:
+        return jsonify({"error": "index_name is required"}), 400
+    
+    if not project_manager.project_exists(project_name):
+        return jsonify({"error": "Project not found"}), 404
+    
+    faiss_index = embedding_storage.get_index_by_name(index_name)
+    if not faiss_index:
+        return jsonify({"error": f"Embeddings index '{index_name}' not found"}), 404
+    
+    indexes = project_manager.get_embeddings_indexes(project_name)
+    
+    if any(i.get("name") == index_name for i in indexes):
+        return jsonify({"error": "Index already exists in project"}), 400
+    
+    if not description and faiss_index.description:
+        description = faiss_index.description
+    
+    indexes.append({
+        "name": index_name,
+        "description": description,
+        "enabled": True
+    })
+    
+    project_manager.save_embeddings_indexes(project_name, indexes)
+    
+    return jsonify({"message": f"Index '{index_name}' added to project '{project_name}'"})
+
+
 @api_bp.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
