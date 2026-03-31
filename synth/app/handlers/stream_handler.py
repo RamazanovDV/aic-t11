@@ -362,7 +362,7 @@ class StreamHandler(BaseHandler):
             if session.status:
                 debug_collector.capture_status(session.status)
         
-        debug_info = tool_debug_info if tool_debug_info else (debug_collector.get_debug_info() if debug_collector else None)
+        debug_info = debug_collector.get_debug_info() if debug_collector else None
         
         if not tool_calls_handled:
             session.add_assistant_message(
@@ -404,10 +404,16 @@ class StreamHandler(BaseHandler):
         
         group_id = str(uuid.uuid4())
         
+        tool_debug = None
+        if debug_collector and debug_collector.enabled:
+            tool_debug = debug_collector.get_debug_info()
+        if not tool_debug:
+            tool_debug = {"usage": chunk.usage or {}, "model": provider.model}
+        
         session.add_assistant_message(
             chunk.content or "",
             chunk.usage or {},
-            debug={"usage": chunk.usage or {}, "model": provider.model},
+            debug=tool_debug,
             model=provider.model,
             reasoning=chunk.reasoning,
             tool_use=chunk.tool_calls,
@@ -482,16 +488,40 @@ class StreamHandler(BaseHandler):
                 break
         
         if final_response:
-            debug_info = None
+            reasoning = final_response.reasoning if hasattr(final_response, 'reasoning') and final_response.reasoning else None
+            if not reasoning and final_response.content:
+                for block in (final_response.content if isinstance(final_response.content, list) else []):
+                    if block.get("type") == "thinking":
+                        reasoning = block.get("thinking", "")
+                        break
+            
+            raw_content = final_response.content or ""
+            if isinstance(raw_content, list):
+                text_parts = []
+                for block in raw_content:
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                    elif block.get("type") == "thinking":
+                        text_parts.append(f"[THINKING]{block.get('thinking', '')}[/THINKING]")
+                raw_content = "\n".join(text_parts)
+            
             if debug_collector and debug_collector.enabled:
-                debug_info = debug_collector.get_debug_info()
+                debug_collector.capture_reasoning(reasoning)
+                debug_collector.capture_raw_model_response(raw_content)
+                debug_collector.capture_session_info(
+                    session.session_id, provider.model, provider.get_provider_name()
+                )
+                if session.status:
+                    debug_collector.capture_status(session.status)
+            
+            debug_info = debug_collector.get_debug_info() if debug_collector else None
             
             session.add_assistant_message(
                 final_response.content or "",
                 final_response.usage or {},
                 debug=debug_info,
                 model=provider.model,
-                reasoning=final_response.reasoning if hasattr(final_response, 'reasoning') else None,
+                reasoning=reasoning,
                 group_id=group_id
             )
             
@@ -502,7 +532,7 @@ class StreamHandler(BaseHandler):
                     is_final=True,
                     usage=final_response.usage or {},
                     tool_calls=None,
-                    reasoning=final_response.reasoning if hasattr(final_response, 'reasoning') else None
+                    reasoning=reasoning
                 ),
                 group_id,
                 debug_info

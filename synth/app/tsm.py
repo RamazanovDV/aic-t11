@@ -403,6 +403,13 @@ def process_orchestrator_response(
                 debug_collector.capture_reasoning(response.reasoning)
             if parsed_status:
                 debug_collector.capture_status(parsed_status)
+            if session.status and not debug_collector._status:
+                debug_collector.capture_status(session.status)
+            debug_collector.capture_session_info(
+                session_id=session.session_id,
+                model=provider.model,
+                provider=provider.get_provider_name()
+            )
         
         # Сохраняем контент даже если нет parsed_status
         current_content = cleaned_content if cleaned_content else response.content
