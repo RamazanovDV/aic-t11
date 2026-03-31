@@ -1435,6 +1435,53 @@ def run_project_schedule(project_name, schedule_id):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/projects/<project_name>/embeddings", methods=["GET"])
+def get_project_embeddings(project_name):
+    """Get embeddings indexes for a project - proxy to backend."""
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/embeddings"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/embeddings/<index_name>", methods=["DELETE"])
+def delete_project_embeddings(project_name, index_name):
+    """Delete an embeddings index from project - proxy to backend."""
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/embeddings/{index_name}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.delete(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/embeddings/<index_name>/enable", methods=["POST"])
+def enable_project_embeddings(project_name, index_name):
+    """Enable or disable an embeddings index - proxy to backend."""
+    data = request.get_json() or {}
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/embeddings/{index_name}/enable"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/sessions/<session_id>/events", methods=["GET"])
 def session_events(session_id: str):
     """SSE endpoint for session updates - proxy to backend."""

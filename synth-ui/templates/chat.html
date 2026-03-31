@@ -231,7 +231,18 @@
                 </label>
             </div>
             
+            <div id="rag-project-indexes" class="form-group" style="margin-top: 1rem;">
+                <h4 style="margin-bottom: 0.5rem;">Индексы проекта</h4>
+                <div id="rag-project-indexes-list">
+                    <div class="loading">Загрузка...</div>
+                </div>
+            </div>
+            
             <div id="rag-options" style="display: none; margin-top: 1rem;">
+                <hr style="margin: 1rem 0; border: none; border-top: 1px solid var(--border);">
+                
+                <h4 style="margin-bottom: 0.5rem;">Настройки для чата</h4>
+                
                 <div class="form-group">
                     <label for="rag-index">Индекс:</label>
                     <select id="rag-index" class="form-input" onchange="loadIndexVersions()">
@@ -3597,7 +3608,137 @@
             indexSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
         }
         
+        // Load project indexes
+        const projectName = getProjectFromPanel(currentRagPanelIndex);
+        await loadProjectIndexes(projectName);
+        
         modal.style.display = 'flex';
+    }
+    
+    async function loadProjectIndexes(projectName) {
+        const container = document.getElementById('rag-project-indexes-list');
+        
+        if (!projectName) {
+            container.innerHTML = '<div class="help-text">Сначала выберите проект в чате</div>';
+            return;
+        }
+        
+        container.innerHTML = '<div class="loading">Загрузка...</div>';
+        
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(projectName)}/embeddings`);
+            if (response.ok) {
+                const data = await response.json();
+                const indexes = data.indexes || [];
+                
+                if (indexes.length === 0) {
+                    container.innerHTML = '<div class="help-text">К проекту не привязано индексов. Используйте MCP tool manageembeddings для создания.</div>';
+                    return;
+                }
+                
+                let html = '<div style="display: flex; flex-direction: column; gap: 0.5rem;">';
+                for (const idx of indexes) {
+                    const statusIcon = idx.enabled ? '✓' : '✗';
+                    const statusClass = idx.enabled ? 'color: var(--success);' : 'color: var(--error);';
+                    const versionStr = idx.version ? `v${idx.version}` : '';
+                    const chunksStr = idx.chunk_count ? `, ${idx.chunk_count} чанков` : '';
+                    const descStr = idx.description ? ` - ${idx.description}` : '';
+                    const errorStr = idx.error ? ` <span style="color: var(--error);">(${idx.error})</span>` : '';
+                    
+                    html += `
+                        <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: var(--bg-secondary); border-radius: 4px;">
+                            <span style="${statusClass} font-size: 1.2em;">${statusIcon}</span>
+                            <div style="flex: 1;">
+                                <strong>${idx.name}</strong>${descStr}
+                                <div style="font-size: 0.85em; color: var(--text-secondary);">
+                                    ${versionStr}${chunksStr}${errorStr}
+                                </div>
+                            </div>
+                            <button class="btn btn-small" onclick="makeIndexActive('${escapeAttr(idx.name)}', ${idx.version || 0})" title="Сделать активным">▶</button>
+                            <button class="btn btn-small" onclick="toggleIndexEnabled('${escapeAttr(projectName)}', '${escapeAttr(idx.name)}', ${!idx.enabled})" title="${idx.enabled ? 'Отключить' : 'Включить'}">${idx.enabled ? '✗' : '✓'}</button>
+                            <button class="btn btn-small" onclick="deleteProjectIndex('${escapeAttr(projectName)}', '${escapeAttr(idx.name)}')" title="Удалить">🗑️</button>
+                        </div>
+                    `;
+                }
+                html += '</div>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<div class="help-text">Ошибка загрузки индексов</div>';
+            }
+        } catch (err) {
+            console.error('Failed to load project indexes:', err);
+            container.innerHTML = '<div class="help-text">Ошибка загрузки</div>';
+        }
+    }
+    
+    async function makeIndexActive(indexName, version) {
+        const indexSelect = document.getElementById('rag-index');
+        const versionSelect = document.getElementById('rag-version');
+        
+        // Find the option and select it
+        for (let i = 0; i < indexSelect.options.length; i++) {
+            if (indexSelect.options[i].value === indexName) {
+                indexSelect.selectedIndex = i;
+                break;
+            }
+        }
+        
+        // Load versions and select the right one
+        await loadIndexVersions();
+        if (version) {
+            for (let i = 0; i < versionSelect.options.length; i++) {
+                if (parseInt(versionSelect.options[i].value) === version) {
+                    versionSelect.selectedIndex = i;
+                    break;
+                }
+            }
+        }
+        
+        // Enable RAG if not already
+        document.getElementById('rag-enable').checked = true;
+        toggleRagOptions();
+    }
+    
+    async function toggleIndexEnabled(projectName, indexName, enable) {
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(projectName)}/embeddings/${encodeURIComponent(indexName)}/enable`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: enable })
+            });
+            
+            if (response.ok) {
+                await loadProjectIndexes(projectName);
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            }
+        } catch (err) {
+            console.error('Failed to toggle index:', err);
+            alert('Ошибка изменения статуса индекса');
+        }
+    }
+    
+    async function deleteProjectIndex(projectName, indexName) {
+        if (!confirm(`Удалить индекс "${indexName}" из проекта "${projectName}"?\nЭто также удалит FAISS файлы.`)) {
+            return;
+        }
+        
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(projectName)}/embeddings/${encodeURIComponent(indexName)}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                await loadProjectIndexes(projectName);
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
+            }
+        } catch (err) {
+            console.error('Failed to delete index:', err);
+            alert('Ошибка удаления индекса');
+        }
     }
 
     async function loadIndexVersions() {

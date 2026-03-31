@@ -810,6 +810,103 @@ def run_schedule(project_name, schedule_id):
     return jsonify({"message": "Job executed"})
 
 
+@api_bp.route("/projects/<project_name>/embeddings", methods=["GET"])
+@require_user
+def get_project_embeddings(project_name):
+    """Get embeddings indexes for a project."""
+    from app.project_manager import project_manager
+    from app.embeddings.storage import embedding_storage
+    
+    if not project_manager.project_exists(project_name):
+        return jsonify({"error": "Project not found"}), 404
+    
+    indexes = project_manager.get_embeddings_indexes(project_name)
+    
+    result = []
+    for idx in indexes:
+        name = idx.get("name", "unknown")
+        faiss_index = embedding_storage.get_index_by_name(name)
+        
+        if faiss_index:
+            result.append({
+                "name": name,
+                "description": idx.get("description", ""),
+                "enabled": idx.get("enabled", True),
+                "version": faiss_index.version,
+                "chunk_count": faiss_index.chunk_count,
+                "provider": faiss_index.provider,
+                "model": faiss_index.model,
+                "chunking_strategy": faiss_index.chunking_strategy,
+            })
+        else:
+            result.append({
+                "name": name,
+                "description": idx.get("description", ""),
+                "enabled": idx.get("enabled", True),
+                "version": None,
+                "chunk_count": None,
+                "provider": None,
+                "model": None,
+                "chunking_strategy": None,
+                "error": "FAISS file not found"
+            })
+    
+    return jsonify({"project": project_name, "indexes": result})
+
+
+@api_bp.route("/projects/<project_name>/embeddings/<index_name>", methods=["DELETE"])
+@require_user
+def delete_project_embeddings(project_name, index_name):
+    """Delete an embeddings index from project (and FAISS files)."""
+    from app.project_manager import project_manager
+    from app.embeddings.storage import embedding_storage
+    
+    if not project_manager.project_exists(project_name):
+        return jsonify({"error": "Project not found"}), 404
+    
+    indexes = project_manager.get_embeddings_indexes(project_name)
+    index_exists = any(i.get("name") == index_name for i in indexes)
+    
+    if not index_exists:
+        return jsonify({"error": "Index not found in project"}), 404
+    
+    embedding_storage.delete_index_by_name(index_name, delete_all_versions=True)
+    
+    indexes = [i for i in indexes if i.get("name") != index_name]
+    project_manager.save_embeddings_indexes(project_name, indexes)
+    
+    return jsonify({"message": f"Index '{index_name}' deleted"})
+
+
+@api_bp.route("/projects/<project_name>/embeddings/<index_name>/enable", methods=["POST"])
+@require_user
+def enable_project_embeddings(project_name, index_name):
+    """Enable or disable an embeddings index in project."""
+    from app.project_manager import project_manager
+    
+    data = request.get_json() or {}
+    enabled = data.get("enabled", True)
+    
+    if not project_manager.project_exists(project_name):
+        return jsonify({"error": "Project not found"}), 404
+    
+    indexes = project_manager.get_embeddings_indexes(project_name)
+    
+    found = False
+    for idx in indexes:
+        if idx.get("name") == index_name:
+            idx["enabled"] = enabled
+            found = True
+    
+    if not found:
+        return jsonify({"error": "Index not found in project"}), 404
+    
+    project_manager.save_embeddings_indexes(project_name, indexes)
+    
+    action = "enabled" if enabled else "disabled"
+    return jsonify({"message": f"Index '{index_name}' {action}"})
+
+
 @api_bp.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
