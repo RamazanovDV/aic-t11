@@ -157,15 +157,29 @@ class ContextBuilder:
             return ""
         
         from app.config import config
+        from app.project_manager import project_manager
         
         saved_rag = self.session.session_settings.get("rag_settings", {})
         global_rag_config = config.get_rag_config()
         
+        rag_index_name = saved_rag.get("index_name") or global_rag_config.get("default_index", "")
+        
+        if not rag_index_name:
+            project_name = self.session.status.get("project")
+            if project_name:
+                project_config = project_manager.get_project_config(project_name)
+                rag_index_name = project_config.get("embeddings_index", "")
+                if rag_index_name:
+                    self.session.session_settings.setdefault("rag_settings", {})
+                    self.session.session_settings["rag_settings"]["enabled"] = True
+                    self.session.session_settings["rag_settings"]["index_name"] = rag_index_name
+        
         rag_enabled = saved_rag.get("enabled", global_rag_config.get("enabled", False))
+        if not rag_enabled:
+            rag_enabled = bool(self.session.session_settings.get("rag_settings", {}).get("enabled", False))
         if not rag_enabled:
             return ""
         
-        rag_index_name = saved_rag.get("index_name") or global_rag_config.get("default_index", "")
         if not rag_index_name:
             return ""
         
