@@ -10,6 +10,7 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        agents.yaml                                    │
 │  agents.{agent}.ssh_keys[] → SSH ключи (encrypted)                 │
+│  agents.{agent}.capabilities[] → capabilities агента                │
 │  Привязка ключей к агентам/ролям                                    │
 └─────────────────────────────────────────────────────────────────────┘
 
@@ -22,6 +23,12 @@
 │              data/projects/{project}/repos/                           │
 │  {repo_name}/ → клонированные репозитории                           │
 └─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Builtin Tools (LLM)                              │
+│  code_review, get_current_project, list_project_repos,             │
+│  get_repo_info, read_file, list_directory, grep_files             │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## SSH Keys
@@ -31,6 +38,9 @@
 ```yaml
 agents:
   developer:
+    capabilities:
+      - development
+      - code_review
     ssh_keys:
       - id: "key-1"
         name: "GitHub Deploy Key"
@@ -74,27 +84,135 @@ git_repos:
 ### API Endpoints
 
 ```
-GET    /projects/{project}/git-repos                    - список репозиториев
-POST   /projects/{project}/git-repos                    - добавить репозиторий
-DELETE /projects/{project}/git-repos/{repo}             - удалить репозиторий
-POST   /projects/{project}/git-repos/{repo}/fetch       - fetch + reindex
-GET    /projects/{project}/git-repos/{repo}/info        - информация о репозитории
+GET    /api/projects/{project}/git-repos                    - список репозиториев
+POST   /api/projects/{project}/git-repos                    - добавить репозиторий
+DELETE /api/projects/{project}/git-repos/{repo}             - удалить репозиторий
+POST   /api/projects/{project}/git-repos/{repo}/fetch       - fetch + reindex
+GET    /api/projects/{project}/git-repos/{repo}/info        - информация о репозитории
 ```
 
-### CLI Commands
+### UI
 
-```bash
-# Клонировать репозиторий
-python main.py git clone --project myproject --url https://github.com/org/repo.git --branch main
+Репозитории управляются через модальное окно в интерфейсе (кнопка "Репозитории" в branch-panel).
 
-# Список репозиториев
-python main.py git list --project myproject
+## Slash Commands
 
-# Fetch обновлений
-python main.py git fetch --project myproject --repo backend
+Slash команды работают как в streaming, так и в non-streaming режимах.
 
-# Удалить репозиторий
-python main.py git remove --project myproject --repo backend --delete-local
+### Доступные команды
+
+| Команда | Описание |
+|---------|---------|
+| `/help <вопрос>` | Ответить на вопрос о проекте с помощью RAG |
+| `/add_repo <url> [--name <name>] [--branch <branch>] [--agent <agent>]` | Добавить git репозиторий к проекту |
+| `/review <repo> [--target <target>] [--base <branch>]` | Провести code review |
+| `/commands` | Показать список доступных команд |
+
+### Примеры
+
+```
+/review aic-t11
+/review aic-t11 --target feature-branch --base main
+/add_repo https://github.com/org/repo.git --name my-repo --branch develop
+```
+
+## Builtin Tools для LLM
+
+LLM имеет доступ к следующим инструментам (tools) для выполнения различных операций.
+
+### code_review
+
+Perform code review на репозитории. Анализирует git diff и возвращает findings с severity, title, message и suggestions.
+
+```json
+{
+  "repo_name": "backend",
+  "project_name": "my-project",
+  "target": "HEAD",
+  "base": "main"
+}
+```
+
+### get_current_project
+
+Получить информацию о текущем проекте сессии.
+
+```json
+{}
+```
+
+Возвращает: название проекта, путь, количество репозиториев, список репозиториев.
+
+### list_project_repos
+
+Список всех git репозиториев проекта.
+
+```json
+{
+  "project_name": "my-project"
+}
+```
+
+### get_repo_info
+
+Детальная информация о репозитории.
+
+```json
+{
+  "project_name": "my-project",
+  "repo_name": "backend"
+}
+```
+
+### read_file
+
+Прочитать содержимое файла.
+
+```json
+{
+  "file_path": "/path/to/file.py",
+  "offset": 0,
+  "limit": 500
+}
+```
+
+### list_directory
+
+Список файлов в директории.
+
+```json
+{
+  "path": "/path/to/dir",
+  "recursive": false,
+  "max_depth": 3,
+  "include_hidden": false
+}
+```
+
+### grep_files
+
+Поиск текста в файлах (regex).
+
+```json
+{
+  "path": "/path/to/search",
+  "pattern": "function_name",
+  "file_glob": "*.py",
+  "case_sensitive": false,
+  "max_results": 100
+}
+```
+
+### manageembeddings
+
+Управление RAG индексами проекта.
+
+```json
+{
+  "action": "list|create|delete|enable|disable",
+  "project_name": "my-project",
+  "index_name": "index-name"
+}
 ```
 
 ## Code Review
@@ -207,26 +325,77 @@ mcp:
 - Файлы ключей (`*.key`, `*.salt`) хранятся в gitignore
 - Агенты имеют доступ только к своим ключам
 
+## Capabilities Агентов
+
+Агенты могут иметь capabilities, которые определяют их специализацию:
+
+```yaml
+agents:
+  developer:
+    capabilities:
+      - development
+      - code_review
+      - testing
+  qa:
+    capabilities:
+      - testing
+      - code_review
+```
+
+Code review автоматически выбирает агента с `code_review` capability.
+
 ## Файловая структура
 
 ```
 synth/
 ├── app/
 │   ├── ssh_key_manager.py       # Управление SSH ключами
-│   ├── git_clone_service.py     # Git операции (clone, fetch, diff)
-│   ├── git_repo_manager.py      # Реестр репозиториев
-│   └── handlers/
-│       └── code_review_handler.py  # Code review логика
-├── agents.yaml                  # Конфигурация агентов + SSH ключи
+│   ├── git_clone_service.py      # Git операции (clone, fetch, diff)
+│   ├── git_repo_manager.py       # Реестр репозиториев
+│   ├── handlers/
+│   │   ├── code_review_handler.py  # Code review логика
+│   │   └── chat_handler.py         # Slash commands
+│   ├── tools/
+│   │   ├── __init__.py
+│   │   ├── code_review.py          # code_review tool
+│   │   ├── project.py              # project tools
+│   │   └── filesystem.py           # filesystem tools
+│   └── mcp/
+│       └── processor.py            # Builtin tools integration
+├── agents.yaml                    # Конфигурация агентов + SSH ключи
 synth-mcp-git/
-├── server.py                    # MCP Git сервер
+├── server.py                      # MCP Git сервер
 └── requirements.txt
+synth-mcp-tools/
+└── server.py                      # MCP tools server
 synth-cli/
-└── main.py                      # CLI команды (git clone, git review)
+└── main.py                       # CLI команды (git clone, git review)
 data/
 └── projects/
     └── {project}/
-        ├── config.yaml          # git_repos: []
-        └── repos/              # Клонированные репозитории
+        ├── config.yaml            # git_repos: []
+        └── repos/                 # Клонированные репозитории
             └── {repo}/
+```
+
+## Конфигурация
+
+### synth/config.yaml
+
+```yaml
+mcp:
+  servers:
+    git:
+      type: stdio
+      command: "/path/to/venv/bin/python"
+      args: ["/path/to/synth-mcp-git/server.py"]
+      enabled_by_default: true
+      env:
+        ALLOWED_DIRS: "/home:/workspace:/projects"
+        GIT_REPO_PATH: "/home/eof/dev/aic/t11/data/projects"
+    synth-tools:
+      type: stdio
+      command: "/path/to/venv/bin/python"
+      args: ["/path/to/synth-mcp-tools/server.py"]
+      enabled_by_default: true
 ```

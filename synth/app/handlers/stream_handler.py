@@ -11,6 +11,7 @@ from app.project_updates import handle_project_updates
 
 
 TAGS_PATTERN = re.compile(r'@(\w+)')
+SLASH_COMMAND_PATTERN = re.compile(r'^/(\w+)(?:\s+(.*))?$', re.DOTALL)
 
 
 def parse_agent_tags(message: str) -> tuple[list[str], str, str]:
@@ -24,6 +25,23 @@ def parse_agent_tags(message: str) -> tuple[list[str], str, str]:
     clean_message = TAGS_PATTERN.sub('', message).strip()
     transformed_message = TAGS_PATTERN.sub(r'to: \1', message).strip()
     return tags, clean_message, transformed_message
+
+
+def parse_slash_command(message: str) -> tuple[str | None, str | None, str]:
+    """Parse slash command from message.
+    
+    Returns:
+        (command, args, original_message)
+        - command: command name (e.g., 'review', 'help')
+        - args: arguments after command
+        - original_message: original message unchanged
+    """
+    match = SLASH_COMMAND_PATTERN.match(message.strip())
+    if match:
+        command = match.group(1).lower()
+        args = match.group(2) or ""
+        return command, args, message
+    return None, None, message
 
 
 def split_message_by_tags(message: str, tags: list[str]) -> dict[str, str]:
@@ -145,6 +163,13 @@ class StreamHandler(BaseHandler):
             session.set_agent_role(agent_role)
         
         session.add_user_message(message, source=source or "web")
+        
+        command, args, original_message = parse_slash_command(message)
+        if command:
+            yield from self._handle_slash_command_stream(
+                session, command, args, provider_name, model
+            )
+            return
         
         debug_collector = self.create_debug_collector(session)
         
@@ -278,6 +303,47 @@ class StreamHandler(BaseHandler):
         
         if warnings:
             yield f"data: {json.dumps({'type': 'warnings', 'warnings': warnings})}\n\n"
+    
+    def _handle_slash_command_stream(
+        self,
+        session: Session,
+        command: str,
+        args: str,
+        provider_name: str | None,
+        model: str | None
+    ) -> Generator[str, None, None]:
+        """Handle slash commands (/review, /add_repo, /help, /commands) in streaming mode."""
+        import json
+        from app.handlers.chat_handler import ChatHandler
+        
+        chat_handler = ChatHandler()
+        result = chat_handler._handle_slash_command(
+            session, command, args, provider_name, model
+        )
+        
+        message = result.get("message", "")
+        session_id = result.get("session_id", session.session_id)
+        
+        disabled_indices = [i for i, m in enumerate(session.messages) if getattr(m, 'disabled', False)]
+        
+        chunk_size = 50
+        for i in range(0, len(message), chunk_size):
+            chunk = message[i:i + chunk_size]
+            yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
+        
+        yield f"data: {json.dumps({
+            'content': message,
+            'done': True,
+            'session_id': session_id,
+            'is_command_response': result.get('is_command_response', True),
+            'disabled_indices': disabled_indices,
+            'agent_role': None,
+            'project': session.status.get('project'),
+            'task_name': session.status.get('task_name', 'conversation'),
+            'state': session.status.get('state')
+        })}\n\n"
+        
+        yield "data: [DONE]\n\n"
     
     def _handle_simple_stream(
         self,

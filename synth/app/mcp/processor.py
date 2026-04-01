@@ -4,6 +4,15 @@ from typing import Any
 
 from app.mcp import MCPManager, tools_to_provider_format, MCPTool
 from app.logger import debug, warning
+from app.tools import (
+    builtin_code_review,
+    builtin_get_current_project,
+    builtin_list_project_repos,
+    builtin_get_repo_info,
+    builtin_read_file,
+    builtin_list_directory,
+    builtin_grep_files,
+)
 
 
 BUILTIN_TOOLS: list[MCPTool] = [
@@ -52,6 +61,154 @@ BUILTIN_TOOLS: list[MCPTool] = [
                 }
             },
             "required": ["action", "project_name"]
+        }
+    ),
+    MCPTool(
+        name="code_review",
+        description="Perform code review on a repository. Analyzes git diff and returns findings with severity, title, message, and suggestions. Use this when user asks to review code, changes, or a pull request.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_name": {
+                    "type": "string",
+                    "description": "Name of the repository to review (must be in current project)"
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Target branch/commit for comparison (default: HEAD)",
+                    "default": "HEAD"
+                },
+                "base": {
+                    "type": "string",
+                    "description": "Base branch for diff comparison (optional, leave empty for uncommitted changes)"
+                }
+            },
+            "required": ["repo_name"]
+        }
+    ),
+    MCPTool(
+        name="get_current_project",
+        description="Get information about the current project in the session. Returns project name, path, repositories count, and embeddings indexes.",
+        input_schema={
+            "type": "object",
+            "properties": {}
+        }
+    ),
+    MCPTool(
+        name="list_project_repos",
+        description="List all git repositories connected to a project. Returns repository names, URLs, local paths, and status.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "project_name": {
+                    "type": "string",
+                    "description": "Name of the project (optional if session has active project)"
+                }
+            }
+        }
+    ),
+    MCPTool(
+        name="get_repo_info",
+        description="Get detailed information about a specific repository in a project.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "project_name": {
+                    "type": "string",
+                    "description": "Name of the project"
+                },
+                "repo_name": {
+                    "type": "string",
+                    "description": "Name of the repository"
+                }
+            },
+            "required": ["repo_name"]
+        }
+    ),
+    MCPTool(
+        name="read_file",
+        description="Read contents of a file. Returns file content with optional offset and limit for large files.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path to the file to read"
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Line offset to start reading from (0-based, default: 0)",
+                    "default": 0
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of lines to read (default: 500)",
+                    "default": 500
+                }
+            },
+            "required": ["file_path"]
+        }
+    ),
+    MCPTool(
+        name="list_directory",
+        description="List files and directories at a given path. Can recurse into subdirectories with optional depth limit.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to the directory to list"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "Recurse into subdirectories (default: false)",
+                    "default": False
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Maximum recursion depth when recursive=true (default: 3)",
+                    "default": 3
+                },
+                "include_hidden": {
+                    "type": "boolean",
+                    "description": "Include hidden files (starting with .) (default: false)",
+                    "default": False
+                }
+            },
+            "required": ["path"]
+        }
+    ),
+    MCPTool(
+        name="grep_files",
+        description="Search for text pattern in files. Supports regex patterns and optional file glob filter.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to directory to search in"
+                },
+                "pattern": {
+                    "type": "string",
+                    "description": "Regex pattern to search for"
+                },
+                "file_glob": {
+                    "type": "string",
+                    "description": "File glob pattern to filter files (e.g., '*.py', '*.{js,ts}') (default: all files)",
+                    "default": "*"
+                },
+                "case_sensitive": {
+                    "type": "boolean",
+                    "description": "Case sensitive search (default: false)",
+                    "default": False
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of matching lines to return (default: 100)",
+                    "default": 100
+                }
+            },
+            "required": ["path", "pattern"]
         }
     ),
 ]
@@ -175,6 +332,20 @@ async def process_tool_calls(
 async def handle_builtin_tool(tool_name: str, args: dict[str, Any]) -> str:
     if tool_name == "manageembeddings":
         return await builtin_manage_embeddings(args)
+    elif tool_name == "code_review":
+        return await builtin_code_review(args)
+    elif tool_name == "get_current_project":
+        return await builtin_get_current_project(args)
+    elif tool_name == "list_project_repos":
+        return await builtin_list_project_repos(args)
+    elif tool_name == "get_repo_info":
+        return await builtin_get_repo_info(args)
+    elif tool_name == "read_file":
+        return await builtin_read_file(args)
+    elif tool_name == "list_directory":
+        return await builtin_list_directory(args)
+    elif tool_name == "grep_files":
+        return await builtin_grep_files(args)
     return f"Unknown built-in tool: {tool_name}"
 
 
