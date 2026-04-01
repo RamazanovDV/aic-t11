@@ -180,7 +180,7 @@ class ContextBuilder:
             elif saved_rag.get("index_name"):
                 indexes_to_use = [{"name": saved_rag["index_name"], "version": saved_rag.get("version")}]
         elif saved_rag.get("index_name"):
-            indexes_to_use = [{"Name": saved_rag["index_name"], "version": saved_rag.get("version")}]
+            indexes_to_use = [{"name": saved_rag["index_name"], "version": saved_rag.get("version")}]
         
         if not indexes_to_use:
             return ""
@@ -212,8 +212,9 @@ class ContextBuilder:
                         r["weight"] = r.get("similarity", 0)
                         r["index_name"] = index_name
                     all_results.extend(results)
-                except Exception:
-                    pass
+                except Exception as e:
+                    from app.logger import warning
+                    warning("RAG", f"Search failed for index '{index_name}': {e}")
             
             if not all_results:
                 return ""
