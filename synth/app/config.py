@@ -456,5 +456,38 @@ class Config:
             return None
         return self.get_context_file(context_file)
 
+    def get_agent_ssh_keys(self, agent_name: str) -> list[dict[str, Any]]:
+        agent = self.get_agent(agent_name)
+        if not agent:
+            return []
+        return agent.get("ssh_keys", [])
+
+    def agent_has_ssh_keys(self, agent_name: str) -> bool:
+        agent = self.get_agent(agent_name)
+        if not agent:
+            return False
+        return len(agent.get("ssh_keys", [])) > 0
+
+    def get_agent_capabilities(self, agent_name: str) -> list[str]:
+        agent = self.get_agent(agent_name)
+        if not agent:
+            return []
+        return agent.get("capabilities", [])
+
+    def agent_has_capability(self, agent_name: str, capability: str) -> bool:
+        return capability in self.get_agent_capabilities(agent_name)
+
+    def get_agents_by_capability(self, capability: str) -> list[str]:
+        result = []
+        for name, cfg in self.agents.items():
+            if cfg.get("enabled", True):
+                if capability in cfg.get("capabilities", []):
+                    result.append(name)
+        return result
+
+    def get_first_agent_with_capability(self, capability: str) -> str | None:
+        agents = self.get_agents_by_capability(capability)
+        return agents[0] if agents else None
+
 
 config = Config()

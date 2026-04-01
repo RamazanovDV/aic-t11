@@ -283,6 +283,167 @@ class SlashCommandHandler:
         return combined[:top_k]
     
     @staticmethod
+    def handle_add_repo(
+        session: "Session",
+        args: str,
+        provider_name: str | None,
+        model: str | None
+    ) -> dict[str, Any]:
+        """Handle /add_repo command to add a git repository."""
+        from app.config import config
+        from app.project_manager import project_manager
+        from app.git_repo_manager import git_repo_manager
+        
+        project_name = session.status.get("project")
+        if not project_name:
+            return {
+                "message": "Проект не выбран. Сначала выберите проект в статусе задачи (поле 'project').",
+                "session_id": session.session_id,
+                "is_command_response": True
+            }
+        
+        if not project_manager.project_exists(project_name):
+            return {
+                "message": f"Проект '{project_name}' не найден.",
+                "session_id": session.session_id,
+                "is_command_response": True
+            }
+        
+        import shlex
+        parts = shlex.split(args) if args else []
+        
+        if not parts:
+            return {
+                "message": "Использование: /add_repo <url> [--name <name>] [--branch <branch>] [--agent <agent>]",
+                "session_id": session.session_id,
+                "is_command_response": True
+            }
+        
+        url = parts[0]
+        name = None
+        branch = "main"
+        agent = None
+        
+        i = 1
+        while i < len(parts):
+            if parts[i] == "--name" and i + 1 < len(parts):
+                name = parts[i + 1]
+                i += 2
+            elif parts[i] == "--branch" and i + 1 < len(parts):
+                branch = parts[i + 1]
+                i += 2
+            elif parts[i] == "--agent" and i + 1 < len(parts):
+                agent = parts[i + 1]
+                i += 2
+            else:
+                i += 1
+        
+        repo_type = "https"
+        if url.startswith("git@") or url.startswith("ssh://"):
+            repo_type = "ssh"
+        
+        success, message, repo_info = git_repo_manager.add_repo(
+            project_name=project_name,
+            url=url,
+            name=name,
+            repo_type=repo_type,
+            branch=branch,
+            required_agent=agent,
+            auto_index=True
+        )
+        
+        if success:
+            return {
+                "message": f"Репозиторий успешно добавлен: {repo_info.name}\nURL: {repo_info.url}\nBranch: {repo_info.branch}\nPath: {repo_info.local_path}",
+                "session_id": session.session_id,
+                "is_command_response": True
+            }
+        else:
+            return {
+                "message": f"Ошибка добавления репозитория: {message}",
+                "session_id": session.session_id,
+                "is_command_response": True
+            }
+    
+    @staticmethod
+    def handle_review(
+        session: "Session",
+        args: str,
+        provider_name: str | None,
+        model: str | None
+    ) -> dict[str, Any]:
+        """Handle /review command to perform code review."""
+        from app.handlers.code_review_handler import code_review_handler
+        
+        project_name = session.status.get("project")
+        if not project_name:
+            return {
+                "message": "Проект не выбран. Сначала выберите проект в статусе задачи (поле 'project').",
+                "session_id": session.session_id,
+                "is_command_response": True
+            }
+        
+        parts = args.split() if args else []
+        if len(parts) < 1:
+            return {
+                "message": "Использование: /review <repo> [target] [--base <branch>]",
+                "session_id": session.session_id,
+                "is_command_response": True
+            }
+        
+        repo_name = parts[0]
+        target = parts[1] if len(parts) > 1 else "HEAD"
+        base = None
+        
+        i = 2
+        while i < len(parts):
+            if parts[i] == "--base" and i + 1 < len(parts):
+                base = parts[i + 1]
+                i += 2
+            else:
+                i += 1
+        
+        try:
+            review_result = code_review_handler.review(
+                project=project_name,
+                repo=repo_name,
+                target=target,
+                base=base,
+                include_rag=True
+            )
+            
+            message_parts = [f"# Code Review: {repo_name}"]
+            message_parts.append(f"\n**Target:** {target}")
+            if base:
+                message_parts.append(f"**Base:** {base}")
+            message_parts.append(f"\n**Project:** {project_name}")
+            message_parts.append(f"\n---\n")
+            
+            if review_result.findings:
+                message_parts.append(f"\n## Findings ({len(review_result.findings)})\n")
+                for i, finding in enumerate(review_result.findings, 1):
+                    message_parts.append(f"\n### {i}. [{finding.severity.upper()}] {finding.title}")
+                    message_parts.append(f"\n{finding.message}")
+                    if finding.suggestion:
+                        message_parts.append(f"\n**Suggestion:** {finding.suggestion}")
+            
+            if review_result.detailed:
+                message_parts.append(f"\n\n## Details\n{review_result.detailed[:2000]}")
+            
+            return {
+                "message": "".join(message_parts),
+                "session_id": session.session_id,
+                "is_command_response": True,
+                "review_id": review_result.review_id
+            }
+        except Exception as e:
+            return {
+                "message": f"Ошибка при выполнении code review: {str(e)}",
+                "session_id": session.session_id,
+                "is_command_response": True
+            }
+    
+    @staticmethod
     def get_available_commands() -> list[dict[str, str]]:
         """Get list of available slash commands."""
         return [
@@ -290,6 +451,16 @@ class SlashCommandHandler:
                 "command": "help",
                 "description": "Ответить на вопрос о проекте с помощью RAG",
                 "usage": "/help <вопрос>"
+            },
+            {
+                "command": "add_repo",
+                "description": "Добавить git репозиторий к проекту",
+                "usage": "/add_repo <url> [--name <name>] [--branch <branch>] [--agent <agent>]"
+            },
+            {
+                "command": "review",
+                "description": "Провести code review (автоматически выбирается агент с capability code_review)",
+                "usage": "/review <repo> <target> [--base <branch>]"
             },
         ]
 
@@ -400,6 +571,12 @@ class ChatHandler(BaseHandler):
         
         if command == "help":
             return SlashCommandHandler.handle_help(session, args, provider_name, model)
+        
+        elif command == "add_repo":
+            return SlashCommandHandler.handle_add_repo(session, args, provider_name, model)
+        
+        elif command == "review":
+            return SlashCommandHandler.handle_review(session, args, provider_name, model)
         
         elif command == "commands":
             commands = SlashCommandHandler.get_available_commands()

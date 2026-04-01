@@ -1011,6 +1011,59 @@ def delete_context_file(filename: str):
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/admin/agents", methods=["GET"])
+def admin_agents_list():
+    url = f"{ui_config.backend_url}/admin/agents"
+    headers = {"X-API-Key": ui_config.backend_api_key}
+    
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/agents/<agent_name>/ssh-keys", methods=["GET"])
+def admin_agent_ssh_keys(agent_name: str):
+    url = f"{ui_config.backend_url}/admin/agents/{agent_name}/ssh-keys"
+    headers = {"X-API-Key": ui_config.backend_api_key}
+    
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/agents/<agent_name>/ssh-keys", methods=["POST"])
+def admin_agent_ssh_keys_add(agent_name: str):
+    url = f"{ui_config.backend_url}/admin/agents/{agent_name}/ssh-keys"
+    headers = {"X-API-Key": ui_config.backend_api_key, "Content-Type": "application/json"}
+    data = request.get_json()
+    
+    try:
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/admin/agents/<agent_name>/ssh-keys/<key_id>", methods=["DELETE"])
+def admin_agent_ssh_keys_delete(agent_name: str, key_id: str):
+    url = f"{ui_config.backend_url}/admin/agents/{agent_name}/ssh-keys/{key_id}"
+    headers = {"X-API-Key": ui_config.backend_api_key}
+    
+    try:
+        response = requests.delete(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 @ui_bp.route("/api/admin/embeddings", methods=["GET"])
 def admin_embeddings_list():
     url = f"{ui_config.backend_url}/admin/embeddings"
@@ -1542,6 +1595,83 @@ def embeddings_by_name(name: str):
 
     try:
         response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/git-repos", methods=["GET"])
+def list_git_repos(project_name: str):
+    """List git repositories for a project - proxy to backend."""
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/git-repos"
+    headers = {"X-API-Key": ui_config.backend_api_key}
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/git-repos", methods=["POST"])
+def add_git_repo(project_name: str):
+    """Add a git repository to a project - proxy to backend."""
+    data = request.get_json() or {}
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/git-repos"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=30)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/git-repos/<repo_name>", methods=["DELETE"])
+def delete_git_repo(project_name: str, repo_name: str):
+    """Delete a git repository from a project - proxy to backend."""
+    data = request.get_json() or {}
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/git-repos/{repo_name}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.delete(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/git-repos/<repo_name>/fetch", methods=["POST"])
+def fetch_git_repo(project_name: str, repo_name: str):
+    """Fetch updates from a git repository - proxy to backend."""
+    data = request.get_json() or {}
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/git-repos/{repo_name}/fetch"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=30)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/git-repos/<repo_name>/info", methods=["GET"])
+def git_repo_info(project_name: str, repo_name: str):
+    """Get info about a git repository - proxy to backend."""
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/git-repos/{repo_name}/info"
+    headers = {"X-API-Key": ui_config.backend_api_key}
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:

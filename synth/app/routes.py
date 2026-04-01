@@ -2,6 +2,7 @@ import json
 import re
 import uuid
 import asyncio
+from dataclasses import asdict
 from datetime import datetime
 
 import requests
@@ -945,6 +946,154 @@ def add_project_embeddings(project_name):
     project_manager.save_embeddings_indexes(project_name, indexes)
     
     return jsonify({"message": f"Index '{index_name}' added to project '{project_name}'"})
+
+
+@api_bp.route("/projects/<project_name>/git-repos", methods=["GET"])
+@require_user
+def list_git_repos(project_name):
+    """List git repositories in a project."""
+    from app.git_repo_manager import git_repo_manager
+    from app.project_manager import project_manager
+    
+    if not project_manager.project_exists(project_name):
+        return jsonify({"error": "Project not found"}), 404
+    
+    repos = git_repo_manager.list_repos(project_name)
+    return jsonify({
+        "project": project_name,
+        "repos": [asdict(r) for r in repos]
+    })
+
+
+@api_bp.route("/projects/<project_name>/git-repos", methods=["POST"])
+@require_user
+def add_git_repo(project_name):
+    """Add a git repository to a project."""
+    from app.git_repo_manager import git_repo_manager
+    from app.project_manager import project_manager
+    
+    if not project_manager.project_exists(project_name):
+        return jsonify({"error": "Project not found"}), 404
+    
+    data = request.get_json() or {}
+    url = data.get("url")
+    name = data.get("name")
+    repo_type = data.get("type", "https")
+    branch = data.get("branch", "main")
+    required_agent = data.get("required_agent")
+    ssh_key_id = data.get("ssh_key_id")
+    auto_index = data.get("auto_index", True)
+    
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+    
+    success, message, repo_info = git_repo_manager.add_repo(
+        project_name=project_name,
+        url=url,
+        name=name,
+        repo_type=repo_type,
+        branch=branch,
+        required_agent=required_agent,
+        ssh_key_id=ssh_key_id,
+        auto_index=auto_index
+    )
+    
+    if success:
+        return jsonify({
+            "message": message,
+            "repo": asdict(repo_info) if repo_info else None
+        })
+    else:
+        return jsonify({"error": message}), 400
+
+
+@api_bp.route("/projects/<project_name>/git-repos/<repo_name>", methods=["DELETE"])
+@require_user
+def remove_git_repo(project_name, repo_name):
+    """Remove a git repository from a project."""
+    from app.git_repo_manager import git_repo_manager
+    
+    data = request.get_json() or {}
+    delete_local = data.get("delete_local", False)
+    
+    success, message = git_repo_manager.remove_repo(
+        project_name, repo_name, delete_local=delete_local
+    )
+    
+    if success:
+        return jsonify({"message": message})
+    else:
+        return jsonify({"error": message}), 400
+
+
+@api_bp.route("/projects/<project_name>/git-repos/<repo_name>/fetch", methods=["POST"])
+@require_user
+def fetch_git_repo(project_name, repo_name):
+    """Fetch updates from a git repository."""
+    from app.git_repo_manager import git_repo_manager
+    
+    data = request.get_json() or {}
+    reindex = data.get("reindex", True)
+    
+    success, message = git_repo_manager.fetch_repo(project_name, repo_name, reindex=reindex)
+    
+    if success:
+        return jsonify({"message": message})
+    else:
+        return jsonify({"error": message}), 400
+
+
+@api_bp.route("/projects/<project_name>/git-repos/<repo_name>/info", methods=["GET"])
+@require_user
+def get_git_repo_info(project_name, repo_name):
+    """Get git repository info."""
+    from app.git_repo_manager import git_repo_manager
+    
+    success, message, repo_info = git_repo_manager.get_repo_info(project_name, repo_name)
+    
+    if success:
+        return jsonify({
+            "message": message,
+            "repo": repo_info
+        })
+    else:
+        return jsonify({"error": message}), 404
+
+
+@api_bp.route("/api/git/review", methods=["POST"])
+@require_user
+def git_review():
+    """Perform code review on a git diff."""
+    from app.handlers.code_review_handler import code_review_handler
+    
+    data = request.get_json() or {}
+    project = data.get("project")
+    repo = data.get("repo")
+    target = data.get("target", "HEAD")
+    base = data.get("base")
+    include_rag = data.get("include_rag", True)
+    commit = data.get("commit")
+    
+    if not project or not repo:
+        return jsonify({"error": "project and repo are required"}), 400
+    
+    if commit:
+        review = code_review_handler.review_commit(
+            project=project,
+            repo=repo,
+            commit=commit,
+            include_rag=include_rag
+        )
+    else:
+        review = code_review_handler.review(
+            project=project,
+            repo=repo,
+            target=target,
+            base=base,
+            include_rag=include_rag
+        )
+    
+    return jsonify(code_review_handler.get_structured_output(review))
 
 
 @api_bp.route("/chat", methods=["POST"])
@@ -2374,6 +2523,8 @@ def get_agents():
             "is_overridden": is_overridden,
             "enabled": cfg.get("enabled", True),
             "default": cfg.get("default", False),
+            "capabilities": cfg.get("capabilities", []),
+            "ssh_keys_count": len(cfg.get("ssh_keys", [])),
         }
     return jsonify({"agents": result})
 
@@ -2424,6 +2575,8 @@ def get_agent(agent_name: str):
         "is_overridden": is_overridden,
         "enabled": agent.get("enabled", True),
         "default": agent.get("default", False),
+        "capabilities": agent.get("capabilities", []),
+        "ssh_keys_count": len(agent.get("ssh_keys", [])),
     })
 
 
@@ -2454,6 +2607,126 @@ def set_agent_enabled(agent_name: str):
         config.disable_agent(agent_name)
 
     return jsonify({"status": "ok", "name": agent_name, "enabled": enabled})
+
+
+@admin_bp.route("/agents/<agent_name>/ssh-keys", methods=["GET"])
+@require_user
+def get_agent_ssh_keys(agent_name: str):
+    """Get SSH keys for an agent."""
+    from app.ssh_key_manager import ssh_key_manager
+    
+    agent = config.get_agent(agent_name)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    keys = ssh_key_manager.list_keys_for_agent(agent_name)
+    return jsonify({
+        "agent": agent_name,
+        "ssh_keys": [
+            {
+                "id": k.id,
+                "name": k.name,
+                "type": k.key_type,
+                "created_at": k.created_at
+            }
+            for k in keys
+        ]
+    })
+
+
+@admin_bp.route("/agents/<agent_name>/ssh-keys", methods=["POST"])
+@require_user
+def add_agent_ssh_key(agent_name: str):
+    """Add an SSH key to an agent."""
+    from app.ssh_key_manager import ssh_key_manager, SSHKey
+    
+    agent = config.get_agent(agent_name)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body is required"}), 400
+    
+    name = data.get("name")
+    key_type = data.get("type", "user")
+    private_key = data.get("private_key")
+    passphrase = data.get("passphrase")
+    
+    if not name or not private_key:
+        return jsonify({"error": "name and private_key are required"}), 400
+    
+    import uuid
+    key_id = str(uuid.uuid4())[:8]
+    
+    key = SSHKey(
+        id=key_id,
+        name=name,
+        key_type=key_type,
+        private_key=private_key,
+        passphrase=passphrase
+    )
+    
+    if ssh_key_manager.add_key_to_agent(agent_name, key):
+        return jsonify({
+            "message": "SSH key added",
+            "ssh_key": {
+                "id": key_id,
+                "name": name,
+                "type": key_type
+            }
+        })
+    else:
+        return jsonify({"error": "Failed to add SSH key"}), 500
+
+
+@admin_bp.route("/agents/<agent_name>/ssh-keys/<key_id>", methods=["DELETE"])
+@require_user
+def remove_agent_ssh_key(agent_name: str, key_id: str):
+    """Remove an SSH key from an agent."""
+    from app.ssh_key_manager import ssh_key_manager
+    
+    agent = config.get_agent(agent_name)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    if ssh_key_manager.remove_key_from_agent(agent_name, key_id):
+        return jsonify({"message": "SSH key removed"})
+    else:
+        return jsonify({"error": "SSH key not found"}), 404
+
+
+@admin_bp.route("/agents/<agent_name>/ssh-keys/<key_id>", methods=["PUT"])
+@require_user
+def update_agent_ssh_key(agent_name: str, key_id: str):
+    """Update an SSH key for an agent."""
+    from app.ssh_key_manager import ssh_key_manager, SSHKey
+    
+    agent = config.get_agent(agent_name)
+    if not agent:
+        return jsonify({"error": "Agent not found"}), 404
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body is required"}), 400
+    
+    existing_key = ssh_key_manager.get_key_for_agent(agent_name, key_id)
+    if not existing_key:
+        return jsonify({"error": "SSH key not found"}), 404
+    
+    updated_key = SSHKey(
+        id=key_id,
+        name=data.get("name", existing_key.name),
+        key_type=data.get("type", existing_key.key_type),
+        private_key=data.get("private_key", existing_key.private_key),
+        passphrase=data.get("passphrase", existing_key.passphrase),
+        created_at=existing_key.created_at
+    )
+    
+    if ssh_key_manager.update_key_in_agent(agent_name, updated_key):
+        return jsonify({"message": "SSH key updated"})
+    else:
+        return jsonify({"error": "Failed to update SSH key"}), 500
 
 
 @api_bp.route("/embeddings/list", methods=["GET"])

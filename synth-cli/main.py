@@ -742,5 +742,207 @@ def embeddings_rate(index_id, thumbs_up, thumbs_down, username, password):
 cli.add_command(embeddings)
 
 
+@click.group()
+def git():
+    """Git repository management"""
+    pass
+
+
+@git.command("clone")
+@click.option("--project", required=True, help="Project name")
+@click.option("--url", required=True, help="Repository URL")
+@click.option("--name", help="Repository name (default: derived from URL)")
+@click.option("--type", "repo_type", default="https", help="Repository type (https/ssh)")
+@click.option("--branch", default="main", help="Branch to checkout")
+@click.option("--agent", help="Agent name for SSH key")
+@click.option("--auto-index/--no-auto-index", default=True, help="Auto-index after clone")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def git_clone(project, url, name, repo_type, branch, agent, auto_index, username, password):
+    """Clone a git repository"""
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+    headers = get_auth_headers()
+    headers["Content-Type"] = "application/json"
+
+    payload = {
+        "url": url,
+        "name": name,
+        "type": repo_type,
+        "branch": branch,
+        "required_agent": agent,
+        "auto_index": auto_index
+    }
+
+    url_api = f"{config.backend_url}/projects/{project}/git-repos"
+    try:
+        response = requests.post(url_api, headers=headers, json=payload, cookies=cookies, timeout=120)
+        response.raise_for_status()
+        result = response.json()
+        click.echo(click.style(f"Repository cloned: {result.get('repo', {}).get('name')}", fg="green"))
+        click.echo(f"Path: {result.get('repo', {}).get('local_path')}")
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+@git.command("list")
+@click.option("--project", required=True, help="Project name")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def git_list(project, username, password):
+    """List git repositories in a project"""
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+    headers = get_auth_headers()
+
+    url_api = f"{config.backend_url}/projects/{project}/git-repos"
+    try:
+        response = requests.get(url_api, headers=headers, cookies=cookies, timeout=10)
+        response.raise_for_status()
+        result = response.json()
+        repos = result.get("repos", [])
+
+        if not repos:
+            click.echo("No repositories found")
+            return
+
+        click.echo(f"Repositories in {project}:\n")
+        for repo in repos:
+            click.echo(f"  {repo.get('name')}")
+            click.echo(f"    URL: {repo.get('url')}")
+            click.echo(f"    Branch: {repo.get('branch')}")
+            click.echo(f"    Status: {repo.get('status', 'unknown')}")
+            click.echo(f"    Last fetch: {repo.get('last_fetch', 'never')}")
+            click.echo()
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+@git.command("fetch")
+@click.option("--project", required=True, help="Project name")
+@click.option("--repo", required=True, help="Repository name")
+@click.option("--reindex/--no-reindex", default=True, help="Reindex after fetch")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def git_fetch(project, repo, reindex, username, password):
+    """Fetch updates from a repository"""
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+    headers = get_auth_headers()
+    headers["Content-Type"] = "application/json"
+
+    payload = {"reindex": reindex}
+
+    url_api = f"{config.backend_url}/projects/{project}/git-repos/{repo}/fetch"
+    try:
+        response = requests.post(url_api, headers=headers, json=payload, cookies=cookies, timeout=60)
+        response.raise_for_status()
+        click.echo(click.style(f"Fetch successful for {repo}", fg="green"))
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+@git.command("review")
+@click.option("--project", required=True, help="Project name")
+@click.option("--repo", required=True, help="Repository name")
+@click.option("--target", default="HEAD", help="Target branch/commit")
+@click.option("--base", help="Base branch/commit for diff")
+@click.option("--commit", help="Specific commit to review")
+@click.option("--include-rag/--no-rag", default=True, help="Include RAG context")
+@click.option("--format", "output_format", type=click.Choice(["json", "text"]), default="text", help="Output format")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def git_review(project, repo, target, base, commit, include_rag, output_format, username, password):
+    """Perform code review"""
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+    headers = get_auth_headers()
+    headers["Content-Type"] = "application/json"
+
+    payload = {
+        "project": project,
+        "repo": repo,
+        "target": target,
+        "base": base,
+        "include_rag": include_rag
+    }
+    if commit:
+        payload["commit"] = commit
+
+    url_api = f"{config.backend_url}/api/git/review"
+    try:
+        response = requests.post(url_api, headers=headers, json=payload, cookies=cookies, timeout=120)
+        response.raise_for_status()
+        result = response.json()
+
+        if output_format == "json":
+            click.echo(json.dumps(result, indent=2))
+        else:
+            click.echo(f"Review ID: {result.get('review_id')}")
+            click.echo(f"Summary: {result.get('summary')}")
+            click.echo()
+            findings = result.get("findings", [])
+            if findings:
+                click.echo(f"Findings ({len(findings)}):\n")
+                for f in findings:
+                    severity_color = "red" if f.get("severity") == "critical" else "yellow" if f.get("severity") == "major" else "white"
+                    click.echo(f"  [{f.get('severity').upper()}] {f.get('file')}:{f.get('line')}")
+                    click.echo(f"    {f.get('message')}")
+                    if f.get('suggestion'):
+                        click.echo(f"    Suggestion: {f.get('suggestion')}")
+                    click.echo()
+            else:
+                click.echo("No findings")
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+@git.command("remove")
+@click.option("--project", required=True, help="Project name")
+@click.option("--repo", required=True, help="Repository name")
+@click.option("--delete-local/--no-delete-local", default=False, help="Delete local copy")
+@click.option("--username", prompt=True, help="Username for authentication")
+@click.option("--password", prompt=True, hide_input=True, help="Password for authentication")
+def git_remove(project, repo, delete_local, username, password):
+    """Remove a git repository"""
+    login_result = login(username, password)
+    if not login_result.get("success"):
+        click.echo(click.style(f"Login failed: {login_result.get('error')}", fg="red"), err=True)
+        return
+
+    cookies = login_result.get("cookies", {})
+    headers = get_auth_headers()
+    headers["Content-Type"] = "application/json"
+
+    payload = {"delete_local": delete_local}
+
+    url_api = f"{config.backend_url}/projects/{project}/git-repos/{repo}"
+    try:
+        response = requests.delete(url_api, headers=headers, json=payload, cookies=cookies, timeout=30)
+        response.raise_for_status()
+        click.echo(click.style(f"Repository {repo} removed", fg="green"))
+    except requests.RequestException as e:
+        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+
+
+cli.add_command(git)
+
+
 if __name__ == "__main__":
     main()

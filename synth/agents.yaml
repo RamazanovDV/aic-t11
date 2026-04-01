@@ -1,5 +1,8 @@
 agents:
   analyst:
+    capabilities:
+    - architecture
+    - mentoring
     context_file: ROLE_ANALYST.md
     display_name: Аналитик
     enabled: true
@@ -9,6 +12,7 @@ agents:
     top_k: null
     top_p: 0.95
   assistant:
+    capabilities: []
     context_file: ROLE_ASSISTANT.md
     default: true
     display_name: Ассистент
@@ -19,6 +23,9 @@ agents:
     top_k: null
     top_p: 0.9
   developer:
+    capabilities:
+    - development
+    - code_review
     context_file: ROLE_DEVELOPER.md
     display_name: Разработчик
     enabled: true
@@ -28,6 +35,10 @@ agents:
     top_k: null
     top_p: 0.9
   devops:
+    capabilities:
+    - devops
+    - monitoring
+    - architecture
     context_file: ROLE_DEVOPS.md
     display_name: DevOps-инженер
     enabled: true
@@ -37,6 +48,7 @@ agents:
     top_k: null
     top_p: 0.9
   friend:
+    capabilities: []
     context_file: DRUNKEN_FRIEND.md
     display_name: Дружище
     enabled: true
@@ -46,15 +58,30 @@ agents:
     top_k: null
     top_p: 0.95
   lead:
+    capabilities:
+    - development
+    - code_review
+    - architecture
+    - mentoring
     context_file: ROLE_LEAD.md
     display_name: Тимлид
     enabled: true
     model: ''
     provider: ''
+    ssh_keys:
+    - created_at: '2026-04-01T04:58:14.948988Z'
+      id: 81f56efd
+      name: GitHub
+      passphrase: null
+      private_key: encrypted:Z0FBQUFBQnB6S1htUTl3QWIybnJIbkE3OEVYOFpMeXctTVhkbGk4LVpVekVERk1mTDQ2ajc2Z2NOWUdKbXN4aVlnUVI1NXdGQnV6dlg3Y2RlN3J5VUNlSkJvVGt3cWVPbk8wMmlxN1VqNm5BUGRYSElieE5HY1BwSm1ZYkhHazY3MnAwX3NFMlFSWGhWbDhhaUI5N3p6NnI4VHlJYnh2VWtYT0VBNmZ6WG5EMzZhOU5zLXlaYmFlczZJS200YUNqSUJld3ZYczFYOUk4UVpPdW1ZSlotTElrbzFBaDU4dTRNeFVzQWczQXdIS1l6eWJIOVVnbDZlTXdwWjlKdWtaTVM4Rmd6MkRJUW1MTUd2VnJSWEtMYTh5ZWs3RlVsbnJfV2QxNm9zdm9vREtrcUpqS3d6OXB3YldpTC0yQjZBSkZHMzU5SURCRDJTOVFhenNvRy1QVThBN19FUVhaX0N0djZMVnRaVzRYRGNVZTVGTS1jdnliX3VTc3JhMGRXVF9obHBMZFBOMkJtMUVEWE8zVnhNV0d0Q0gtY3l1c3ZTMHFHZzlHa01tZEU3S3hGY3A5WFZiSGdrZ08tS1NnaWUxZG1MRHU4QWc0bXpoU0F4RHVtamxkeFN4UFg1Ynpqd1hhbWthWUtyZzdVOFNPdEJCdEkyZHcwNnFyVTQ5Qy1IZ3lRYlhJMTBadE5QUmRiZ0ZmS3RqMV9EUW96U2JjdlZMRmdybE8zd2NHT3Y4aFlGSC1mZUV4VkdDdFhadXloUGFaYjlFQjdBNUpGWEFQc1I5cjN4UmJKd0VjSUx2bmV3MWVuUT09
+      type: deploy
     temperature: 0.6
     top_k: null
     top_p: 0.95
   pm:
+    capabilities:
+    - mentoring
+    - architecture
     context_file: ROLE_PM.md
     display_name: Продакт менеджер
     enabled: true
@@ -64,6 +91,9 @@ agents:
     top_k: null
     top_p: 0.95
   qa:
+    capabilities:
+    - testing
+    - test_design
     context_file: ROLE_QA.md
     display_name: Тестировщик
     enabled: true
@@ -73,6 +103,9 @@ agents:
     top_k: null
     top_p: 0.9
   security_auditor:
+    capabilities:
+    - code_review
+    - testing
     context_file: ROLE_SECURITY_AUDITOR.md
     display_name: Аудитор ИБ
     enabled: true

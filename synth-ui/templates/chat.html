@@ -434,6 +434,57 @@
     </div>
 </div>
 
+<div id="repos-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 700px;">
+        <div class="modal-header">
+            <h3>📦 Репозитории проекта: <span id="repos-project-name"></span></h3>
+            <span class="modal-close" onclick="closeReposModal()">&times;</span>
+        </div>
+        
+        <div id="repos-list" class="repos-list">
+            <div class="loading">Загрузка...</div>
+        </div>
+        
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeReposModal()">Закрыть</button>
+            <button class="btn btn-secondary" onclick="showAddRepoForm()">+ Добавить репозиторий</button>
+        </div>
+        
+        <div id="add-repo-form" class="add-repo-form" style="display: none;">
+            <h4>Добавить репозиторий</h4>
+            <div class="form-group">
+                <label for="repo-url">URL</label>
+                <input type="text" id="repo-url" class="form-input" placeholder="https://github.com/org/repo.git">
+            </div>
+            <div class="form-group">
+                <label for="repo-name">Имя <span class="help-text">(опционально)</span></label>
+                <input type="text" id="repo-name" class="form-input" placeholder="backend">
+            </div>
+            <div class="form-group">
+                <label for="repo-branch">Ветка</label>
+                <input type="text" id="repo-branch" class="form-input" value="main">
+            </div>
+            <div class="form-group">
+                <label for="repo-type">Тип</label>
+                <select id="repo-type" class="form-input" onchange="toggleRepoAgentSelect()">
+                    <option value="https">HTTPS</option>
+                    <option value="ssh">SSH</option>
+                </select>
+            </div>
+            <div class="form-group" id="repo-agent-group" style="display: none;">
+                <label for="repo-agent">Агент <span class="help-text">(для SSH)</span></label>
+                <select id="repo-agent" class="form-input">
+                    <option value="">-- Выберите агента --</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideAddRepoForm()">Отмена</button>
+                <button class="btn btn-primary" onclick="addProjectRepo()">Добавить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     const PANEL_MODE_KEY = 't6_panel_mode';
     const PANEL_0_SESSION_KEY = 't6_panel_0_session';
@@ -600,6 +651,7 @@
                         <button class="btn btn-icon" onclick="openMcpModal(${index})" title="MCP Серверы">🔌</button>
                         <button class="btn btn-icon" onclick="openRagModal(${index})" title="RAG Поиск">🔍</button>
                         <button class="btn btn-icon" onclick="openSchedulesModal(${index})" title="Расписание">⏰</button>
+                        <button class="btn btn-icon" onclick="openReposModal(${index})" title="Репозитории">📦</button>
                     </div>
                     <button class="btn btn-secondary btn-small" onclick="resetPanelChat(${index})" title="Сбросить чат">🗑️</button>
                 </div>
@@ -4363,6 +4415,255 @@
         } catch (e) {
             alert('Ошибка: ' + e.message);
         }
+    }
+
+    let currentReposProject = null;
+
+    async function openReposModal(panelIndex) {
+        const projectName = getProjectFromPanel(panelIndex);
+        if (!projectName) {
+            alert('Сначала выберите проект');
+            return;
+        }
+        
+        currentReposProject = projectName;
+        document.getElementById('repos-project-name').textContent = projectName;
+        document.getElementById('repos-list').innerHTML = '<div class="loading">Загрузка...</div>';
+        document.getElementById('add-repo-form').style.display = 'none';
+        document.getElementById('repos-modal').style.display = 'flex';
+        
+        await loadProjectRepos(projectName);
+    }
+
+    function closeReposModal() {
+        document.getElementById('repos-modal').style.display = 'none';
+        currentReposProject = null;
+    }
+
+    async function loadProjectRepos(projectName) {
+        const listEl = document.getElementById('repos-list');
+        
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(projectName)}/git-repos`);
+            const data = await response.json();
+            renderReposList(data.repos || []);
+        } catch (e) {
+            listEl.innerHTML = '<p class="error">Ошибка загрузки: ' + e.message + '</p>';
+        }
+    }
+
+    function renderReposList(repos) {
+        const listEl = document.getElementById('repos-list');
+        
+        if (repos.length === 0) {
+            listEl.innerHTML = '<p class="help-text">Нет репозиториев. Добавьте первый.</p>';
+            return;
+        }
+        
+        listEl.innerHTML = repos.map(repo => `
+            <div class="repo-item" style="border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                    <span style="font-size: 1.2rem;">🔀</span>
+                    <span style="font-weight: 600; flex: 1;">${escapeHtml(repo.name)}</span>
+                    <span class="badge">${escapeHtml(repo.branch)}</span>
+                    <span class="badge ${repo.status === 'clean' ? 'badge-success' : 'badge-warning'}">${repo.status || 'unknown'}</span>
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+                    ${escapeHtml(repo.url)}
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                    Last fetch: ${repo.last_fetch ? new Date(repo.last_fetch).toLocaleString() : 'never'}
+                </div>
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <button class="btn btn-small" onclick="reviewRepo('${escapeAttr(currentReposProject)}', '${escapeAttr(repo.name)}')">Review</button>
+                    <button class="btn btn-small" onclick="fetchProjectRepo('${escapeAttr(currentReposProject)}', '${escapeAttr(repo.name)}')">↻ Fetch</button>
+                    <button class="btn btn-small btn-danger-outline" onclick="deleteProjectRepo('${escapeAttr(currentReposProject)}', '${escapeAttr(repo.name)}')">Удалить</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function showAddRepoForm() {
+        document.getElementById('add-repo-form').style.display = 'block';
+        document.getElementById('repo-url').value = '';
+        document.getElementById('repo-name').value = '';
+        document.getElementById('repo-branch').value = 'main';
+        document.getElementById('repo-type').value = 'https';
+        document.getElementById('repo-agent-group').style.display = 'none';
+        loadAgentsForRepoSelect();
+    }
+
+    function hideAddRepoForm() {
+        document.getElementById('add-repo-form').style.display = 'none';
+    }
+
+    function toggleRepoAgentSelect() {
+        const repoType = document.getElementById('repo-type').value;
+        document.getElementById('repo-agent-group').style.display = repoType === 'ssh' ? 'block' : 'none';
+    }
+
+    async function loadAgentsForRepoSelect() {
+        const select = document.getElementById('repo-agent');
+        if (!select) {
+            console.error('repo-agent select not found');
+            return;
+        }
+        
+        try {
+            const response = await authFetch('/api/admin/agents');
+            
+            if (!response.ok) {
+                console.error('API returned status:', response.status);
+                select.innerHTML = '<option value="">Ошибка авторизации</option>';
+                return;
+            }
+            
+            const data = await response.json();
+            const agents = data.agents || {};
+            
+            const agentsWithKeys = [];
+            for (const [name, cfg] of Object.entries(agents)) {
+                const sshKeysCount = cfg.ssh_keys_count || 0;
+                console.log(`Checking agent ${name}: ssh_keys_count=${sshKeysCount}`);
+                if (sshKeysCount > 0) {
+                    agentsWithKeys.push({ name, display_name: cfg.display_name || name });
+                }
+            }
+            
+            select.innerHTML = '<option value="">-- Выберите агента --</option>';
+            if (agentsWithKeys.length === 0) {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'Нет агентов с SSH ключами';
+                option.disabled = true;
+                select.appendChild(option);
+            } else {
+                agentsWithKeys.forEach(agent => {
+                    const option = document.createElement('option');
+                    option.value = agent.name;
+                    option.textContent = agent.display_name || agent.name;
+                    select.appendChild(option);
+                });
+            }
+        } catch (e) {
+            console.error('Failed to load agents:', e);
+            select.innerHTML = '<option value="">Ошибка загрузки</option>';
+        }
+    }
+
+    async function addProjectRepo() {
+        const url = document.getElementById('repo-url').value.trim();
+        if (!url) {
+            alert('Введите URL репозитория');
+            return;
+        }
+        
+        const name = document.getElementById('repo-name').value.trim();
+        const branch = document.getElementById('repo-branch').value.trim() || 'main';
+        const repoType = document.getElementById('repo-type').value;
+        const agent = document.getElementById('repo-agent').value;
+        
+        if (repoType === 'ssh' && !agent) {
+            alert('Для SSH репозитория выберите агента с SSH ключом');
+            return;
+        }
+        
+        const payload = {
+            url,
+            name: name || null,
+            branch,
+            type: repoType,
+            required_agent: repoType === 'ssh' ? agent : null,
+            auto_index: true
+        };
+        
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(currentReposProject)}/git-repos`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            
+            if (response.ok) {
+                hideAddRepoForm();
+                await loadProjectRepos(currentReposProject);
+            } else {
+                const contentType = response.headers.get('content-type');
+                let errorMsg = 'Ошибка добавления репозитория';
+                if (contentType && contentType.includes('application/json')) {
+                    try {
+                        const data = await response.json();
+                        errorMsg = data.error || errorMsg;
+                    } catch (e) {}
+                }
+                alert(errorMsg);
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function fetchProjectRepo(projectName, repoName) {
+        if (!confirm(`Fetch обновления из ${repoName}?`)) return;
+        
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(projectName)}/git-repos/${encodeURIComponent(repoName)}/fetch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reindex: true })
+            });
+            
+            if (response.ok) {
+                alert('Fetch выполнен');
+                await loadProjectRepos(projectName);
+            } else {
+                const contentType = response.headers.get('content-type');
+                let errorMsg = 'Ошибка fetch';
+                if (contentType && contentType.includes('application/json')) {
+                    try {
+                        const data = await response.json();
+                        errorMsg = data.error || errorMsg;
+                    } catch (e) {}
+                }
+                alert(errorMsg);
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function deleteProjectRepo(projectName, repoName) {
+        if (!confirm(`Удалить репозиторий ${repoName}? Локальные файлы будут удалены.`)) return;
+        
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(projectName)}/git-repos/${encodeURIComponent(repoName)}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ delete_local: true })
+            });
+            
+            if (response.ok) {
+                await loadProjectRepos(projectName);
+            } else {
+                const contentType = response.headers.get('content-type');
+                let errorMsg = 'Ошибка удаления';
+                if (contentType && contentType.includes('application/json')) {
+                    try {
+                        const data = await response.json();
+                        errorMsg = data.error || errorMsg;
+                    } catch (e) {}
+                }
+                alert(errorMsg);
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    function reviewRepo(projectName, repoName) {
+        const message = `/review ${repoName}`;
+        addMessageToPanel(getActivePanelIndex(), message);
+        closeReposModal();
     }
 
     initPanels();

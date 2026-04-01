@@ -1676,6 +1676,8 @@
                         <div><strong>Модель:</strong> ${cfg.model || 'по умолчанию'}</div>
                         <div><strong>Temperature:</strong> ${cfg.temperature}</div>
                         <div><strong>Контекст:</strong> ${cfg.context_file || '-'}</div>
+                        <div><strong>Capabilities:</strong> ${(cfg.capabilities || []).join(', ') || '-'}</div>
+                        <div><strong>SSH Keys:</strong> ${cfg.ssh_keys_count || 0}</div>
                     </div>
                     <div class="agent-toggle">
                         <label class="toggle-label">
@@ -1786,6 +1788,17 @@
                 populateContextFileSelect(uniqueId, selectedContextFile);
             }
             
+            if (name && agentsConfig[name]) {
+                const capabilitiesEl = document.getElementById('agent-modal-' + uniqueId + '-capabilities');
+                if (capabilitiesEl) {
+                    const agentCaps = agentsConfig[name].capabilities || [];
+                    Array.from(capabilitiesEl.options).forEach(opt => {
+                        opt.selected = agentCaps.includes(opt.value);
+                    });
+                }
+                loadAgentSSHKeys(name, uniqueId);
+            }
+            
             modal.style.display = 'flex';
         } catch (e) {
             console.error('Error in openAgentModal:', e);
@@ -1835,6 +1848,54 @@
                     <select id="agent-modal-${uniqueId}-context-file" class="form-input">
                         <option value="">-- Выберите файл --</option>
                     </select>
+                </div>
+                <div class="form-group">
+                    <label for="agent-modal-${uniqueId}-capabilities">Capabilities</label>
+                    <select id="agent-modal-${uniqueId}-capabilities" class="form-input" multiple size="4">
+                        <option value="development">development</option>
+                        <option value="code_review">code_review</option>
+                        <option value="testing">testing</option>
+                        <option value="monitoring">monitoring</option>
+                        <option value="architecture">architecture</option>
+                        <option value="devops">devops</option>
+                        <option value="mentoring">mentoring</option>
+                    </select>
+                    <span class="help-text">Выберите одно или несколько</span>
+                </div>
+                <div class="form-group">
+                    <label>SSH Ключи <span id="agent-modal-${uniqueId}-ssh-keys-count">(0)</span></label>
+                    <div id="agent-modal-${uniqueId}-ssh-keys-list" class="ssh-keys-list"></div>
+                    <button type="button" class="btn btn-secondary btn-small" onclick="showAddSSHKeyForm('${uniqueId}')">
+                        + Добавить ключ
+                    </button>
+                </div>
+                <div id="agent-modal-${uniqueId}-ssh-key-form" class="ssh-key-form" style="display: none;">
+                    <div class="ssh-key-form-inner">
+                        <h5>Новый SSH ключ</h5>
+                        <div class="form-group">
+                            <label>Имя</label>
+                            <input type="text" id="agent-modal-${uniqueId}-ssh-key-name" class="form-input" placeholder="GitHub Deploy Key">
+                        </div>
+                        <div class="form-group">
+                            <label>Тип</label>
+                            <select id="agent-modal-${uniqueId}-ssh-key-type" class="form-input">
+                                <option value="deploy">Deploy Key</option>
+                                <option value="user">User Key</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Private Key</label>
+                            <textarea id="agent-modal-${uniqueId}-ssh-key-private" class="form-input" rows="5" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Passphrase (опционально)</label>
+                            <input type="password" id="agent-modal-${uniqueId}-ssh-key-passphrase" class="form-input">
+                        </div>
+                        <div class="modal-actions">
+                            <button type="button" class="btn btn-secondary" onclick="hideAddSSHKeyForm('${uniqueId}')">Отмена</button>
+                            <button type="button" class="btn btn-primary" onclick="addSSHKey('${uniqueId}')">Сохранить ключ</button>
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-actions">
                     <button class="btn btn-danger" id="agent-modal-${uniqueId}-delete-btn" onclick="deleteCurrentAgent('${uniqueId}')" style="display:none">Удалить</button>
@@ -1943,6 +2004,10 @@
             return;
         }
         
+        const capabilitiesSelect = document.getElementById('agent-modal-' + uniqueId + '-capabilities');
+        const capabilities = capabilitiesSelect ? 
+            Array.from(capabilitiesSelect.selectedOptions).map(opt => opt.value) : [];
+        
         const agentData = {
             name: name,
             display_name: document.getElementById('agent-modal-' + uniqueId + '-display-name').value.trim() || name,
@@ -1952,6 +2017,7 @@
             top_p: document.getElementById('agent-modal-' + uniqueId + '-top-p').value ? parseFloat(document.getElementById('agent-modal-' + uniqueId + '-top-p').value) : null,
             top_k: document.getElementById('agent-modal-' + uniqueId + '-top-k').value ? parseInt(document.getElementById('agent-modal-' + uniqueId + '-top-k').value) : null,
             context_file: document.getElementById('agent-modal-' + uniqueId + '-context-file').value || `ROLE_${name.toUpperCase()}.md`,
+            capabilities: capabilities,
         };
         
         saveAgentData(agentData);
@@ -2027,6 +2093,126 @@
         } catch (e) {
             alert('Ошибка: ' + e.message);
             toggle.checked = !enabled;
+        }
+    }
+
+    async function loadAgentSSHKeys(agentName, uniqueId) {
+        const listEl = document.getElementById('agent-modal-' + uniqueId + '-ssh-keys-list');
+        const countEl = document.getElementById('agent-modal-' + uniqueId + '-ssh-keys-count');
+        if (!listEl) return;
+        
+        try {
+            const response = await fetch('/admin/agents/' + encodeURIComponent(agentName) + '/ssh-keys', {
+                headers: getAuthHeaders()
+            });
+            if (response.ok) {
+                const data = await response.json();
+                const keys = data.ssh_keys || [];
+                if (countEl) countEl.textContent = '(' + keys.length + ')';
+                renderSSHKeysList(keys, uniqueId);
+            }
+        } catch (e) {
+            console.error('Failed to load SSH keys:', e);
+        }
+    }
+
+    function renderSSHKeysList(keys, uniqueId) {
+        const listEl = document.getElementById('agent-modal-' + uniqueId + '-ssh-keys-list');
+        if (!listEl) return;
+        
+        if (keys.length === 0) {
+            listEl.innerHTML = '<p class="help-text" style="margin: 0.5rem 0;">Нет SSH ключей</p>';
+            return;
+        }
+        
+        let html = '';
+        for (const key of keys) {
+            html += `
+                <div class="ssh-key-item">
+                    <span class="ssh-key-icon">🔑</span>
+                    <span class="ssh-key-name">${key.name}</span>
+                    <span class="ssh-key-type">${key.type}</span>
+                    <button type="button" class="btn btn-small btn-danger-outline" 
+                        onclick="deleteSSHKey('${agentName}', '${key.id}', '${uniqueId}')" title="Удалить">🗑️</button>
+                </div>
+            `;
+        }
+        listEl.innerHTML = html;
+    }
+
+    function showAddSSHKeyForm(uniqueId) {
+        const formEl = document.getElementById('agent-modal-' + uniqueId + '-ssh-key-form');
+        if (formEl) formEl.style.display = 'block';
+    }
+
+    function hideAddSSHKeyForm(uniqueId) {
+        const formEl = document.getElementById('agent-modal-' + uniqueId + '-ssh-key-form');
+        if (formEl) formEl.style.display = 'none';
+        document.getElementById('agent-modal-' + uniqueId + '-ssh-key-name').value = '';
+        document.getElementById('agent-modal-' + uniqueId + '-ssh-key-private').value = '';
+        document.getElementById('agent-modal-' + uniqueId + '-ssh-key-passphrase').value = '';
+    }
+
+    async function addSSHKey(uniqueId) {
+        const agentName = document.getElementById('agent-modal-' + uniqueId + '-edit-name').value;
+        if (!agentName) {
+            alert('Сначала сохраните агента');
+            return;
+        }
+        
+        const name = document.getElementById('agent-modal-' + uniqueId + '-ssh-key-name').value.trim();
+        const keyType = document.getElementById('agent-modal-' + uniqueId + '-ssh-key-type').value;
+        const privateKey = document.getElementById('agent-modal-' + uniqueId + '-ssh-key-private').value.trim();
+        const passphrase = document.getElementById('agent-modal-' + uniqueId + '-ssh-key-passphrase').value;
+        
+        if (!name || !privateKey) {
+            alert('Введите имя ключа и private key');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/admin/agents/' + encodeURIComponent(agentName) + '/ssh-keys', {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: name,
+                    type: keyType,
+                    private_key: privateKey,
+                    passphrase: passphrase || null
+                })
+            });
+            
+            if (response.ok) {
+                hideAddSSHKeyForm(uniqueId);
+                loadAgentSSHKeys(agentName, uniqueId);
+                loadAgents();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Ошибка добавления ключа');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
+        }
+    }
+
+    async function deleteSSHKey(agentName, keyId, uniqueId) {
+        if (!confirm('Удалить SSH ключ?')) return;
+        
+        try {
+            const response = await fetch('/admin/agents/' + encodeURIComponent(agentName) + '/ssh-keys/' + encodeURIComponent(keyId), {
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                loadAgentSSHKeys(agentName, uniqueId);
+                loadAgents();
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Ошибка удаления ключа');
+            }
+        } catch (e) {
+            alert('Ошибка: ' + e.message);
         }
     }
 
@@ -3263,6 +3449,53 @@
     .toggle-label input[type="checkbox"] {
         width: 18px;
         height: 18px;
+    }
+
+    .ssh-keys-list {
+        margin: 0.5rem 0;
+    }
+
+    .ssh-key-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem;
+        background: var(--bg-secondary);
+        border-radius: 4px;
+        margin-bottom: 0.5rem;
+    }
+
+    .ssh-key-icon {
+        font-size: 1rem;
+    }
+
+    .ssh-key-name {
+        flex: 1;
+        font-weight: 500;
+    }
+
+    .ssh-key-type {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        padding: 2px 6px;
+        background: var(--bg-tertiary);
+        border-radius: 3px;
+    }
+
+    .ssh-key-form {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+    }
+
+    .ssh-key-form-inner h5 {
+        margin: 0 0 1rem 0;
+    }
+
+    .ssh-key-form-inner textarea {
+        font-family: monospace;
+        font-size: 0.8rem;
     }
 
     .badge-success {
