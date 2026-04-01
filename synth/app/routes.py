@@ -1266,6 +1266,7 @@ def get_session(session_id: str):
             "summary_of": m.summary_of,
             "created_at": m.created_at.isoformat(),
             "disabled": m.disabled,
+            "pinned": m.pinned,
             "source": m.source,
             "status": m.status,
             "reasoning": m.reasoning,
@@ -1471,6 +1472,21 @@ def toggle_message(session_id: str, index: int):
         session_manager.save_session(session_id)
         msg = session.messages[index]
         return jsonify({"status": "toggled", "index": index, "disabled": msg.disabled})
+    
+    return jsonify({"error": "Invalid message index"}), 400
+
+
+@api_bp.route("/sessions/<session_id>/messages/<int:index>/pin", methods=["POST"])
+@require_user
+def pin_message(session_id: str, index: int):
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+    
+    if session.toggle_pin(index):
+        session_manager.save_session(session_id)
+        msg = session.messages[index]
+        return jsonify({"status": "pinned", "index": index, "pinned": msg.pinned})
     
     return jsonify({"error": "Invalid message index"}), 400
 

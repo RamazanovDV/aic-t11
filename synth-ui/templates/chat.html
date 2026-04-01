@@ -1194,10 +1194,11 @@
                 
                 const groupId = msg.group_id || null;
                 const groupInfo = groupId ? groupInfoMap.get(groupId) : null;
-                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, idx, msg.source || null, statusClass, msg.reasoning || null, groupId, groupInfo, msg.agent_role || null);
+                addMessageToPanel(panelIndex, msg.content, msg.role, msg.debug || null, msg.usage || null, msg.model || null, msg.disabled || false, msg.pinned === true, idx, msg.source || null, statusClass, msg.reasoning || null, groupId, groupInfo, msg.agent_role || null);
                 panel.messages[idx]._renderIndex = idx;
                 panel.messages[idx].messageIndex = idx;
                 panel.messages[idx].group_id = msg.group_id || null;
+                panel.messages[idx].pinned = msg.pinned || false;
             });
             
             const lastMsg = panel.messages[panel.messages.length - 1];
@@ -1220,7 +1221,7 @@
         }
     }
     
-    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null, groupInfo = null, agentRole = null) {
+    function addMessageToPanel(panelIndex, content, role, debugData = null, usage = null, model = null, disabled = false, pinned = false, messageIndex = -1, source = null, statusClass = null, reasoning = null, groupId = null, groupInfo = null, agentRole = null) {
         const panel = panels[panelIndex];
         const container = panel.messagesContainer;
         if (!container) return;
@@ -1336,6 +1337,12 @@
             const toggleIcon = disabled ? '👁️' : '👁️‍🗨️';
             const toggleTitle = disabled ? 'Включить в контекст' : 'Отключить из контекста';
             actionsHtml += `<button class="message-toggle-btn" onclick="toggleMessage(${panelIndex}, ${msgIndex})" title="${toggleTitle}">${toggleIcon}</button>`;
+        }
+        
+        if (role === 'user' || role === 'assistant' || role === 'error' || role === 'summary') {
+            const msgIndex = messageIndex >= 0 ? messageIndex : (panel.messages ? panel.messages.length - 1 : 0);
+            const pinTitle = pinned ? 'Открепить сообщение' : 'Закрепить сообщение';
+            actionsHtml += `<button class="message-pin-btn${pinned ? ' pinned' : ''}" onclick="pinMessage(${panelIndex}, ${msgIndex})" title="${pinTitle}">📌</button>`;
         }
         
         if ((role === 'assistant' || role === 'error' || role === 'summary') && debugData) {
@@ -2249,18 +2256,7 @@
                 method: 'POST',
                 headers: { 'X-Session-Id': panel.sessionId }
             });
-            panel.messagesContainer.innerHTML = `
-                <div class="message message-system">
-                    <div class="message-content">
-                        Чат сброшен. Задайте новый вопрос.
-                    </div>
-                </div>
-            `;
-            updatePanelStats(panelIndex, 0, 0, 0);
-            panel.messages = [];
-            panel.totalInput = 0;
-            panel.totalOutput = 0;
-            panel.totalTokens = 0;
+            await loadPanelMessages(panelIndex);
         } catch (err) {
             alert('Ошибка сброса чата: ' + err.message);
         }
@@ -2371,6 +2367,28 @@
         }
     }
 
+    async function pinMessage(panelIndex, messageIndex) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.sessionId) return;
+        
+        try {
+            const response = await fetch(`/api/sessions/${panel.sessionId}/messages/${messageIndex}/pin`, {
+                method: 'POST'
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                updateMessagePinnedState(panelIndex, messageIndex, data.pinned);
+            } else {
+                const data = await response.json();
+                alert('Ошибка: ' + (data.error || 'Unknown error'));
+            }
+        } catch (err) {
+            console.error('Failed to pin message:', err);
+            alert('Ошибка закрепления сообщения');
+        }
+    }
+
     function updateMessageDisabledState(panelIndex, messageIndex, disabled) {
         const panel = panels[panelIndex];
         if (!panel || !panel.messages) return;
@@ -2404,6 +2422,32 @@
                 const newTitle = disabled ? 'Включить в контекст' : 'Отключить из контекста';
                 toggleBtn.innerHTML = newIcon;
                 toggleBtn.title = newTitle;
+            }
+        }
+    }
+
+    function updateMessagePinnedState(panelIndex, messageIndex, pinned) {
+        const panel = panels[panelIndex];
+        if (!panel || !panel.messages) return;
+        
+        panel.messages[messageIndex].pinned = pinned;
+        
+        const container = document.getElementById(`panel-messages-${panelIndex}`);
+        if (!container) return;
+        
+        const messageElements = container.querySelectorAll('.message-row');
+        if (messageElements[messageIndex]) {
+            const row = messageElements[messageIndex];
+            
+            const pinBtn = row.querySelector('.message-pin-btn');
+            if (pinBtn) {
+                const newTitle = pinned ? 'Открепить сообщение' : 'Закрепить сообщение';
+                pinBtn.title = newTitle;
+                if (pinned) {
+                    pinBtn.classList.add('pinned');
+                } else {
+                    pinBtn.classList.remove('pinned');
+                }
             }
         }
     }

@@ -41,6 +41,7 @@ class FileStorage:
                     "model": m.model,
                     "created_at": m.created_at.isoformat(),
                     "disabled": m.disabled,
+                    "pinned": m.pinned,
                     "branch_id": m.branch_id,
                     "source": m.source,
                     "status": m.status,

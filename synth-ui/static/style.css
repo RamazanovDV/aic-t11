@@ -1084,7 +1084,8 @@ body {
 .message-copy-btn,
 .message-debug-btn,
 .message-delete-btn,
-.message-toggle-btn {
+.message-toggle-btn,
+.message-pin-btn {
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -1099,7 +1100,14 @@ body {
 .message-copy-btn:hover,
 .message-debug-btn:hover,
 .message-delete-btn:hover,
-.message-toggle-btn:hover {
+.message-toggle-btn:hover,
+.message-pin-btn:hover {
+    opacity: 1;
+}
+
+.message-pin-btn.pinned {
+    background: var(--bg-secondary);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
     opacity: 1;
 }
 

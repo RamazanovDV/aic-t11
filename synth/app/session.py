@@ -427,7 +427,7 @@ class Session:
         window_set = set(id(m) for m in window_messages)
 
         for msg in active_messages:
-            if id(msg) not in window_set:
+            if id(msg) not in window_set and not msg.pinned:
                 msg.disabled = True
                 disabled_count += 1
 
@@ -572,6 +572,15 @@ class Session:
                 self.input_tokens += usage.get("input_tokens", 0)
                 self.output_tokens += usage.get("output_tokens", 0)
             
+            self.updated_at = datetime.now()
+            return True
+        return False
+
+    def toggle_pin(self, index: int) -> bool:
+        """Переключить состояние pinned сообщения"""
+        if 0 <= index < len(self.messages):
+            msg = self.messages[index]
+            msg.pinned = not msg.pinned
             self.updated_at = datetime.now()
             return True
         return False
@@ -825,7 +834,7 @@ class Session:
         return "\n".join(lines)
 
     def clear(self) -> None:
-        self.messages = []
+        self.messages = [m for m in self.messages if m.pinned]
         self.total_tokens = 0
         self.input_tokens = 0
         self.output_tokens = 0
@@ -888,6 +897,7 @@ class SessionManager:
                         summary_of=m.get("summary_of"),
                         created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
                         disabled=m.get("disabled", False),
+                        pinned=m.get("pinned", False),
                         branch_id=m.get("branch_id", "main"),
                         source=m.get("source"),
                         status=m.get("status"),
@@ -977,6 +987,7 @@ class SessionManager:
                         summary_of=m.get("summary_of"),
                         created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
                         disabled=m.get("disabled", False),
+                        pinned=m.get("pinned", False),
                         branch_id=m.get("branch_id", "main"),
                         source=m.get("source"),
                         status=m.get("status"),
@@ -1068,6 +1079,7 @@ class SessionManager:
                         summary_of=m.get("summary_of"),
                         created_at=datetime.fromisoformat(m["created_at"]) if m.get("created_at") else datetime.now(),
                         disabled=m.get("disabled", False),
+                        pinned=m.get("pinned", False),
                         branch_id=m.get("branch_id", "main"),
                         source=m.get("source"),
                         status=m.get("status"),
