@@ -2,7 +2,7 @@ import logging
 import threading
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +10,7 @@ import yaml
 from croniter import croniter
 
 from app.config import config
-from app.logger import debug, info, warning, error
+from app.logger import debug, info, error
 
 logger = logging.getLogger(__name__)
 
@@ -262,10 +262,12 @@ class Scheduler:
         return self._execute_job(schedule)
 
     def _execute_job(self, schedule: Schedule) -> bool:
-        from app.llm.client import LLMClient
+        from app.llm.client import create_llm_client
         from app.session import session_manager
         from app import storage
         from app import project_manager
+        from app.debug import DebugCollector
+        from app.context_builder import ContextBuilder
 
         project_name = None
         if schedule.session_id:
@@ -291,23 +293,30 @@ class Scheduler:
 
             info("SCHEDULER", f"Running scheduled job '{schedule.name}' for project {project_name}")
 
-            from app.llm.client import create_llm_client
-            from app.llm.base import Message
+            debug_collector = DebugCollector.from_session(session)
+            
+            context_builder = ContextBuilder(session, debug_collector=debug_collector)
+            
+            system_prompt = context_builder.build_system_prompt()
+            system_prompt = context_builder.apply_rag_to_prompt(system_prompt, schedule.prompt, use_rag=True)
+            messages = context_builder.build_messages(include_user_message=schedule.prompt)
             
             client = create_llm_client(session, provider_name=schedule.model)
             provider_name = client.provider.get_provider_name()
+            mcp_tools = context_builder.build_mcp_tools(provider_name)
             
-            mcp_tools = self._get_mcp_tools(session, provider_name)
-            
-            llm_messages = session.get_messages_for_llm()
-            llm_messages.append(Message(role="user", content=schedule.prompt, usage={}, debug=None, model=None, summary_of=None, created_at=datetime.now(), disabled=False, branch_id="main", source="scheduler", status=None, tool_call_id=None, tool_use=None))
+            if mcp_tools:
+                system_prompt += _format_mcp_tools_for_prompt(mcp_tools)
             
             response = self._handle_tool_calls(
                 client=client,
-                messages=llm_messages,
-                system_prompt=_format_mcp_tools_for_prompt(mcp_tools),
+                messages=messages,
+                system_prompt=system_prompt,
                 mcp_tools=mcp_tools,
+                debug_collector=debug_collector,
             )
+
+            debug_info = debug_collector.get_debug_info() if debug_collector else None
 
             if response.content:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -315,6 +324,7 @@ class Scheduler:
                 session.add_assistant_message(
                     response.content,
                     response.usage,
+                    debug=debug_info,
                     model=response.model,
                 )
                 session_manager.save_session(session_id)
@@ -337,49 +347,10 @@ class Scheduler:
             logger.error(f"[SCHEDULER] Error executing job '{schedule.name}': {e}")
             return False
 
-    def _get_mcp_tools(self, session, provider_name: str) -> list | None:
-        """Get MCP tools for the session's configured MCP servers."""
-        try:
-            from app.mcp import mcp_available
-            if not mcp_available():
-                return None
-            
-            mcp_servers = session.get_mcp_servers()
-            if not mcp_servers:
-                return None
-            
-            from app.routes import run_mcp_async
-            from app.mcp import MCPManager, tools_to_provider_format
-            
-            try:
-                import asyncio
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    raise RuntimeError("Event loop already running")
-            except RuntimeError:
-                pass
-            
-            async def get_tools():
-                all_tools = []
-                for server_name in mcp_servers:
-                    try:
-                        server_tools = await MCPManager.get_tools([server_name])
-                        if server_tools:
-                            all_tools.extend(tools_to_provider_format(server_tools, provider_name))
-                    except Exception as e:
-                        error("SCHEDULER", f"Failed to get tools from {server_name}: {e}")
-                return all_tools if all_tools else None
-            
-            return run_mcp_async(get_tools())
-        except Exception as e:
-            logger.warning(f"[SCHEDULER] Failed to get MCP tools: {e}")
-            return None
-
-    def _handle_tool_calls(self, client, messages: list, system_prompt: str, mcp_tools: list | None, max_iterations: int = 10):
+    def _handle_tool_calls(self, client, messages: list, system_prompt: str, mcp_tools: list | None, debug_collector=None, max_iterations: int = 10):
         """Рекурсивно обрабатывает tool calls от LLM."""
         from app.llm.base import Message
         from app.routes import run_mcp_async
-        from app.mcp import MCPManager
         
         iteration = 0
         current_mcp_tools = mcp_tools
@@ -392,6 +363,7 @@ class Scheduler:
             response = client.send(
                 messages=messages,
                 system_prompt=system_prompt,
+                debug_collector=debug_collector,
                 tools=current_mcp_tools,
             )
             
@@ -411,7 +383,7 @@ class Scheduler:
                     import json
                     try:
                         tool_args = json.loads(tool_args)
-                    except:
+                    except json.JSONDecodeError:
                         tool_args = {}
                 
                 debug("SCHEDULER", f"Calling tool: {tool_name}")
@@ -422,6 +394,14 @@ class Scheduler:
                 except Exception as e:
                     tool_result_content = f"Error: {str(e)}"
                     error("SCHEDULER", f"Tool error: {e}")
+                
+                if debug_collector and debug_collector.enabled:
+                    debug_collector.capture_mcp_call(
+                        tool_name,
+                        tool_args,
+                        tool_result_content,
+                        is_error=tool_result_content.startswith("Error:")
+                    )
                 
                 tool_call_results.append({
                     "role": "tool",
