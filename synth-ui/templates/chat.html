@@ -5069,10 +5069,13 @@
         previewContainer.innerHTML = '';
         previewContainer.appendChild(header);
         
-        const content = document.createElement('div');
-        content.className = 'file-preview-content';
-        content.innerHTML = '<div class="file-preview-empty">Загрузка...</div>';
-        previewContainer.appendChild(content);
+        const pre = document.createElement('pre');
+        pre.className = 'file-preview-content';
+        previewContainer.appendChild(pre);
+        
+        const code = document.createElement('code');
+        code.className = 'language-python';
+        pre.appendChild(code);
         
         try {
             const url = `/api/projects/${encodeURIComponent(fileBrowserState.project)}/files/read?path=${encodeURIComponent(path)}`;
@@ -5080,13 +5083,13 @@
             
             if (!response.ok) {
                 const data = await response.json();
-                content.innerHTML = `<div class="file-preview-empty">Ошибка: ${data.error || 'Не удалось загрузить файл'}</div>`;
+                pre.innerHTML = `<div class="file-preview-empty">Ошибка: ${data.error || 'Не удалось загрузить файл'}</div>`;
                 return;
             }
             
             const data = await response.json();
-            content.innerHTML = '<code>' + escapeHtml(data.content) + '</code>';
-            hljs.highlightElement(content);
+            code.textContent = data.content;
+            hljs.highlightElement(code);
             
         } catch (e) {
             content.innerHTML = `<div class="file-preview-empty">Ошибка: ${e.message}</div>`;

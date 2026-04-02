@@ -1440,6 +1440,19 @@ def get_project_files_diff(project_name):
     
     file_path_str = request.args.get("path")
     if file_path_str:
+        # Normalize path - remove repo prefix if present for correct filtering
+        repo_prefix = None
+        search_path = file_path_str
+        try:
+            for item in base_path.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    if file_path_str.startswith(item.name + '/'):
+                        repo_prefix = item.name + '/'
+                        search_path = file_path_str[len(repo_prefix):]
+                        break
+        except PermissionError:
+            pass
+        
         diff_result = git_clone_service.get_diff(git_path, "HEAD")
         
         if diff_result:
@@ -1449,14 +1462,15 @@ def get_project_files_diff(project_name):
             
             for line in lines:
                 if line.startswith("diff --git"):
-                    if file_path_str in line:
+                    if search_path in line or file_path_str in line:
                         in_file_section = True
+                        filtered_lines.append(line)
                     else:
                         in_file_section = False
                 elif in_file_section:
                     filtered_lines.append(line)
             
-            diff_result = "\n".join(filtered_lines)
+            diff_result = "\n".join(filtered_lines) if filtered_lines else ""
     else:
         diff_result = git_clone_service.get_diff(git_path, "HEAD")
     
