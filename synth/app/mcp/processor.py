@@ -215,7 +215,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="read_file",
-        description="Read contents of a file. Returns file content with optional offset and limit for large files.",
+        description="Read contents of a file. Requires active project in session. Only works with files within project's repos directory.",
         input_schema={
             "type": "object",
             "properties": {
@@ -239,7 +239,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="list_directory",
-        description="List files and directories at a given path. Can recurse into subdirectories with optional depth limit.",
+        description="List files and directories. Requires active project in session. Only works within project's repos directory.",
         input_schema={
             "type": "object",
             "properties": {
@@ -268,7 +268,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="grep_files",
-        description="Search for text pattern in files. Supports regex patterns and optional file glob filter.",
+        description="Search for text pattern in files. Requires active project in session. Only searches within project's repos directory.",
         input_schema={
             "type": "object",
             "properties": {
@@ -301,7 +301,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="write_file",
-        description="Create or overwrite a file with content.",
+        description="Create or overwrite a file. Requires active project in session. Only works within project's repos directory.",
         input_schema={
             "type": "object",
             "properties": {
@@ -319,7 +319,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="edit_file",
-        description="Edit a specific section of a file by replacing old text with new text.",
+        description="Edit a file section. Requires active project in session. Only works within project's repos directory.",
         input_schema={
             "type": "object",
             "properties": {
@@ -341,7 +341,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="create_directory",
-        description="Create a new directory.",
+        description="Create a directory. Requires active project in session. Only works within project's repos directory.",
         input_schema={
             "type": "object",
             "properties": {
@@ -360,7 +360,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="delete_file",
-        description="Delete a file.",
+        description="Delete a file. Requires active project in session. Only works within project's repos directory.",
         input_schema={
             "type": "object",
             "properties": {
@@ -374,7 +374,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="delete_directory",
-        description="Delete a directory and all its contents recursively.",
+        description="Delete a directory recursively. Requires active project in session. Only works within project's repos directory.",
         input_schema={
             "type": "object",
             "properties": {
@@ -393,22 +393,22 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_status",
-        description="Show the working tree status.",
+        description="Show working tree status. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string", "description": "Path to git repository"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "short": {"type": "boolean", "default": True}
             }
         }
     ),
     MCPTool(
         name="git_log",
-        description="Show commit logs.",
+        description="Show commit logs. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "max_count": {"type": "integer", "default": 20},
                 "oneline": {"type": "boolean", "default": True}
             }
@@ -416,11 +416,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_diff",
-        description="Show changes between commits.",
+        description="Show changes between commits. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "target": {"type": "string"},
                 "file": {"type": "string"},
                 "cached": {"type": "boolean"}
@@ -429,11 +429,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_branch_list",
-        description="List all branches.",
+        description="List all branches. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "all": {"type": "boolean"},
                 "verbose": {"type": "boolean"}
             }
@@ -441,22 +441,22 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_show",
-        description="Show various types of objects.",
+        description="Show various types of objects. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "object": {"type": "string"}
             }
         }
     ),
     MCPTool(
         name="git_blame",
-        description="Show what revision and author last modified each line.",
+        description="Show what revision and author last modified each line. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "file": {"type": "string"}
             },
             "required": ["file"]
@@ -464,11 +464,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_commit",
-        description="Create a new commit.",
+        description="Create a new commit. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "message": {"type": "string"},
                 "amend": {"type": "boolean"}
             },
@@ -477,11 +477,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_push",
-        description="Push commits to remote.",
+        description="Push commits to remote. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "remote": {"type": "string"},
                 "force": {"type": "boolean"}
             }
@@ -489,11 +489,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_pull",
-        description="Fetch and integrate changes.",
+        description="Fetch and integrate changes. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "remote": {"type": "string"},
                 "rebase": {"type": "boolean"}
             }
@@ -501,11 +501,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_checkout",
-        description="Switch branches.",
+        description="Switch branches. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "branch": {"type": "string"},
                 "new_branch": {"type": "string"},
                 "force": {"type": "boolean"}
@@ -515,11 +515,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_reset",
-        description="Reset current HEAD.",
+        description="Reset current HEAD. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "target": {"type": "string"},
                 "mode": {"type": "string", "enum": ["soft", "mixed", "hard"]}
             }
@@ -527,11 +527,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_rebase",
-        description="Reapply commits on top of another base.",
+        description="Reapply commits on top of another base. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "base": {"type": "string"},
                 "continue": {"type": "boolean"},
                 "abort": {"type": "boolean"}
@@ -540,11 +540,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_merge",
-        description="Join two or more development histories.",
+        description="Join two or more development histories. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "branch": {"type": "string"},
                 "no_ff": {"type": "boolean"},
                 "squash": {"type": "boolean"}
@@ -554,11 +554,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_stash",
-        description="Stash changes.",
+        description="Stash changes. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "action": {"type": "string", "enum": ["push", "pop", "list", "drop", "apply"]},
                 "message": {"type": "string"}
             }
@@ -566,11 +566,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_cherry_pick",
-        description="Apply changes from commits.",
+        description="Apply changes from commits. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "commits": {"type": "array", "items": {"type": "string"}},
                 "continue": {"type": "boolean"},
                 "abort": {"type": "boolean"}
@@ -580,11 +580,11 @@ BUILTIN_TOOLS: list[MCPTool] = [
     ),
     MCPTool(
         name="git_fetch",
-        description="Download objects and refs.",
+        description="Download objects and refs. Requires active project. Use list_project_repos to get available repositories.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_name": {"type": "string"},
+                "repo_name": {"type": "string", "description": "Name of git repository in project"},
                 "remote": {"type": "string"},
                 "all": {"type": "boolean"},
                 "prune": {"type": "boolean"}
