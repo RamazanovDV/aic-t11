@@ -1,4 +1,6 @@
+import os
 import subprocess
+import tempfile
 from typing import Any
 
 from app.mcp import MCPTool
@@ -7,6 +9,27 @@ from app.tools.path_utils import (
     get_project_repos_path,
     validate_path,
 )
+
+
+def _get_ssh_key_for_agent(agent_role: str | None) -> tuple[str | None, str | None]:
+    """Get SSH key for agent. Returns (key_path, passphrase) or (None, None).
+    
+    If agent has keys, writes the first key to a temp file and returns path.
+    """
+    if not agent_role:
+        return None, None
+
+    from app.ssh_key_manager import ssh_key_manager
+    keys = ssh_key_manager.list_keys_for_agent(agent_role)
+    if not keys:
+        return None, None
+
+    key = keys[0]
+    with tempfile.NamedTemporaryFile(mode='w', suffix='_ssh_key', delete=False) as f:
+        f.write(key.private_key)
+        key_path = f.name
+
+    return key_path, key.passphrase
 
 
 TOOLS_GIT = [
@@ -480,15 +503,23 @@ TOOLS_GIT = [
 ]
 
 
-def _run_git(repo_path: str, args: list[str]) -> tuple[int, str, str]:
+def _run_git(
+    repo_path: str,
+    args: list[str],
+    env_add: dict[str, str] | None = None
+) -> tuple[int, str, str]:
     cmd = ["git"] + args
+    env = os.environ.copy()
+    if env_add:
+        env.update(env_add)
     try:
         result = subprocess.run(
             cmd,
             cwd=repo_path,
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
+            env=env
         )
         return result.returncode, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
@@ -720,7 +751,7 @@ async def builtin_git_commit(args: dict[str, Any], project_name: str | None = No
     return stdout or "Commit created successfully"
 
 
-async def builtin_git_push(args: dict[str, Any], project_name: str | None = None) -> str:
+async def builtin_git_push(args: dict[str, Any], project_name: str | None = None, agent_role: str | None = None) -> str:
     repo_name = args.get("repo_name")
     repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
@@ -730,6 +761,13 @@ async def builtin_git_push(args: dict[str, Any], project_name: str | None = None
     branch = args.get("branch")
     force = args.get("force", False)
     tags = args.get("tags", False)
+
+    env_add = {}
+    key_path, passphrase = _get_ssh_key_for_agent(agent_role)
+    if key_path:
+        env_add["GIT_SSH_COMMAND"] = f"ssh -i {key_path}"
+        if passphrase:
+            env_add["SSH_PASSPHRASE"] = passphrase
 
     cmd = ["push"]
     if force:
@@ -741,13 +779,13 @@ async def builtin_git_push(args: dict[str, Any], project_name: str | None = None
     else:
         cmd.append(remote)
 
-    code, stdout, stderr = _run_git(repo_path, cmd)
+    code, stdout, stderr = _run_git(repo_path, cmd, env_add if env_add else None)
     if code != 0:
         return f"Error: {stderr}"
     return stdout or "Push completed successfully"
 
 
-async def builtin_git_pull(args: dict[str, Any], project_name: str | None = None) -> str:
+async def builtin_git_pull(args: dict[str, Any], project_name: str | None = None, agent_role: str | None = None) -> str:
     repo_name = args.get("repo_name")
     repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
@@ -757,6 +795,13 @@ async def builtin_git_pull(args: dict[str, Any], project_name: str | None = None
     branch = args.get("branch")
     rebase = args.get("rebase", False)
 
+    env_add = {}
+    key_path, passphrase = _get_ssh_key_for_agent(agent_role)
+    if key_path:
+        env_add["GIT_SSH_COMMAND"] = f"ssh -i {key_path}"
+        if passphrase:
+            env_add["SSH_PASSPHRASE"] = passphrase
+
     cmd = ["pull"]
     if rebase:
         cmd.append("--rebase")
@@ -764,7 +809,7 @@ async def builtin_git_pull(args: dict[str, Any], project_name: str | None = None
     if branch:
         cmd.append(branch)
 
-    code, stdout, stderr = _run_git(repo_path, cmd)
+    code, stdout, stderr = _run_git(repo_path, cmd, env_add if env_add else None)
     if code != 0:
         return f"Error: {stderr}"
     return stdout or "Pull completed successfully"
@@ -986,7 +1031,7 @@ async def builtin_git_cherry_pick(args: dict[str, Any], project_name: str | None
     return stdout or f"Successfully cherry-picked {len(commits)} commit(s)"
 
 
-async def builtin_git_fetch(args: dict[str, Any], project_name: str | None = None) -> str:
+async def builtin_git_fetch(args: dict[str, Any], project_name: str | None = None, agent_role: str | None = None) -> str:
     repo_name = args.get("repo_name")
     repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
@@ -996,6 +1041,13 @@ async def builtin_git_fetch(args: dict[str, Any], project_name: str | None = Non
     all_remotes = args.get("all", False)
     prune = args.get("prune", False)
     tags = args.get("tags", False)
+
+    env_add = {}
+    key_path, passphrase = _get_ssh_key_for_agent(agent_role)
+    if key_path:
+        env_add["GIT_SSH_COMMAND"] = f"ssh -i {key_path}"
+        if passphrase:
+            env_add["SSH_PASSPHRASE"] = passphrase
 
     cmd = ["fetch"]
     if all_remotes:
@@ -1007,7 +1059,7 @@ async def builtin_git_fetch(args: dict[str, Any], project_name: str | None = Non
     if tags:
         cmd.append("--tags")
 
-    code, stdout, stderr = _run_git(repo_path, cmd)
+    code, stdout, stderr = _run_git(repo_path, cmd, env_add if env_add else None)
     if code != 0:
         return f"Error: {stderr}"
     return stdout or "Fetch completed successfully"

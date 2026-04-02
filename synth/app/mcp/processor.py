@@ -736,8 +736,11 @@ async def process_tool_calls(
 
 async def handle_builtin_tool(tool_name: str, args: dict[str, Any], session: Any = None) -> str:
     project_name = None
+    agent_role = None
     if session and hasattr(session, 'status'):
         project_name = session.status.get("project")
+    if session and hasattr(session, 'agent_role'):
+        agent_role = session.agent_role
 
     if tool_name == "manageembeddings":
         return await builtin_manage_embeddings(args)
@@ -780,9 +783,9 @@ async def handle_builtin_tool(tool_name: str, args: dict[str, Any], session: Any
     elif tool_name == "git_commit":
         return await builtin_git_commit(args, project_name)
     elif tool_name == "git_push":
-        return await builtin_git_push(args, project_name)
+        return await builtin_git_push(args, project_name, agent_role)
     elif tool_name == "git_pull":
-        return await builtin_git_pull(args, project_name)
+        return await builtin_git_pull(args, project_name, agent_role)
     elif tool_name == "git_checkout":
         return await builtin_git_checkout(args, project_name)
     elif tool_name == "git_reset":
@@ -796,7 +799,7 @@ async def handle_builtin_tool(tool_name: str, args: dict[str, Any], session: Any
     elif tool_name == "git_cherry_pick":
         return await builtin_git_cherry_pick(args, project_name)
     elif tool_name == "git_fetch":
-        return await builtin_git_fetch(args, project_name)
+        return await builtin_git_fetch(args, project_name, agent_role)
     return f"Unknown built-in tool: {tool_name}"
 
 
