@@ -314,6 +314,7 @@ class Scheduler:
                 system_prompt=system_prompt,
                 mcp_tools=mcp_tools,
                 debug_collector=debug_collector,
+                session=session,
             )
 
             debug_info = debug_collector.get_debug_info() if debug_collector else None
@@ -347,7 +348,7 @@ class Scheduler:
             logger.error(f"[SCHEDULER] Error executing job '{schedule.name}': {e}")
             return False
 
-    def _handle_tool_calls(self, client, messages: list, system_prompt: str, mcp_tools: list | None, debug_collector=None, max_iterations: int = 10):
+    def _handle_tool_calls(self, client, messages: list, system_prompt: str, mcp_tools: list | None, debug_collector=None, session=None, max_iterations: int = 10):
         """Рекурсивно обрабатывает tool calls от LLM."""
         from app.llm.base import Message
         from app.routes import run_mcp_async
@@ -390,7 +391,7 @@ class Scheduler:
                 
                 try:
                     from app.mcp.processor import call_mcp_tool
-                    tool_result_content = run_mcp_async(call_mcp_tool(tool_name, tool_args))
+                    tool_result_content = run_mcp_async(call_mcp_tool(tool_name, tool_args, session=session))
                 except Exception as e:
                     tool_result_content = f"Error: {str(e)}"
                     error("SCHEDULER", f"Tool error: {e}")

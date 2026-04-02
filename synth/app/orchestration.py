@@ -250,7 +250,7 @@ class OrchestrationController:
                 
                 try:
                     from app.mcp.processor import call_mcp_tool
-                    tool_result_content = run_mcp_async(call_mcp_tool(tool_name, tool_args))
+                    tool_result_content = run_mcp_async(call_mcp_tool(tool_name, tool_args, session=self.session))
                     is_error = tool_result_content.startswith("Error:")
                 except Exception as e:
                     tool_result_content = f"Error: {str(e)}"
