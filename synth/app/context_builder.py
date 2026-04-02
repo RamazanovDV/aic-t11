@@ -315,16 +315,20 @@ class ContextBuilder:
         """Build MCP tools for provider."""
         from app.mcp.processor import get_mcp_tools
         from app.async_utils import run_mcp_async
-        
+        from app.config import config
+
         server_names = self.session.get_mcp_servers()
 
+        agent_role = self.session.agent_role
+        capabilities = config.get_agent_capabilities(agent_role)
+
         from app.logger import debug as dbg
-        dbg("MCP", f"build_mcp_tools: server_names={server_names}, provider={provider_name}")
+        dbg("MCP", f"build_mcp_tools: server_names={server_names}, provider={provider_name}, agent_role={agent_role}, capabilities={capabilities}")
         if not server_names:
             return []
-        
+
         try:
-            return run_mcp_async(get_mcp_tools(server_names, provider_name))
+            return run_mcp_async(get_mcp_tools(server_names, provider_name, capabilities))
         except Exception as e:
             dbg("MCP", f"build_mcp_tools failed: {e}")
             return []

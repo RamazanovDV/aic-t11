@@ -12,7 +12,62 @@ from app.tools import (
     builtin_read_file,
     builtin_list_directory,
     builtin_grep_files,
+    builtin_write_file,
+    builtin_edit_file,
+    builtin_create_directory,
+    builtin_delete_file,
+    builtin_delete_directory,
 )
+
+
+TOOL_CAPABILITIES: dict[str, list[str]] = {
+    "read_file": ["file_read"],
+    "list_directory": ["file_read"],
+    "grep_files": ["file_search"],
+    "write_file": ["file_write"],
+    "edit_file": ["file_edit"],
+    "create_directory": ["file_write"],
+    "delete_file": ["file_write"],
+    "delete_directory": ["file_write"],
+    "manageembeddings": ["development"],
+    "code_review": ["code_review"],
+    "get_current_project": ["development", "devops", "architecture"],
+    "list_project_repos": ["development", "devops", "architecture"],
+    "get_repo_info": ["development", "devops", "architecture"],
+}
+
+
+def _tool_has_required_capability(tool_name: str, capabilities: list[str]) -> bool:
+    required = TOOL_CAPABILITIES.get(tool_name, [])
+    if not required:
+        return True
+    return any(cap in capabilities for cap in required)
+
+
+def _filter_tools_by_capabilities(
+    tools: list[MCPTool], capabilities: list[str]
+) -> list[MCPTool]:
+    if not capabilities:
+        return tools
+    return [t for t in tools if _tool_has_required_capability(t.name, capabilities)]
+
+
+def _filter_dict_tools_by_capabilities(
+    tools: list[dict], capabilities: list[str]
+) -> list[dict]:
+    if not capabilities:
+        return tools
+    result = []
+    for tool in tools:
+        if "function" in tool:
+            name = tool["function"].get("name", "")
+        elif "name" in tool:
+            name = tool.get("name", "")
+        else:
+            continue
+        if _tool_has_required_capability(name, capabilities):
+            result.append(tool)
+    return result
 
 
 BUILTIN_TOOLS: list[MCPTool] = [
@@ -211,20 +266,118 @@ BUILTIN_TOOLS: list[MCPTool] = [
             "required": ["path", "pattern"]
         }
     ),
+    MCPTool(
+        name="write_file",
+        description="Create or overwrite a file with content.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path to the file to write"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Content to write to the file"
+                }
+            },
+            "required": ["file_path", "content"]
+        }
+    ),
+    MCPTool(
+        name="edit_file",
+        description="Edit a specific section of a file by replacing old text with new text.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path to the file to edit"
+                },
+                "old_string": {
+                    "type": "string",
+                    "description": "The exact text to find and replace"
+                },
+                "new_string": {
+                    "type": "string",
+                    "description": "The replacement text"
+                }
+            },
+            "required": ["file_path", "old_string", "new_string"]
+        }
+    ),
+    MCPTool(
+        name="create_directory",
+        description="Create a new directory.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to the directory to create"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "Create parent directories if they don't exist (default: true)",
+                    "default": True
+                }
+            },
+            "required": ["path"]
+        }
+    ),
+    MCPTool(
+        name="delete_file",
+        description="Delete a file.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path to the file to delete"
+                }
+            },
+            "required": ["file_path"]
+        }
+    ),
+    MCPTool(
+        name="delete_directory",
+        description="Delete a directory and all its contents recursively.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Absolute path to the directory to delete"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "Must be true to delete non-empty directories (default: true)",
+                    "default": True
+                }
+            },
+            "required": ["path"]
+        }
+    ),
 ]
 
 
-async def get_mcp_tools(server_names: list[str], provider_name: str) -> list[dict[str, Any]]:
+async def get_mcp_tools(
+    server_names: list[str],
+    provider_name: str,
+    required_capabilities: list[str] | None = None
+) -> list[dict[str, Any]]:
     result = []
-    
-    result.extend(tools_to_provider_format(BUILTIN_TOOLS, provider_name))
-    
+
+    filtered_builtin = _filter_tools_by_capabilities(BUILTIN_TOOLS, required_capabilities or [])
+    result.extend(tools_to_provider_format(filtered_builtin, provider_name))
+
     if not server_names:
         return result
-    
+
     try:
         tools = await MCPManager.get_tools(server_names)
-        result.extend(tools_to_provider_format(tools, provider_name))
+        filtered_external = _filter_tools_by_capabilities(tools, required_capabilities or [])
+        result.extend(tools_to_provider_format(filtered_external, provider_name))
         return result
     except Exception as e:
         warning("MCP", f"Failed to get tools: {e}")
@@ -289,43 +442,61 @@ async def process_tool_calls(
     tool_calls: list[dict[str, Any]],
     formatted_messages: list[dict[str, Any]],
     provider_name: str,
-    max_tool_calls: int = 10
+    max_tool_calls: int = 10,
+    required_capabilities: list[str] | None = None
 ) -> list[dict[str, Any]]:
     results = []
-    
+
     for i, tool_call in enumerate(tool_calls[:max_tool_calls]):
         tool_name = tool_call.get("name")
         tool_args = tool_call.get("input") or tool_call.get("arguments", {})
         tool_call_id = tool_call.get("id")
-        
+
         if isinstance(tool_args, str):
             try:
                 tool_args = json.loads(tool_args)
             except json.JSONDecodeError:
                 tool_args = {}
-        
+
         debug("MCP", f"Calling tool: {tool_name} with args: {tool_args}")
-        
-        builtin_names = {t.name for t in BUILTIN_TOOLS}
-        if tool_name in builtin_names:
-            tool_result_content = await handle_builtin_tool(tool_name, tool_args)
+
+        if required_capabilities is not None:
+            if not _tool_has_required_capability(tool_name, required_capabilities):
+                required = TOOL_CAPABILITIES.get(tool_name, [])
+                missing = [r for r in required if r not in required_capabilities]
+                tool_result_content = f"Error: Tool '{tool_name}' requires capability: {', '.join(missing)}"
+            else:
+                builtin_names = {t.name for t in BUILTIN_TOOLS}
+                if tool_name in builtin_names:
+                    tool_result_content = await handle_builtin_tool(tool_name, tool_args)
+                else:
+                    try:
+                        result = await MCPManager.call_tool(tool_name, tool_args)
+                        tool_result_content = result.content
+                    except Exception as e:
+                        tool_result_content = f"Error: {str(e)}"
+                        warning("MCP", f"Tool call error: {e}")
         else:
-            try:
-                result = await MCPManager.call_tool(tool_name, tool_args)
-                tool_result_content = result.content
-            except Exception as e:
-                tool_result_content = f"Error: {str(e)}"
-                warning("MCP", f"Tool call error: {e}")
-        
+            builtin_names = {t.name for t in BUILTIN_TOOLS}
+            if tool_name in builtin_names:
+                tool_result_content = await handle_builtin_tool(tool_name, tool_args)
+            else:
+                try:
+                    result = await MCPManager.call_tool(tool_name, tool_args)
+                    tool_result_content = result.content
+                except Exception as e:
+                    tool_result_content = f"Error: {str(e)}"
+                    warning("MCP", f"Tool call error: {e}")
+
         formatted_result = format_tool_result_for_provider(
             tool_result_content, tool_call_id, provider_name
         )
-        
+
         if provider_name == "anthropic":
             results.append(formatted_result)
         else:
             results.append(formatted_result)
-    
+
     return results
 
 
@@ -346,11 +517,31 @@ async def handle_builtin_tool(tool_name: str, args: dict[str, Any]) -> str:
         return await builtin_list_directory(args)
     elif tool_name == "grep_files":
         return await builtin_grep_files(args)
+    elif tool_name == "write_file":
+        return await builtin_write_file(args)
+    elif tool_name == "edit_file":
+        return await builtin_edit_file(args)
+    elif tool_name == "create_directory":
+        return await builtin_create_directory(args)
+    elif tool_name == "delete_file":
+        return await builtin_delete_file(args)
+    elif tool_name == "delete_directory":
+        return await builtin_delete_directory(args)
     return f"Unknown built-in tool: {tool_name}"
 
 
-async def call_mcp_tool(tool_name: str, tool_args: dict[str, Any]) -> str:
+async def call_mcp_tool(
+    tool_name: str,
+    tool_args: dict[str, Any],
+    required_capabilities: list[str] | None = None
+) -> str:
     """Call an MCP tool, handling both builtin and external tools."""
+    if required_capabilities is not None:
+        if not _tool_has_required_capability(tool_name, required_capabilities):
+            required = TOOL_CAPABILITIES.get(tool_name, [])
+            missing = [r for r in required if r not in required_capabilities]
+            return f"Error: Tool '{tool_name}' requires capability: {', '.join(missing)}"
+
     builtin_names = {t.name for t in BUILTIN_TOOLS}
     if tool_name in builtin_names:
         return await handle_builtin_tool(tool_name, tool_args)

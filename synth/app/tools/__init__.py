@@ -11,11 +11,20 @@ from app.tools.filesystem import (
     builtin_grep_files,
     TOOLS_FILESYSTEM,
 )
+from app.tools.file_ops import (
+    builtin_write_file,
+    builtin_edit_file,
+    builtin_create_directory,
+    builtin_delete_file,
+    builtin_delete_directory,
+    TOOLS_FILE_OPS,
+)
 
 ALL_BUILTIN_TOOLS = [
     TOOL_CODE_REVIEW,
     *TOOLS_PROJECT,
     *TOOLS_FILESYSTEM,
+    *TOOLS_FILE_OPS,
 ]
 
 __all__ = [
@@ -29,5 +38,11 @@ __all__ = [
     "builtin_list_directory",
     "builtin_grep_files",
     "TOOLS_FILESYSTEM",
+    "builtin_write_file",
+    "builtin_edit_file",
+    "builtin_create_directory",
+    "builtin_delete_file",
+    "builtin_delete_directory",
+    "TOOLS_FILE_OPS",
     "ALL_BUILTIN_TOOLS",
 ]

@@ -3,6 +3,8 @@ agents:
     capabilities:
     - architecture
     - mentoring
+    - file_read
+    - file_search
     context_file: ROLE_ANALYST.md
     display_name: Аналитик
     enabled: true
@@ -26,6 +28,10 @@ agents:
     capabilities:
     - development
     - code_review
+    - file_read
+    - file_search
+    - file_write
+    - file_edit
     context_file: ROLE_DEVELOPER.md
     display_name: Разработчик
     enabled: true
@@ -39,6 +45,9 @@ agents:
     - devops
     - monitoring
     - architecture
+    - file_read
+    - file_search
+    - file_write
     context_file: ROLE_DEVOPS.md
     display_name: DevOps-инженер
     enabled: true
@@ -63,6 +72,10 @@ agents:
     - code_review
     - architecture
     - mentoring
+    - file_read
+    - file_search
+    - file_write
+    - file_edit
     context_file: ROLE_LEAD.md
     display_name: Тимлид
     enabled: true
@@ -82,6 +95,7 @@ agents:
     capabilities:
     - mentoring
     - architecture
+    - file_read
     context_file: ROLE_PM.md
     display_name: Продакт менеджер
     enabled: true
@@ -94,6 +108,9 @@ agents:
     capabilities:
     - testing
     - test_design
+    - file_read
+    - file_search
+    - file_write
     context_file: ROLE_QA.md
     display_name: Тестировщик
     enabled: true
@@ -106,6 +123,8 @@ agents:
     capabilities:
     - code_review
     - testing
+    - file_read
+    - file_search
     context_file: ROLE_SECURITY_AUDITOR.md
     display_name: Аудитор ИБ
     enabled: true
