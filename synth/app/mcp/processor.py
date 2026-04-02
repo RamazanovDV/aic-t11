@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from typing import Any
 
 from app.mcp import MCPManager, tools_to_provider_format, MCPTool
@@ -18,6 +17,24 @@ from app.tools import (
     builtin_delete_file,
     builtin_delete_directory,
 )
+from app.tools.git_ops import (
+    builtin_git_status,
+    builtin_git_log,
+    builtin_git_diff,
+    builtin_git_branch_list,
+    builtin_git_show,
+    builtin_git_blame,
+    builtin_git_commit,
+    builtin_git_push,
+    builtin_git_pull,
+    builtin_git_checkout,
+    builtin_git_reset,
+    builtin_git_rebase,
+    builtin_git_merge,
+    builtin_git_stash,
+    builtin_git_cherry_pick,
+    builtin_git_fetch,
+)
 
 
 TOOL_CAPABILITIES: dict[str, list[str]] = {
@@ -34,6 +51,22 @@ TOOL_CAPABILITIES: dict[str, list[str]] = {
     "get_current_project": ["development", "devops", "architecture"],
     "list_project_repos": ["development", "devops", "architecture"],
     "get_repo_info": ["development", "devops", "architecture"],
+    "git_status": ["git_read"],
+    "git_log": ["git_read"],
+    "git_diff": ["git_read"],
+    "git_branch_list": ["git_read"],
+    "git_show": ["git_read"],
+    "git_blame": ["git_read"],
+    "git_commit": ["git_write"],
+    "git_push": ["git_write"],
+    "git_pull": ["git_write"],
+    "git_checkout": ["git_write"],
+    "git_reset": ["git_write"],
+    "git_rebase": ["git_write"],
+    "git_merge": ["git_write"],
+    "git_stash": ["git_write"],
+    "git_cherry_pick": ["git_write"],
+    "git_fetch": ["git_write"],
 }
 
 
@@ -358,6 +391,206 @@ BUILTIN_TOOLS: list[MCPTool] = [
             "required": ["path"]
         }
     ),
+    MCPTool(
+        name="git_status",
+        description="Show the working tree status.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string", "description": "Path to git repository"},
+                "short": {"type": "boolean", "default": True}
+            }
+        }
+    ),
+    MCPTool(
+        name="git_log",
+        description="Show commit logs.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "max_count": {"type": "integer", "default": 20},
+                "oneline": {"type": "boolean", "default": True}
+            }
+        }
+    ),
+    MCPTool(
+        name="git_diff",
+        description="Show changes between commits.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "target": {"type": "string"},
+                "file": {"type": "string"},
+                "cached": {"type": "boolean"}
+            }
+        }
+    ),
+    MCPTool(
+        name="git_branch_list",
+        description="List all branches.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "all": {"type": "boolean"},
+                "verbose": {"type": "boolean"}
+            }
+        }
+    ),
+    MCPTool(
+        name="git_show",
+        description="Show various types of objects.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "object": {"type": "string"}
+            }
+        }
+    ),
+    MCPTool(
+        name="git_blame",
+        description="Show what revision and author last modified each line.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "file": {"type": "string"}
+            },
+            "required": ["file"]
+        }
+    ),
+    MCPTool(
+        name="git_commit",
+        description="Create a new commit.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "message": {"type": "string"},
+                "amend": {"type": "boolean"}
+            },
+            "required": ["message"]
+        }
+    ),
+    MCPTool(
+        name="git_push",
+        description="Push commits to remote.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "remote": {"type": "string"},
+                "force": {"type": "boolean"}
+            }
+        }
+    ),
+    MCPTool(
+        name="git_pull",
+        description="Fetch and integrate changes.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "remote": {"type": "string"},
+                "rebase": {"type": "boolean"}
+            }
+        }
+    ),
+    MCPTool(
+        name="git_checkout",
+        description="Switch branches.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "branch": {"type": "string"},
+                "new_branch": {"type": "string"},
+                "force": {"type": "boolean"}
+            },
+            "required": ["branch"]
+        }
+    ),
+    MCPTool(
+        name="git_reset",
+        description="Reset current HEAD.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "target": {"type": "string"},
+                "mode": {"type": "string", "enum": ["soft", "mixed", "hard"]}
+            }
+        }
+    ),
+    MCPTool(
+        name="git_rebase",
+        description="Reapply commits on top of another base.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "base": {"type": "string"},
+                "continue": {"type": "boolean"},
+                "abort": {"type": "boolean"}
+            }
+        }
+    ),
+    MCPTool(
+        name="git_merge",
+        description="Join two or more development histories.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "branch": {"type": "string"},
+                "no_ff": {"type": "boolean"},
+                "squash": {"type": "boolean"}
+            },
+            "required": ["branch"]
+        }
+    ),
+    MCPTool(
+        name="git_stash",
+        description="Stash changes.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "action": {"type": "string", "enum": ["push", "pop", "list", "drop", "apply"]},
+                "message": {"type": "string"}
+            }
+        }
+    ),
+    MCPTool(
+        name="git_cherry_pick",
+        description="Apply changes from commits.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "commits": {"type": "array", "items": {"type": "string"}},
+                "continue": {"type": "boolean"},
+                "abort": {"type": "boolean"}
+            },
+            "required": ["commits"]
+        }
+    ),
+    MCPTool(
+        name="git_fetch",
+        description="Download objects and refs.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "repo_path": {"type": "string"},
+                "remote": {"type": "string"},
+                "all": {"type": "boolean"},
+                "prune": {"type": "boolean"}
+            }
+        }
+    ),
 ]
 
 
@@ -527,6 +760,38 @@ async def handle_builtin_tool(tool_name: str, args: dict[str, Any]) -> str:
         return await builtin_delete_file(args)
     elif tool_name == "delete_directory":
         return await builtin_delete_directory(args)
+    elif tool_name == "git_status":
+        return await builtin_git_status(args)
+    elif tool_name == "git_log":
+        return await builtin_git_log(args)
+    elif tool_name == "git_diff":
+        return await builtin_git_diff(args)
+    elif tool_name == "git_branch_list":
+        return await builtin_git_branch_list(args)
+    elif tool_name == "git_show":
+        return await builtin_git_show(args)
+    elif tool_name == "git_blame":
+        return await builtin_git_blame(args)
+    elif tool_name == "git_commit":
+        return await builtin_git_commit(args)
+    elif tool_name == "git_push":
+        return await builtin_git_push(args)
+    elif tool_name == "git_pull":
+        return await builtin_git_pull(args)
+    elif tool_name == "git_checkout":
+        return await builtin_git_checkout(args)
+    elif tool_name == "git_reset":
+        return await builtin_git_reset(args)
+    elif tool_name == "git_rebase":
+        return await builtin_git_rebase(args)
+    elif tool_name == "git_merge":
+        return await builtin_git_merge(args)
+    elif tool_name == "git_stash":
+        return await builtin_git_stash(args)
+    elif tool_name == "git_cherry_pick":
+        return await builtin_git_cherry_pick(args)
+    elif tool_name == "git_fetch":
+        return await builtin_git_fetch(args)
     return f"Unknown built-in tool: {tool_name}"
 
 

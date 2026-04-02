@@ -19,12 +19,32 @@ from app.tools.file_ops import (
     builtin_delete_directory,
     TOOLS_FILE_OPS,
 )
+from app.tools.git_ops import (
+    builtin_git_status,
+    builtin_git_log,
+    builtin_git_diff,
+    builtin_git_branch_list,
+    builtin_git_show,
+    builtin_git_blame,
+    builtin_git_commit,
+    builtin_git_push,
+    builtin_git_pull,
+    builtin_git_checkout,
+    builtin_git_reset,
+    builtin_git_rebase,
+    builtin_git_merge,
+    builtin_git_stash,
+    builtin_git_cherry_pick,
+    builtin_git_fetch,
+    TOOLS_GIT,
+)
 
 ALL_BUILTIN_TOOLS = [
     TOOL_CODE_REVIEW,
     *TOOLS_PROJECT,
     *TOOLS_FILESYSTEM,
     *TOOLS_FILE_OPS,
+    *TOOLS_GIT,
 ]
 
 __all__ = [
@@ -44,5 +64,22 @@ __all__ = [
     "builtin_delete_file",
     "builtin_delete_directory",
     "TOOLS_FILE_OPS",
+    "builtin_git_status",
+    "builtin_git_log",
+    "builtin_git_diff",
+    "builtin_git_branch_list",
+    "builtin_git_show",
+    "builtin_git_blame",
+    "builtin_git_commit",
+    "builtin_git_push",
+    "builtin_git_pull",
+    "builtin_git_checkout",
+    "builtin_git_reset",
+    "builtin_git_rebase",
+    "builtin_git_merge",
+    "builtin_git_stash",
+    "builtin_git_cherry_pick",
+    "builtin_git_fetch",
+    "TOOLS_GIT",
     "ALL_BUILTIN_TOOLS",
 ]

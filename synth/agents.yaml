@@ -5,6 +5,7 @@ agents:
     - mentoring
     - file_read
     - file_search
+    - git_read
     context_file: ROLE_ANALYST.md
     display_name: Аналитик
     enabled: true
@@ -32,6 +33,8 @@ agents:
     - file_search
     - file_write
     - file_edit
+    - git_read
+    - git_write
     context_file: ROLE_DEVELOPER.md
     display_name: Разработчик
     enabled: true
@@ -48,6 +51,8 @@ agents:
     - file_read
     - file_search
     - file_write
+    - git_read
+    - git_write
     context_file: ROLE_DEVOPS.md
     display_name: DevOps-инженер
     enabled: true
@@ -76,6 +81,8 @@ agents:
     - file_search
     - file_write
     - file_edit
+    - git_read
+    - git_write
     context_file: ROLE_LEAD.md
     display_name: Тимлид
     enabled: true
@@ -111,6 +118,7 @@ agents:
     - file_read
     - file_search
     - file_write
+    - git_read
     context_file: ROLE_QA.md
     display_name: Тестировщик
     enabled: true
@@ -125,6 +133,7 @@ agents:
     - testing
     - file_read
     - file_search
+    - git_read
     context_file: ROLE_SECURITY_AUDITOR.md
     display_name: Аудитор ИБ
     enabled: true
