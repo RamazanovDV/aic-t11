@@ -123,14 +123,15 @@ class ContextBuilder:
     def build_messages(self, include_user_message: str | None = None, current_agent_role: str | None = None) -> list[Message]:
         """Build messages for LLM.
         
-        When include_user_message is provided (tagged agent mode), skip the last
-        user message from session (it's the original multi-tag message).
+        When include_user_message is provided (tagged agent mode), skip the user
+        message that contains @tags and replace it with the per-agent message.
         """
         import re
+        TAGS_PATTERN = re.compile(r'@(\w+)')
         llm_messages = self.session.get_messages_for_llm()
         
         formatted_messages = []
-        skip_last_user = include_user_message is not None
+        skip_tagged_user = include_user_message is not None
         
         for i, msg in enumerate(llm_messages):
             if msg.role == "summary":
@@ -140,16 +141,30 @@ class ContextBuilder:
                 else:
                     formatted_messages.insert(0, {"role": "system", "content": summary_text})
             elif msg.role == "user":
-                if skip_last_user and i == len(llm_messages) - 1:
+                if skip_tagged_user and TAGS_PATTERN.search(msg.content):
                     continue
                 formatted_messages.append({"role": msg.role, "content": msg.content})
             elif msg.role == "assistant":
-                formatted_messages.append({"role": msg.role, "content": msg.content})
+                msg_dict = {"role": msg.role, "content": msg.content}
+                if msg.tool_use:
+                    msg_dict["tool_use"] = msg.tool_use
+                formatted_messages.append(msg_dict)
+            elif msg.role == "tool":
+                msg_dict = {"role": msg.role, "content": msg.content, "tool_call_id": msg.tool_call_id}
+                formatted_messages.append(msg_dict)
         
         if include_user_message:
             formatted_messages.append({"role": "user", "content": include_user_message})
         
-        return [Message(role=m["role"], content=m["content"], usage={}) for m in formatted_messages]
+        result = []
+        for m in formatted_messages:
+            msg = Message(role=m["role"], content=m["content"], usage={})
+            if "tool_use" in m and m["tool_use"]:
+                msg.tool_use = m["tool_use"]
+            if "tool_call_id" in m and m["tool_call_id"]:
+                msg.tool_call_id = m["tool_call_id"]
+            result.append(msg)
+        return result
     
     def build_rag_context(self, query: str, use_rag: bool = True) -> str:
         """Build RAG context for query.

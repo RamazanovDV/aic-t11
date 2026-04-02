@@ -19,11 +19,15 @@ def parse_agent_tags(message: str) -> tuple[list[str], str, str]:
     """Parse @tags from message and return (tags, clean_message, transformed_message).
     
     - tags: list of tag names found (e.g., ['developer', 'qa'])
-    - clean_message: message with @tags removed
+    - clean_message: text before the first @tag (the common prefix for all agents)
     - transformed_message: message with @tag replaced by 'to: tag' for LLM
     """
     tags = TAGS_PATTERN.findall(message)
-    clean_message = TAGS_PATTERN.sub('', message).strip()
+    first_tag_match = TAGS_PATTERN.search(message)
+    if first_tag_match:
+        clean_message = message[:first_tag_match.start()].strip()
+    else:
+        clean_message = message.strip()
     transformed_message = TAGS_PATTERN.sub(r'to: \1', message).strip()
     return tags, clean_message, transformed_message
 
@@ -31,29 +35,30 @@ def parse_agent_tags(message: str) -> tuple[list[str], str, str]:
 def split_message_by_tags(message: str, tags: list[str]) -> dict[str, str]:
     """Split message by @tags so each agent gets only their relevant portion.
     
-    For "to: analyst to: developer hello":
-    - 'analyst' gets "to: analyst hello"
-    - 'developer' gets "to: developer hello"
-    
-    Each agent sees only their 'to:' tag and the user's question (content after last tag).
+    For "Hello to: lead do A to: developer do B":
+    - 'lead' gets "to: lead do A"
+    - 'developer' gets "to: developer do B"
     """
     if not tags:
         return {}
     
     result = {}
     
-    trailing_content = message.split(f'to: {tags[-1]}')[-1].strip() if tags else ""
-    
-    for tag in tags:
-        to_pattern = f'to: {tag}'
-        pos = message.find(to_pattern)
-        if pos == -1:
+    for i, tag in enumerate(tags):
+        to_pattern = f"to: {tag}"
+        start_pos = message.find(to_pattern)
+        if start_pos == -1:
             continue
         
-        if trailing_content:
-            result[tag] = f"to: {tag} {trailing_content}"
+        if i < len(tags) - 1:
+            next_to_pattern = f"to: {tags[i + 1]}"
+            end_pos = message.find(next_to_pattern)
+            if end_pos == -1:
+                end_pos = len(message)
         else:
-            result[tag] = f"to: {tag}"
+            end_pos = len(message)
+        
+        result[tag] = message[start_pos:end_pos].strip()
     
     return result
 

@@ -400,7 +400,7 @@ class StreamHandler(BaseHandler):
             if chunk.tool_calls and not tool_calls_handled:
                 tool_calls_handled = True
                 result = yield from self._handle_tool_calls(
-                    session, provider, chunk, debug_collector, mcp_tools, llm_msgs
+                    session, provider, chunk, debug_collector, mcp_tools, llm_msgs, agent_role
                 )
                 if result:
                     final_chunk, tool_group_id, tool_debug_info = result
@@ -467,7 +467,8 @@ class StreamHandler(BaseHandler):
         chunk,
         debug_collector: DebugCollector | None,
         mcp_tools: list,
-        llm_msgs: list
+        llm_msgs: list,
+        agent_role: str | None = None
     ) -> Generator[str, tuple[LLMChunk | None, str | None, dict | None], None]:
         """Handle tool calls. Yields tool results, returns (final_chunk, group_id, debug_info)."""
         import json
@@ -517,10 +518,16 @@ class StreamHandler(BaseHandler):
                 from app.mcp.processor import call_mcp_tool
                 from app.routes import run_mcp_async
                 
+                original_agent_role = session.agent_role
+                if agent_role:
+                    session.agent_role = agent_role
+                
                 try:
                     tool_result_content = run_mcp_async(call_mcp_tool(tool_name, tool_args, session=session))
                 except Exception as e:
                     tool_result_content = f"Error: {str(e)}"
+                finally:
+                    session.agent_role = original_agent_role
                 
                 if debug_collector and debug_collector.enabled:
                     debug_collector.capture_mcp_call(

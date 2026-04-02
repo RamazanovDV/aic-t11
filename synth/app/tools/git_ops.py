@@ -16,14 +16,19 @@ def _get_ssh_key_for_agent(agent_role: str | None) -> tuple[str | None, str | No
     
     If agent has keys, writes the first key to a temp file and returns path.
     """
+    from app.logger import debug as dbg
+
     if not agent_role:
+        dbg("GIT", "No agent_role, skipping SSH key")
         return None, None
 
     from app.ssh_key_manager import ssh_key_manager
     keys = ssh_key_manager.list_keys_for_agent(agent_role)
     if not keys:
+        dbg("GIT", f"No SSH keys found for agent '{agent_role}'")
         return None, None
 
+    dbg("GIT", f"Found {len(keys)} SSH key(s) for agent '{agent_role}', using first one")
     key = keys[0]
     with tempfile.NamedTemporaryFile(mode='w', suffix='_ssh_key', delete=False) as f:
         f.write(key.private_key)

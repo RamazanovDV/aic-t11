@@ -65,7 +65,8 @@ async def builtin_get_current_project(args: dict[str, Any], session: Any = None)
     repos = git_repo_manager.list_repos(project_name)
     
     parts = [f"# Project: {project_name}"]
-    parts.append(f"\n**Path:** {project_info.get('path', 'N/A')}")
+    if project_info:
+        parts.append(f"\n{project_info}")
     parts.append(f"\n**Repositories:** {len(repos)}")
     
     if repos:
@@ -76,10 +77,6 @@ async def builtin_get_current_project(args: dict[str, Any], session: Any = None)
             parts.append(f"  - Local: {repo.local_path or 'N/A'}")
             parts.append(f"  - Branch: {repo.branch or 'N/A'}")
             parts.append(f"  - Status: {repo.status or 'N/A'}")
-    
-    indexes = project_info.get('embeddings_indexes', [])
-    if indexes:
-        parts.append(f"\n**Embeddings Indexes:** {len(indexes)}")
     
     return "".join(parts)
 
