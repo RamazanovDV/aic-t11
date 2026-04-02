@@ -1,8 +1,12 @@
 import subprocess
-from pathlib import Path
 from typing import Any
 
 from app.mcp import MCPTool
+from app.tools.path_utils import (
+    PathSecurityError,
+    get_project_repos_path,
+    validate_path,
+)
 
 
 TOOLS_GIT = [
@@ -12,9 +16,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository (default: current directory)"
+                    "description": "Name of the git repository in the project (subdirectory of repos/)"
                 },
                 "short": {
                     "type": "boolean",
@@ -30,9 +34,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "max_count": {
                     "type": "integer",
@@ -65,13 +69,13 @@ TOOLS_GIT = [
     ),
     MCPTool(
         name="git_diff",
-        description="Show changes between commits, commit and working tree, etc. Returns diff output.",
+        description="Show changes between commits, commit and working tree, etc.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "target": {
                     "type": "string",
@@ -99,13 +103,13 @@ TOOLS_GIT = [
     ),
     MCPTool(
         name="git_branch_list",
-        description="List all branches. Shows local and optionally remote branches.",
+        description="List all branches.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "all": {
                     "type": "boolean",
@@ -126,9 +130,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "object": {
                     "type": "string",
@@ -148,9 +152,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "file": {
                     "type": "string",
@@ -169,13 +173,13 @@ TOOLS_GIT = [
     ),
     MCPTool(
         name="git_commit",
-        description="Create a new commit with all staged changes. Returns commit hash and message.",
+        description="Create a new commit with all staged changes.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "message": {
                     "type": "string",
@@ -201,9 +205,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "remote": {
                     "type": "string",
@@ -232,9 +236,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "remote": {
                     "type": "string",
@@ -258,9 +262,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "branch": {
                     "type": "string",
@@ -281,13 +285,13 @@ TOOLS_GIT = [
     ),
     MCPTool(
         name="git_reset",
-        description="Reset current HEAD to specified state. Can unstage files or change commit history.",
+        description="Reset current HEAD to specified state.",
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "target": {
                     "type": "string",
@@ -312,9 +316,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "base": {
                     "type": "string",
@@ -349,9 +353,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "branch": {
                     "type": "string",
@@ -381,9 +385,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "action": {
                     "type": "string",
@@ -413,9 +417,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "commits": {
                     "type": "array",
@@ -447,9 +451,9 @@ TOOLS_GIT = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {
+                "repo_name": {
                     "type": "string",
-                    "description": "Absolute path to the git repository"
+                    "description": "Name of the git repository in the project"
                 },
                 "remote": {
                     "type": "string",
@@ -476,7 +480,7 @@ TOOLS_GIT = [
 ]
 
 
-def _run_git(repo_path: str | None, args: list[str]) -> tuple[int, str, str]:
+def _run_git(repo_path: str, args: list[str]) -> tuple[int, str, str]:
     cmd = ["git"] + args
     try:
         result = subprocess.run(
@@ -493,19 +497,41 @@ def _run_git(repo_path: str | None, args: list[str]) -> tuple[int, str, str]:
         return 1, "", str(e)
 
 
-def _get_repo_path(repo_path: str | None) -> str | None:
-    if repo_path:
-        p = Path(repo_path)
-        if not p.exists() or not (p / ".git").exists():
-            return None
-        return str(p)
-    return None
+def _validate_and_get_repo_path(
+    repo_name: str | None,
+    project_name: str | None
+) -> str | None:
+    """Validate repo_name and return the full path to the git repository.
+    
+    If repo_name is provided, validates it's within project/repos.
+    If repo_name is None, returns the project/repos directory itself.
+    Returns None if validation fails.
+    """
+    if not project_name:
+        return None
+    
+    base_repos = get_project_repos_path(project_name)
+    
+    if not repo_name:
+        if base_repos.exists() and base_repos.is_dir():
+            return str(base_repos)
+        return None
+    
+    try:
+        repo_path = validate_path(repo_name, project_name)
+        git_path = repo_path / ".git"
+        if git_path.exists() and git_path.is_dir():
+            return str(repo_path)
+        return None
+    except PathSecurityError:
+        return None
 
 
-async def builtin_git_status(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_status(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     short = args.get("short", True)
     cmd = ["status"]
@@ -518,10 +544,11 @@ async def builtin_git_status(args: dict[str, Any]) -> str:
     return stdout or "Nothing to commit, working tree clean"
 
 
-async def builtin_git_log(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_log(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     max_count = args.get("max_count", 20)
     oneline = args.get("oneline", True)
@@ -551,10 +578,11 @@ async def builtin_git_log(args: dict[str, Any]) -> str:
     return stdout or "No commits found"
 
 
-async def builtin_git_diff(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_diff(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     target = args.get("target", "HEAD")
     base = args.get("base")
@@ -568,7 +596,7 @@ async def builtin_git_diff(args: dict[str, Any]) -> str:
     if cached:
         cmd.append("--cached")
     elif base:
-        cmd.append(f"{base}...{target}" if "..." in f"{base}...{target}" else f"{base}..{target}")
+        cmd.append(f"{base}..{target}")
     elif target:
         cmd.append(target)
     if file:
@@ -581,10 +609,11 @@ async def builtin_git_diff(args: dict[str, Any]) -> str:
     return stdout or "No differences"
 
 
-async def builtin_git_branch_list(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_branch_list(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     all_branches = args.get("all", False)
     verbose = args.get("verbose", False)
@@ -620,10 +649,11 @@ def _get_current_branch(repo_path: str) -> str:
     return stdout.strip() if code == 0 else ""
 
 
-async def builtin_git_show(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_show(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     obj = args.get("object", "HEAD")
     stat = args.get("stat", True)
@@ -639,10 +669,11 @@ async def builtin_git_show(args: dict[str, Any]) -> str:
     return stdout or "Object not found"
 
 
-async def builtin_git_blame(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_blame(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     file = args.get("file")
     if not file:
@@ -664,10 +695,11 @@ async def builtin_git_blame(args: dict[str, Any]) -> str:
     return stdout or "No blame information"
 
 
-async def builtin_git_commit(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_commit(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     message = args.get("message")
     if not message:
@@ -688,10 +720,11 @@ async def builtin_git_commit(args: dict[str, Any]) -> str:
     return stdout or "Commit created successfully"
 
 
-async def builtin_git_push(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_push(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     remote = args.get("remote", "origin")
     branch = args.get("branch")
@@ -714,10 +747,11 @@ async def builtin_git_push(args: dict[str, Any]) -> str:
     return stdout or "Push completed successfully"
 
 
-async def builtin_git_pull(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_pull(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     remote = args.get("remote", "origin")
     branch = args.get("branch")
@@ -736,10 +770,11 @@ async def builtin_git_pull(args: dict[str, Any]) -> str:
     return stdout or "Pull completed successfully"
 
 
-async def builtin_git_checkout(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_checkout(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     branch = args.get("branch")
     new_branch = args.get("new_branch")
@@ -764,10 +799,11 @@ async def builtin_git_checkout(args: dict[str, Any]) -> str:
     return stdout or f"Switched to branch: {new_branch or branch}"
 
 
-async def builtin_git_reset(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_reset(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     target = args.get("target", "HEAD")
     mode = args.get("mode", "mixed")
@@ -788,10 +824,11 @@ async def builtin_git_reset(args: dict[str, Any]) -> str:
     return stdout or f"Reset to {target} ({mode} mode)"
 
 
-async def builtin_git_rebase(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_rebase(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     base = args.get("base")
     continue_flag = args.get("continue", False)
@@ -831,10 +868,11 @@ async def builtin_git_rebase(args: dict[str, Any]) -> str:
     return "Error: base, abort, continue, or skip is required"
 
 
-async def builtin_git_merge(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_merge(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     branch = args.get("branch")
     if not branch:
@@ -858,10 +896,11 @@ async def builtin_git_merge(args: dict[str, Any]) -> str:
     return stdout or f"Successfully merged {branch}"
 
 
-async def builtin_git_stash(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_stash(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     action = args.get("action", "push")
     message = args.get("message")
@@ -912,10 +951,11 @@ async def builtin_git_stash(args: dict[str, Any]) -> str:
         return stdout or "Changes stashed successfully"
 
 
-async def builtin_git_cherry_pick(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_cherry_pick(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     commits = args.get("commits", [])
     if not commits:
@@ -946,10 +986,11 @@ async def builtin_git_cherry_pick(args: dict[str, Any]) -> str:
     return stdout or f"Successfully cherry-picked {len(commits)} commit(s)"
 
 
-async def builtin_git_fetch(args: dict[str, Any]) -> str:
-    repo_path = _get_repo_path(args.get("repo_path"))
+async def builtin_git_fetch(args: dict[str, Any], project_name: str | None = None) -> str:
+    repo_name = args.get("repo_name")
+    repo_path = _validate_and_get_repo_path(repo_name, project_name)
     if repo_path is None:
-        return "Error: Not a git repository"
+        return "Error: No git repository specified or repository not found in project"
 
     remote = args.get("remote")
     all_remotes = args.get("all", False)

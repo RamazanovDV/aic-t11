@@ -397,7 +397,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string", "description": "Path to git repository"},
+                "repo_name": {"type": "string", "description": "Path to git repository"},
                 "short": {"type": "boolean", "default": True}
             }
         }
@@ -408,7 +408,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "max_count": {"type": "integer", "default": 20},
                 "oneline": {"type": "boolean", "default": True}
             }
@@ -420,7 +420,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "target": {"type": "string"},
                 "file": {"type": "string"},
                 "cached": {"type": "boolean"}
@@ -433,7 +433,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "all": {"type": "boolean"},
                 "verbose": {"type": "boolean"}
             }
@@ -445,7 +445,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "object": {"type": "string"}
             }
         }
@@ -456,7 +456,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "file": {"type": "string"}
             },
             "required": ["file"]
@@ -468,7 +468,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "message": {"type": "string"},
                 "amend": {"type": "boolean"}
             },
@@ -481,7 +481,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "remote": {"type": "string"},
                 "force": {"type": "boolean"}
             }
@@ -493,7 +493,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "remote": {"type": "string"},
                 "rebase": {"type": "boolean"}
             }
@@ -505,7 +505,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "branch": {"type": "string"},
                 "new_branch": {"type": "string"},
                 "force": {"type": "boolean"}
@@ -519,7 +519,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "target": {"type": "string"},
                 "mode": {"type": "string", "enum": ["soft", "mixed", "hard"]}
             }
@@ -531,7 +531,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "base": {"type": "string"},
                 "continue": {"type": "boolean"},
                 "abort": {"type": "boolean"}
@@ -544,7 +544,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "branch": {"type": "string"},
                 "no_ff": {"type": "boolean"},
                 "squash": {"type": "boolean"}
@@ -558,7 +558,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "action": {"type": "string", "enum": ["push", "pop", "list", "drop", "apply"]},
                 "message": {"type": "string"}
             }
@@ -570,7 +570,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "commits": {"type": "array", "items": {"type": "string"}},
                 "continue": {"type": "boolean"},
                 "abort": {"type": "boolean"}
@@ -584,7 +584,7 @@ BUILTIN_TOOLS: list[MCPTool] = [
         input_schema={
             "type": "object",
             "properties": {
-                "repo_path": {"type": "string"},
+                "repo_name": {"type": "string"},
                 "remote": {"type": "string"},
                 "all": {"type": "boolean"},
                 "prune": {"type": "boolean"}
@@ -676,7 +676,8 @@ async def process_tool_calls(
     formatted_messages: list[dict[str, Any]],
     provider_name: str,
     max_tool_calls: int = 10,
-    required_capabilities: list[str] | None = None
+    required_capabilities: list[str] | None = None,
+    session: Any = None
 ) -> list[dict[str, Any]]:
     results = []
 
@@ -701,7 +702,7 @@ async def process_tool_calls(
             else:
                 builtin_names = {t.name for t in BUILTIN_TOOLS}
                 if tool_name in builtin_names:
-                    tool_result_content = await handle_builtin_tool(tool_name, tool_args)
+                    tool_result_content = await handle_builtin_tool(tool_name, tool_args, session)
                 else:
                     try:
                         result = await MCPManager.call_tool(tool_name, tool_args)
@@ -712,7 +713,7 @@ async def process_tool_calls(
         else:
             builtin_names = {t.name for t in BUILTIN_TOOLS}
             if tool_name in builtin_names:
-                tool_result_content = await handle_builtin_tool(tool_name, tool_args)
+                tool_result_content = await handle_builtin_tool(tool_name, tool_args, session)
             else:
                 try:
                     result = await MCPManager.call_tool(tool_name, tool_args)
@@ -733,72 +734,77 @@ async def process_tool_calls(
     return results
 
 
-async def handle_builtin_tool(tool_name: str, args: dict[str, Any]) -> str:
+async def handle_builtin_tool(tool_name: str, args: dict[str, Any], session: Any = None) -> str:
+    project_name = None
+    if session and hasattr(session, 'status'):
+        project_name = session.status.get("project")
+
     if tool_name == "manageembeddings":
         return await builtin_manage_embeddings(args)
     elif tool_name == "code_review":
         return await builtin_code_review(args)
     elif tool_name == "get_current_project":
-        return await builtin_get_current_project(args)
+        return await builtin_get_current_project(args, session)
     elif tool_name == "list_project_repos":
-        return await builtin_list_project_repos(args)
+        return await builtin_list_project_repos(args, session)
     elif tool_name == "get_repo_info":
-        return await builtin_get_repo_info(args)
+        return await builtin_get_repo_info(args, session)
     elif tool_name == "read_file":
-        return await builtin_read_file(args)
+        return await builtin_read_file(args, project_name)
     elif tool_name == "list_directory":
-        return await builtin_list_directory(args)
+        return await builtin_list_directory(args, project_name)
     elif tool_name == "grep_files":
-        return await builtin_grep_files(args)
+        return await builtin_grep_files(args, project_name)
     elif tool_name == "write_file":
-        return await builtin_write_file(args)
+        return await builtin_write_file(args, project_name)
     elif tool_name == "edit_file":
-        return await builtin_edit_file(args)
+        return await builtin_edit_file(args, project_name)
     elif tool_name == "create_directory":
-        return await builtin_create_directory(args)
+        return await builtin_create_directory(args, project_name)
     elif tool_name == "delete_file":
-        return await builtin_delete_file(args)
+        return await builtin_delete_file(args, project_name)
     elif tool_name == "delete_directory":
-        return await builtin_delete_directory(args)
+        return await builtin_delete_directory(args, project_name)
     elif tool_name == "git_status":
-        return await builtin_git_status(args)
+        return await builtin_git_status(args, project_name)
     elif tool_name == "git_log":
-        return await builtin_git_log(args)
+        return await builtin_git_log(args, project_name)
     elif tool_name == "git_diff":
-        return await builtin_git_diff(args)
+        return await builtin_git_diff(args, project_name)
     elif tool_name == "git_branch_list":
-        return await builtin_git_branch_list(args)
+        return await builtin_git_branch_list(args, project_name)
     elif tool_name == "git_show":
-        return await builtin_git_show(args)
+        return await builtin_git_show(args, project_name)
     elif tool_name == "git_blame":
-        return await builtin_git_blame(args)
+        return await builtin_git_blame(args, project_name)
     elif tool_name == "git_commit":
-        return await builtin_git_commit(args)
+        return await builtin_git_commit(args, project_name)
     elif tool_name == "git_push":
-        return await builtin_git_push(args)
+        return await builtin_git_push(args, project_name)
     elif tool_name == "git_pull":
-        return await builtin_git_pull(args)
+        return await builtin_git_pull(args, project_name)
     elif tool_name == "git_checkout":
-        return await builtin_git_checkout(args)
+        return await builtin_git_checkout(args, project_name)
     elif tool_name == "git_reset":
-        return await builtin_git_reset(args)
+        return await builtin_git_reset(args, project_name)
     elif tool_name == "git_rebase":
-        return await builtin_git_rebase(args)
+        return await builtin_git_rebase(args, project_name)
     elif tool_name == "git_merge":
-        return await builtin_git_merge(args)
+        return await builtin_git_merge(args, project_name)
     elif tool_name == "git_stash":
-        return await builtin_git_stash(args)
+        return await builtin_git_stash(args, project_name)
     elif tool_name == "git_cherry_pick":
-        return await builtin_git_cherry_pick(args)
+        return await builtin_git_cherry_pick(args, project_name)
     elif tool_name == "git_fetch":
-        return await builtin_git_fetch(args)
+        return await builtin_git_fetch(args, project_name)
     return f"Unknown built-in tool: {tool_name}"
 
 
 async def call_mcp_tool(
     tool_name: str,
     tool_args: dict[str, Any],
-    required_capabilities: list[str] | None = None
+    required_capabilities: list[str] | None = None,
+    session: Any = None
 ) -> str:
     """Call an MCP tool, handling both builtin and external tools."""
     if required_capabilities is not None:
@@ -809,7 +815,7 @@ async def call_mcp_tool(
 
     builtin_names = {t.name for t in BUILTIN_TOOLS}
     if tool_name in builtin_names:
-        return await handle_builtin_tool(tool_name, tool_args)
+        return await handle_builtin_tool(tool_name, tool_args, session)
     else:
         try:
             result = await MCPManager.call_tool(tool_name, tool_args)

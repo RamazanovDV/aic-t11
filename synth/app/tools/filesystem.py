@@ -3,6 +3,11 @@ from pathlib import Path
 from typing import Any
 
 from app.mcp import MCPTool
+from app.tools.path_utils import (
+    PathSecurityError,
+    validate_file_path,
+    validate_dir_path,
+)
 
 
 TOOLS_FILESYSTEM = [
@@ -95,99 +100,93 @@ TOOLS_FILESYSTEM = [
 ]
 
 
-async def builtin_read_file(args: dict[str, Any]) -> str:
+async def builtin_read_file(args: dict[str, Any], project_name: str | None = None) -> str:
     """Read file contents."""
     file_path = args.get("file_path")
-    
+
     if not file_path:
         return "Error: file_path is required"
-    
-    path = Path(file_path)
-    
-    if not path.exists():
-        return f"Error: File not found: {file_path}"
-    
-    if not path.is_file():
-        return f"Error: Not a file: {file_path}"
-    
+
+    try:
+        path = validate_file_path(file_path, project_name)
+    except PathSecurityError as e:
+        return f"Error: {str(e)}"
+
     offset = args.get("offset", 0)
     limit = args.get("limit", 500)
-    
+
     try:
         with open(path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        
+
         total_lines = len(lines)
-        
+
         if offset >= total_lines:
             return f"Error: Offset {offset} is beyond file length ({total_lines} lines)"
-        
+
         selected_lines = lines[offset:offset + limit]
         content = ''.join(selected_lines)
-        
-        result = f"# File: {file_path}\n"
+
+        result = f"# File: {path}\n"
         result += f"# Lines: {total_lines} (showing {offset}-{min(offset + limit, total_lines)})\n\n"
         result += content
-        
+
         if offset + limit < total_lines:
             result += f"\n... ({total_lines - offset - limit} more lines)"
-        
+
         return result
-    
+
     except UnicodeDecodeError:
-        return f"Error: Cannot read binary file: {file_path}"
+        return f"Error: Cannot read binary file: {path}"
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
 
-async def builtin_list_directory(args: dict[str, Any]) -> str:
+async def builtin_list_directory(args: dict[str, Any], project_name: str | None = None) -> str:
     """List directory contents."""
-    path = args.get("path")
-    
-    if not path:
+    path_arg = args.get("path")
+
+    if not path_arg:
         return "Error: path is required"
-    
-    dir_path = Path(path)
-    
-    if not dir_path.exists():
-        return f"Error: Directory not found: {path}"
-    
-    if not dir_path.is_dir():
-        return f"Error: Not a directory: {path}"
-    
+
+    try:
+        dir_path = validate_dir_path(path_arg, project_name)
+    except PathSecurityError as e:
+        return f"Error: {str(e)}"
+
     recursive = args.get("recursive", False)
     max_depth = args.get("max_depth", 3)
     include_hidden = args.get("include_hidden", False)
-    
+
     def format_tree(dir_path: Path, prefix: str = "", depth: int = 0) -> list[str]:
         if depth > max_depth:
             return []
-        
+
         try:
             entries = sorted(dir_path.iterdir(), key=lambda e: (not e.is_dir(), e.name))
         except PermissionError:
             return [f"{prefix}[Permission denied]"]
-        
+
         lines = []
         dirs = []
         files = []
-        
+
         for entry in entries:
             if not include_hidden and entry.name.startswith('.'):
                 continue
-            
+
             if entry.is_dir():
                 dirs.append(entry)
             else:
                 files.append(entry)
-        
+
         all_entries = [(d, True) for d in dirs] + [(f, False) for f in files]
-        
+
         for i, (entry, is_dir) in enumerate(all_entries):
             is_last = i == len(all_entries) - 1
             current_prefix = "└── " if is_last else "├── "
             next_prefix = "    " if is_last else "│   "
-            
+
             if is_dir:
                 lines.append(f"{prefix}{current_prefix}{entry.name}/")
                 if recursive:
@@ -196,11 +195,11 @@ async def builtin_list_directory(args: dict[str, Any]) -> str:
                 size = entry.stat().st_size if not entry.is_symlink() else 0
                 size_str = f" ({size} bytes)" if size > 0 else ""
                 lines.append(f"{prefix}{current_prefix}{entry.name}{size_str}")
-        
+
         return lines
-    
-    result = f"# Directory: {path}\n\n"
-    
+
+    result = f"# Directory: {dir_path}\n\n"
+
     try:
         entries = list(dir_path.iterdir())
         if not include_hidden:
@@ -208,39 +207,39 @@ async def builtin_list_directory(args: dict[str, Any]) -> str:
         total = len(entries)
     except PermissionError:
         return result + "[Permission denied]"
-    
+
     result += f"# Total: {total} entries\n\n"
     result += ".\n"
     result += "\n".join(format_tree(dir_path))
-    
+
     return result
 
 
-async def builtin_grep_files(args: dict[str, Any]) -> str:
+async def builtin_grep_files(args: dict[str, Any], project_name: str | None = None) -> str:
     """Search for pattern in files."""
-    path = args.get("path")
+    path_arg = args.get("path")
     pattern = args.get("pattern")
-    
-    if not path or not pattern:
+
+    if not path_arg or not pattern:
         return "Error: both path and pattern are required"
-    
-    dir_path = Path(path)
-    
-    if not dir_path.exists():
-        return f"Error: Directory not found: {path}"
-    
+
+    try:
+        dir_path = validate_dir_path(path_arg, project_name)
+    except PathSecurityError as e:
+        return f"Error: {str(e)}"
+
     file_glob = args.get("file_glob", "*")
     case_sensitive = args.get("case_sensitive", False)
     max_results = args.get("max_results", 100)
-    
+
     try:
         flags = 0 if case_sensitive else re.IGNORECASE
         regex = re.compile(pattern, flags)
     except re.error as e:
         return f"Error: Invalid regex pattern: {e}"
-    
+
     matches = []
-    
+
     def search_in_file(file_path: Path) -> list[str]:
         file_matches = []
         try:
@@ -254,16 +253,16 @@ async def builtin_grep_files(args: dict[str, Any]) -> str:
         except Exception:
             pass
         return file_matches
-    
+
     def walk_directory(current_path: Path, depth: int = 0) -> None:
         if depth > 10:
             return
-        
+
         try:
             for entry in sorted(current_path.iterdir()):
                 if entry.name.startswith('.'):
                     continue
-                
+
                 if entry.is_dir() and not entry.is_symlink():
                     walk_directory(entry, depth + 1)
                 elif entry.is_file():
@@ -275,20 +274,20 @@ async def builtin_grep_files(args: dict[str, Any]) -> str:
                                 return
         except PermissionError:
             pass
-    
+
     walk_directory(dir_path)
-    
+
     if not matches:
-        return f"# Search: {pattern}\n# In: {path}\n# Glob: {file_glob}\n\nNo matches found."
-    
+        return f"# Search: {pattern}\n# In: {dir_path}\n# Glob: {file_glob}\n\nNo matches found."
+
     result = f"# Search: {pattern}\n"
-    result += f"# In: {path}\n"
+    result += f"# In: {dir_path}\n"
     result += f"# Glob: {file_glob}\n"
     result += f"# Files with matches: {len(matches)}\n\n"
-    
+
     for file_path, file_matches in matches:
         result += f"## {file_path}\n"
         result += "\n".join(file_matches)
         result += "\n\n"
-    
+
     return result

@@ -1,8 +1,13 @@
 import shutil
-from pathlib import Path
 from typing import Any
 
 from app.mcp import MCPTool
+from app.tools.path_utils import (
+    PathSecurityError,
+    validate_file_path,
+    validate_dir_path,
+    validate_any_path,
+)
 
 
 TOOLS_FILE_OPS = [
@@ -101,7 +106,7 @@ TOOLS_FILE_OPS = [
 ]
 
 
-async def builtin_write_file(args: dict[str, Any]) -> str:
+async def builtin_write_file(args: dict[str, Any], project_name: str | None = None) -> str:
     """Create or overwrite a file with content."""
     file_path = args.get("file_path")
     content = args.get("content", "")
@@ -109,10 +114,10 @@ async def builtin_write_file(args: dict[str, Any]) -> str:
     if not file_path:
         return "Error: file_path is required"
 
-    path = Path(file_path)
-
-    if path.exists() and path.is_dir():
-        return f"Error: Path is a directory: {file_path}"
+    try:
+        path = validate_any_path(file_path, project_name)
+    except PathSecurityError as e:
+        return f"Error: {str(e)}"
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,14 +125,14 @@ async def builtin_write_file(args: dict[str, Any]) -> str:
             f.write(content)
 
         line_count = len(content.splitlines())
-        return f"Successfully wrote to {file_path}\nLines: {line_count}\nSize: {len(content)} bytes"
+        return f"Successfully wrote to {path}\nLines: {line_count}\nSize: {len(content)} bytes"
     except PermissionError:
-        return f"Error: Permission denied: {file_path}"
+        return f"Error: Permission denied: {path}"
     except Exception as e:
         return f"Error writing file: {str(e)}"
 
 
-async def builtin_edit_file(args: dict[str, Any]) -> str:
+async def builtin_edit_file(args: dict[str, Any], project_name: str | None = None) -> str:
     """Edit a file by replacing old_string with new_string."""
     file_path = args.get("file_path")
     old_string = args.get("old_string")
@@ -138,19 +143,16 @@ async def builtin_edit_file(args: dict[str, Any]) -> str:
     if old_string is None:
         return "Error: old_string is required"
 
-    path = Path(file_path)
-
-    if not path.exists():
-        return f"Error: File not found: {file_path}"
-
-    if not path.is_file():
-        return f"Error: Not a file: {file_path}"
+    try:
+        path = validate_file_path(file_path, project_name)
+    except PathSecurityError as e:
+        return f"Error: {str(e)}"
 
     try:
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
     except UnicodeDecodeError:
-        return f"Error: Cannot read binary file: {file_path}"
+        return f"Error: Cannot read binary file: {path}"
     except Exception as e:
         return f"Error reading file: {str(e)}"
 
@@ -165,24 +167,27 @@ async def builtin_edit_file(args: dict[str, Any]) -> str:
 
         old_lines = len(content.splitlines())
         new_lines = len(new_content.splitlines())
-        return f"Successfully edited {file_path}\nReplaced 1 occurrence\nOld lines: {old_lines}, New lines: {new_lines}"
+        return f"Successfully edited {path}\nReplaced 1 occurrence\nOld lines: {old_lines}, New lines: {new_lines}"
     except PermissionError:
-        return f"Error: Permission denied: {file_path}"
+        return f"Error: Permission denied: {path}"
     except Exception as e:
         return f"Error writing file: {str(e)}"
 
 
-async def builtin_create_directory(args: dict[str, Any]) -> str:
+async def builtin_create_directory(args: dict[str, Any], project_name: str | None = None) -> str:
     """Create a directory."""
-    path = args.get("path")
+    path_arg = args.get("path")
 
-    if not path:
+    if not path_arg:
         return "Error: path is required"
 
-    dir_path = Path(path)
+    try:
+        path = validate_any_path(path_arg, project_name)
+    except PathSecurityError as e:
+        return f"Error: {str(e)}"
 
-    if dir_path.exists():
-        if dir_path.is_dir():
+    if path.exists():
+        if path.is_dir():
             return f"Directory already exists: {path}"
         else:
             return f"Error: Path exists but is not a directory: {path}"
@@ -191,9 +196,9 @@ async def builtin_create_directory(args: dict[str, Any]) -> str:
 
     try:
         if recursive:
-            dir_path.mkdir(parents=True, exist_ok=True)
+            path.mkdir(parents=True, exist_ok=True)
         else:
-            dir_path.mkdir(parents=False, exist_ok=False)
+            path.mkdir(parents=False, exist_ok=False)
         return f"Successfully created directory: {path}"
     except PermissionError:
         return f"Error: Permission denied: {path}"
@@ -203,56 +208,50 @@ async def builtin_create_directory(args: dict[str, Any]) -> str:
         return f"Error creating directory: {str(e)}"
 
 
-async def builtin_delete_file(args: dict[str, Any]) -> str:
+async def builtin_delete_file(args: dict[str, Any], project_name: str | None = None) -> str:
     """Delete a file."""
     file_path = args.get("file_path")
 
     if not file_path:
         return "Error: file_path is required"
 
-    path = Path(file_path)
-
-    if not path.exists():
-        return f"Error: File not found: {file_path}"
-
-    if not path.is_file():
-        return f"Error: Not a file (use delete_directory for directories): {file_path}"
+    try:
+        path = validate_file_path(file_path, project_name)
+    except PathSecurityError as e:
+        return f"Error: {str(e)}"
 
     try:
         path.unlink()
-        return f"Successfully deleted file: {file_path}"
+        return f"Successfully deleted file: {path}"
     except PermissionError:
-        return f"Error: Permission denied: {file_path}"
+        return f"Error: Permission denied: {path}"
     except Exception as e:
         return f"Error deleting file: {str(e)}"
 
 
-async def builtin_delete_directory(args: dict[str, Any]) -> str:
+async def builtin_delete_directory(args: dict[str, Any], project_name: str | None = None) -> str:
     """Delete a directory and its contents."""
-    path = args.get("path")
+    path_arg = args.get("path")
 
-    if not path:
+    if not path_arg:
         return "Error: path is required"
 
-    dir_path = Path(path)
-
-    if not dir_path.exists():
-        return f"Error: Directory not found: {path}"
-
-    if not dir_path.is_dir():
-        return f"Error: Not a directory: {path}"
+    try:
+        path = validate_dir_path(path_arg, project_name)
+    except PathSecurityError as e:
+        return f"Error: {str(e)}"
 
     recursive = args.get("recursive", True)
 
     if not recursive:
         try:
-            dir_path.rmdir()
+            path.rmdir()
             return f"Successfully deleted empty directory: {path}"
         except OSError:
             return "Error: Directory not empty. Use recursive=true to delete recursively."
 
     try:
-        shutil.rmtree(dir_path)
+        shutil.rmtree(path)
         return f"Successfully deleted directory and contents: {path}"
     except PermissionError:
         return f"Error: Permission denied: {path}"
