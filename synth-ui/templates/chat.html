@@ -581,6 +581,7 @@
                 branches: [],
                 checkpoints: [],
                 currentStatusClass: 'state-free',
+                currentProject: null,
             });
         }
     }
@@ -1073,6 +1074,7 @@
         }
         
         if (panel) {
+            panel.currentProject = data.project || panel.currentProject;
             panel.currentStatusClass = stateClass;
         }
     }
@@ -1342,7 +1344,7 @@
         if (role === 'user' || role === 'assistant' || role === 'error' || role === 'summary') {
             const msgIndex = messageIndex >= 0 ? messageIndex : (panel.messages ? panel.messages.length - 1 : 0);
             const pinTitle = pinned ? 'Открепить сообщение' : 'Закрепить сообщение';
-            actionsHtml += `<button class="message-pin-btn${pinned ? ' pinned' : ''}" onclick="pinMessage(${panelIndex}, ${msgIndex})" title="${pinTitle}">📌</button>`;
+            actionsHtml += `<button class="message-pin-btn${pinned ? ' pinned' : ''}" data-pinned="${pinned}" onclick="pinMessage(${panelIndex}, ${msgIndex})" title="${pinTitle}">📌</button>`;
         }
         
         if ((role === 'assistant' || role === 'error' || role === 'summary') && debugData) {
@@ -1830,7 +1832,7 @@
                 const usage = data.usage || null;
                 const msgIndex = panel.messages.length;
                 const statusClass = panel.currentStatusClass || 'state-free';
-                addMessageToPanel(panelIndex, data.message, 'assistant', data.debug || null, usage, data.model || null, false, msgIndex, null, statusClass, data.reasoning || null);
+                addMessageToPanel(panelIndex, data.message, 'assistant', data.debug || null, usage, data.model || null, false, false, msgIndex, null, statusClass, data.reasoning || null);
                 if (data.usage) {
                     panel.totalInput += data.usage.input_tokens || 0;
                     panel.totalOutput += data.usage.output_tokens || 0;
@@ -2443,6 +2445,7 @@
             if (pinBtn) {
                 const newTitle = pinned ? 'Открепить сообщение' : 'Закрепить сообщение';
                 pinBtn.title = newTitle;
+                pinBtn.dataset.pinned = pinned;
                 if (pinned) {
                     pinBtn.classList.add('pinned');
                 } else {
@@ -4227,7 +4230,11 @@
 
     function getProjectFromPanel(panelIndex) {
         const panel = panels[panelIndex];
-        if (!panel || !panel.messages) return null;
+        if (!panel) return null;
+        
+        if (panel.currentProject) return panel.currentProject;
+        
+        if (!panel.messages) return null;
         
         for (let i = panel.messages.length - 1; i >= 0; i--) {
             const msg = panel.messages[i];
