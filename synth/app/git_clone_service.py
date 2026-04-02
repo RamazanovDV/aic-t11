@@ -194,6 +194,56 @@ class GitCloneService:
             return "clean"
         return "unknown"
     
+    def get_status_detailed(self, repo_path: Path) -> dict[str, Any]:
+        """Get detailed git status including modified, staged, and untracked files."""
+        returncode, stdout, stderr = self._run_git_command(
+            ["status", "--porcelain"],
+            cwd=repo_path
+        )
+        
+        if returncode != 0:
+            return {"status": "unknown", "modified": [], "staged": [], "untracked": []}
+        
+        modified = []
+        staged = []
+        untracked = []
+        
+        for line in stdout.strip().split("\n"):
+            if not line:
+                continue
+            index_status = line[0] if len(line) > 0 else " "
+            worktree_status = line[1] if len(line) > 1 else " "
+            filepath = line[3:] if len(line) > 3 else line
+            
+            if index_status == "?" and worktree_status == "?":
+                untracked.append(filepath)
+            elif index_status == " " and worktree_status == "M":
+                modified.append(filepath)
+            elif index_status == "M" and worktree_status == " ":
+                staged.append(filepath)
+            elif index_status == "M" and worktree_status == "M":
+                modified.append(filepath)
+                staged.append(filepath)
+            elif index_status == "A":
+                staged.append(filepath)
+            elif index_status == "D":
+                staged.append(filepath)
+            elif worktree_status == "D":
+                modified.append(filepath)
+            else:
+                if index_status != " ":
+                    staged.append(filepath)
+                if worktree_status == "M":
+                    modified.append(filepath)
+        
+        overall = "dirty" if (modified or staged or untracked) else "clean"
+        return {
+            "status": overall,
+            "modified": modified,
+            "staged": staged,
+            "untracked": untracked
+        }
+    
     def get_log(
         self,
         repo_path: Path,

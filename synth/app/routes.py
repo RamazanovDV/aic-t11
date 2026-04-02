@@ -673,6 +673,68 @@ def _handle_project_updates(session) -> None:
             error("ROUTES", f"Failed to create schedule from status block: {e}")
 
 
+@api_bp.route("/projects", methods=["GET"])
+@require_user
+def list_projects():
+    """List all projects"""
+    projects = project_manager.project_manager.get_projects_list()
+    return jsonify({"projects": projects})
+
+
+@api_bp.route("/projects", methods=["POST"])
+@require_user
+def create_project():
+    """Create a new project"""
+    data = request.get_json()
+    if not data or "name" not in data:
+        return jsonify({"error": "Missing required field: name"}), 400
+    
+    name = data["name"].strip()
+    if not name:
+        return jsonify({"error": "Project name cannot be empty"}), 400
+    
+    if project_manager.project_manager.create_project(name):
+        return jsonify({"success": True, "name": name}), 201
+    return jsonify({"error": "Project already exists or invalid name"}), 400
+
+
+@api_bp.route("/projects/<project_name>", methods=["DELETE"])
+@require_user
+def delete_project(project_name):
+    """Delete a project"""
+    project_dir = project_manager.project_manager._projects_dir / project_name
+    if not project_dir.exists():
+        return jsonify({"error": "Project not found"}), 404
+    
+    try:
+        import shutil
+        shutil.rmtree(project_dir)
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/sessions/<session_id>/project", methods=["PUT"])
+@require_user
+def set_session_project(session_id):
+    """Set project for a session"""
+    data = request.get_json()
+    if data is None:
+        return jsonify({"error": "Missing request body"}), 400
+    
+    project_name = data.get("project")
+    if project_name is not None and not isinstance(project_name, str):
+        return jsonify({"error": "Project must be a string or null"}), 400
+    
+    session = session_manager.get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+    
+    session.set_project(project_name)
+    session_manager.save_session(session_id)
+    return jsonify({"success": True, "project": project_name})
+
+
 @api_bp.route("/projects/<project_name>/schedules", methods=["GET"])
 @require_user
 def list_schedules(project_name):
@@ -1058,6 +1120,369 @@ def get_git_repo_info(project_name, repo_name):
         })
     else:
         return jsonify({"error": message}), 404
+
+
+@api_bp.route("/projects/<project_name>/repos/<repo_name>/tree", methods=["GET"])
+@require_user
+def get_repo_tree(project_name, repo_name):
+    """Get directory tree for a repository."""
+    from app.git_repo_manager import git_repo_manager
+    from pathlib import Path
+    
+    success, message, repo_info = git_repo_manager.get_repo_info(project_name, repo_name)
+    if not success:
+        return jsonify({"error": message}), 404
+    
+    repo_path = Path(repo_info.local_path)
+    if not repo_path.exists():
+        return jsonify({"error": "Repository path not found"}), 404
+    
+    target_path = request.args.get("path", "")
+    if target_path:
+        target_path = repo_path / target_path
+    else:
+        target_path = repo_path
+    
+    if not target_path.exists():
+        return jsonify({"error": "Path not found"}), 404
+    
+    if not target_path.is_dir():
+        return jsonify({"error": "Path is not a directory"}), 400
+    
+    max_depth = int(request.args.get("max_depth", 3))
+    include_hidden = request.args.get("include_hidden", "false").lower() == "true"
+    
+    def list_tree(dir_path: Path, depth: int = 0) -> list:
+        if depth > max_depth:
+            return []
+        
+        try:
+            entries = sorted(dir_path.iterdir(), key=lambda e: (not e.is_dir(), e.name))
+        except PermissionError:
+            return [{"name": "[Permission denied]", "type": "error"}]
+        
+        result = []
+        for entry in entries:
+            if not include_hidden and entry.name.startswith('.'):
+                continue
+            
+            if entry.is_dir():
+                result.append({"name": entry.name, "type": "dir"})
+            else:
+                try:
+                    size = entry.stat().st_size
+                except:
+                    size = 0
+                result.append({"name": entry.name, "type": "file", "size": size})
+        
+        return result
+    
+    rel_path = target_path.relative_to(repo_path) if target_path != repo_path else ""
+    
+    return jsonify({
+        "path": str(rel_path) if rel_path else "",
+        "entries": list_tree(target_path)
+    })
+
+
+@api_bp.route("/projects/<project_name>/repos/<repo_name>/read", methods=["GET"])
+@require_user
+def read_repo_file(project_name, repo_name):
+    """Read a file from a repository."""
+    from app.git_repo_manager import git_repo_manager
+    from pathlib import Path
+    
+    success, message, repo_info = git_repo_manager.get_repo_info(project_name, repo_name)
+    if not success:
+        return jsonify({"error": message}), 404
+    
+    repo_path = Path(repo_info.local_path)
+    if not repo_path.exists():
+        return jsonify({"error": "Repository path not found"}), 404
+    
+    file_path = request.args.get("path", "")
+    if not file_path:
+        return jsonify({"error": "path is required"}), 400
+    
+    target_path = repo_path / file_path
+    if not target_path.exists():
+        return jsonify({"error": "File not found"}), 404
+    
+    if not target_path.is_file():
+        return jsonify({"error": "Path is not a file"}), 400
+    
+    try:
+        with open(target_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except UnicodeDecodeError:
+        return jsonify({"error": "File is not text-readable", "encoding": "binary"}), 400
+    except Exception as e:
+        return jsonify({"error": f"Error reading file: {str(e)}"}), 500
+    
+    return jsonify({
+        "path": file_path,
+        "content": content,
+        "size": len(content)
+    })
+
+
+@api_bp.route("/projects/<project_name>/repos/<repo_name>/status", methods=["GET"])
+@require_user
+def get_repo_status(project_name, repo_name):
+    """Get git status for a repository."""
+    from app.git_repo_manager import git_repo_manager
+    
+    success, message, repo_info = git_repo_manager.get_repo_info(project_name, repo_name)
+    if not success:
+        return jsonify({"error": message}), 404
+    
+    status, modified_files = git_repo_manager.get_repo_status(project_name, repo_name)
+    
+    return jsonify({
+        "status": status,
+        "modified": modified_files.get("modified", []),
+        "staged": modified_files.get("staged", []),
+        "untracked": modified_files.get("untracked", [])
+    })
+
+
+@api_bp.route("/projects/<project_name>/repos/<repo_name>/diff", methods=["GET"])
+@require_user
+def get_repo_diff(project_name, repo_name):
+    """Get git diff for a repository."""
+    from app.git_repo_manager import git_repo_manager
+    
+    success, message, repo_info = git_repo_manager.get_repo_info(project_name, repo_name)
+    if not success:
+        return jsonify({"error": message}), 404
+    
+    file_path = request.args.get("path")
+    
+    diff_result = git_repo_manager.get_repo_diff(project_name, repo_name, file_path=file_path)
+    
+    return jsonify({
+        "diff": diff_result,
+        "path": file_path
+    })
+
+
+@api_bp.route("/projects/<project_name>/files/tree", methods=["GET"])
+@require_user
+def get_project_files_tree(project_name):
+    """Get directory tree for project files (from projects/{project}/repos/)."""
+    from app.project_manager import project_manager
+    from pathlib import Path
+    
+    if not project_manager.project_exists(project_name):
+        return jsonify({"error": "Project not found"}), 404
+    
+    base_path = config.data_dir / "projects" / project_name / "repos"
+    if not base_path.exists():
+        return jsonify({"path": "", "entries": []})
+    
+    target_path_str = request.args.get("path", "")
+    if target_path_str:
+        target_path = base_path / target_path_str
+    else:
+        target_path = base_path
+    
+    if not target_path.exists():
+        return jsonify({"error": "Path not found"}), 404
+    
+    if not target_path.is_dir():
+        return jsonify({"error": "Path is not a directory"}), 400
+    
+    max_depth = int(request.args.get("max_depth", 3))
+    include_hidden = request.args.get("include_hidden", "false").lower() == "true"
+    
+    def list_tree(dir_path: Path, depth: int = 0) -> list:
+        if depth > max_depth:
+            return []
+        
+        try:
+            entries = sorted(dir_path.iterdir(), key=lambda e: (not e.is_dir(), e.name))
+        except PermissionError:
+            return [{"name": "[Permission denied]", "type": "error"}]
+        
+        result = []
+        for entry in entries:
+            if not include_hidden and entry.name.startswith('.'):
+                continue
+            
+            if entry.is_dir():
+                result.append({"name": entry.name, "type": "dir"})
+            else:
+                try:
+                    size = entry.stat().st_size
+                except:
+                    size = 0
+                result.append({"name": entry.name, "type": "file", "size": size})
+        
+        return result
+    
+    rel_path = target_path.relative_to(base_path) if target_path != base_path else ""
+    
+    return jsonify({
+        "path": str(rel_path) if rel_path else "",
+        "entries": list_tree(target_path)
+    })
+
+
+@api_bp.route("/projects/<project_name>/files/read", methods=["GET"])
+@require_user
+def read_project_file(project_name):
+    """Read a file from project files."""
+    from app.project_manager import project_manager
+    from pathlib import Path
+    
+    if not project_manager.project_exists(project_name):
+        return jsonify({"error": "Project not found"}), 404
+    
+    base_path = config.data_dir / "projects" / project_name / "repos"
+    if not base_path.exists():
+        return jsonify({"error": "Base path not found"}), 404
+    
+    file_path_str = request.args.get("path", "")
+    if not file_path_str:
+        return jsonify({"error": "path is required"}), 400
+    
+    target_path = base_path / file_path_str
+    if not target_path.exists():
+        return jsonify({"error": "File not found"}), 404
+    
+    if not target_path.is_file():
+        return jsonify({"error": "Path is not a file"}), 400
+    
+    try:
+        with open(target_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except UnicodeDecodeError:
+        return jsonify({"error": "File is not text-readable", "encoding": "binary"}), 400
+    except Exception as e:
+        return jsonify({"error": f"Error reading file: {str(e)}"}), 500
+    
+    return jsonify({
+        "path": file_path_str,
+        "content": content,
+        "size": len(content)
+    })
+
+
+@api_bp.route("/projects/<project_name>/files/status", methods=["GET"])
+@require_user
+def get_project_files_status(project_name):
+    """Get git status for project files (searches for .git in subdirs)."""
+    from app.project_manager import project_manager
+    from pathlib import Path
+    
+    if not project_manager.project_exists(project_name):
+        return jsonify({"error": "Project not found"}), 404
+    
+    base_path = config.data_dir / "projects" / project_name / "repos"
+    if not base_path.exists():
+        return jsonify({"status": "clean", "modified": [], "staged": [], "untracked": []})
+    
+    git_path = _find_git_dir(base_path)
+    if not git_path:
+        return jsonify({"status": "clean", "modified": [], "staged": [], "untracked": []})
+    
+    from app.git_clone_service import git_clone_service
+    status_data = git_clone_service.get_status_detailed(git_path)
+    
+    relative_modified = []
+    for f in status_data.get("modified", []):
+        try:
+            relative_modified.append(str(Path(f).relative_to(git_path)))
+        except ValueError:
+            relative_modified.append(f)
+    
+    relative_staged = []
+    for f in status_data.get("staged", []):
+        try:
+            relative_staged.append(str(Path(f).relative_to(git_path)))
+        except ValueError:
+            relative_staged.append(f)
+    
+    relative_untracked = []
+    for f in status_data.get("untracked", []):
+        try:
+            relative_untracked.append(str(Path(f).relative_to(git_path)))
+        except ValueError:
+            relative_untracked.append(f)
+    
+    return jsonify({
+        "status": status_data.get("status", "unknown"),
+        "modified": relative_modified,
+        "staged": relative_staged,
+        "untracked": relative_untracked
+    })
+
+
+@api_bp.route("/projects/<project_name>/files/diff", methods=["GET"])
+@require_user
+def get_project_files_diff(project_name):
+    """Get git diff for project files."""
+    from app.project_manager import project_manager
+    from pathlib import Path
+    
+    if not project_manager.project_exists(project_name):
+        return jsonify({"error": "Project not found"}), 404
+    
+    base_path = config.data_dir / "projects" / project_name / "repos"
+    if not base_path.exists():
+        return jsonify({"diff": "", "path": None})
+    
+    git_path = _find_git_dir(base_path)
+    if not git_path:
+        return jsonify({"diff": "", "path": None})
+    
+    from app.git_clone_service import git_clone_service
+    
+    file_path_str = request.args.get("path")
+    if file_path_str:
+        diff_result = git_clone_service.get_diff(git_path, "HEAD")
+        
+        if diff_result:
+            lines = diff_result.split("\n")
+            filtered_lines = []
+            in_file_section = False
+            
+            for line in lines:
+                if line.startswith("diff --git"):
+                    if file_path_str in line:
+                        in_file_section = True
+                    else:
+                        in_file_section = False
+                elif in_file_section:
+                    filtered_lines.append(line)
+            
+            diff_result = "\n".join(filtered_lines)
+    else:
+        diff_result = git_clone_service.get_diff(git_path, "HEAD")
+    
+    return jsonify({
+        "diff": diff_result or "",
+        "path": file_path_str
+    })
+
+
+def _find_git_dir(base_path: Path) -> Path | None:
+    """Find .git directory in base_path or its subdirectories."""
+    if (base_path / ".git").exists():
+        return base_path
+    
+    try:
+        for item in base_path.iterdir():
+            if item.is_dir() and not item.name.startswith('.'):
+                if (item / ".git").exists():
+                    return item
+                nested = _find_git_dir(item)
+                if nested:
+                    return nested
+    except PermissionError:
+        pass
+    
+    return None
 
 
 @api_bp.route("/api/git/review", methods=["POST"])

@@ -233,6 +233,18 @@ class Session:
         self.provider = provider
         self.model = model
 
+    def set_project(self, project_name: str | None) -> None:
+        """Set project for this session manually"""
+        if not self.status:
+            self.status = {}
+        prev_project = self.status.get("project")
+        self.status["project"] = project_name
+        if project_name and project_name != prev_project:
+            self.add_info_message(f"📁 Проект изменён: {project_name}")
+        elif project_name is None and prev_project:
+            self.add_info_message(f"📁 Проект удалён")
+        self.updated_at = datetime.now()
+
     def add_mcp_server(self, server_name: str) -> None:
         if not any(s.get("name") == server_name for s in self.mcp_servers):
             self.mcp_servers.append({"name": server_name, "active": "true"})

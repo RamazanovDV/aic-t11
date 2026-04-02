@@ -12,10 +12,13 @@ except NameError:
 try:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
-    from mcp.client.sse import sse_client
     MCP_AVAILABLE = True
 except ImportError:
     MCP_AVAILABLE = False
+
+import httpx
+from httpx_sse import EventSource
+from mcp.types import JSONRPCMessage, JSONRPCRequest, JSONRPCResponse
 
 from app.mcp.config import mcp_config
 from app.logger import debug, info, warning, error
@@ -57,10 +60,12 @@ class MCPClient:
         
         self._session: ClientSession | None = None
         self._exit_stack: AsyncExitStack | None = None
+        self._client: httpx.AsyncClient | None = None
+        self._session_id: str | None = None
         self._tools: list[MCPTool] = []
 
     async def connect(self) -> None:
-        if self._session is not None:
+        if self._client is not None:
             return
         
         try:
@@ -100,33 +105,105 @@ class MCPClient:
         
         try:
             debug("MCP", f"Creating SSE connection to {self.url}")
+            
+            self._session_id = None
+            self._client = httpx.AsyncClient(timeout=30.0)
             self._exit_stack = AsyncExitStack()
-            sse_transport = await self._exit_stack.enter_async_context(sse_client(self.url))
-            read, write = sse_transport
-            debug("MCP", "SSE connected, creating session")
-            self._session = await self._exit_stack.enter_async_context(
-                ClientSession(read, write)
+            await self._exit_stack.enter_async_context(self._client)
+            
+            debug("MCP", "Sending initialize via direct httpx...")
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            }
+            
+            response = await self._client.post(
+                self.url,
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "mcp", "version": "1.0"}
+                    },
+                    "id": 1
+                },
+                headers=headers
             )
-            debug("MCP", "Initializing session")
-            await self._session.initialize()
-            debug("MCP", "Session initialized")
+            
+            response.raise_for_status()
+            self._session_id = response.headers.get("mcp-session-id")
+            debug("MCP", f"Got session ID: {self._session_id}")
+            
+            content_type = response.headers.get("content-type", "").lower()
+            if content_type.startswith("text/event-stream"):
+                event_source = EventSource(response)
+                async for sse in event_source.aiter_sse():
+                    if sse.data:
+                        debug("MCP", f"SSE initialize response: {sse.data[:100]}...")
+                        break
+            
+            debug("MCP", "Session initialized via direct httpx")
+            
+            self._session = None  # We'll call tools directly
+            
         except Exception as e:
             error("MCP", f"Connection error: {e}")
             raise MCPConnectionError(f"Failed to connect to MCP server '{self.server_name}': {e}")
 
     async def _load_tools(self) -> None:
-        if not self._session:
+        if not self._client or not self._session_id:
             raise MCPConnectionError("Not connected")
         
-        response = await self._session.list_tools()
-        self._tools = [
-            MCPTool(
-                name=tool.name,
-                description=tool.description or "",
-                input_schema=tool.inputSchema
-            )
-            for tool in response.tools
-        ]
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "mcp-session-id": self._session_id,
+        }
+        
+        response = await self._client.post(
+            self.url,
+            json={
+                "jsonrpc": "2.0",
+                "method": "tools/list",
+                "params": {},
+                "id": 2
+            },
+            headers=headers
+        )
+        response.raise_for_status()
+        
+        content_type = response.headers.get("content-type", "").lower()
+        if content_type.startswith("text/event-stream"):
+            event_source = EventSource(response)
+            async for sse in event_source.aiter_sse():
+                if sse.data:
+                    msg = JSONRPCMessage.model_validate_json(sse.data)
+                    if isinstance(msg.root, JSONRPCResponse) and msg.root.result:
+                        tools_data = msg.root.result.get("tools", [])
+                        self._tools = [
+                            MCPTool(
+                                name=tool.get("name", ""),
+                                description=tool.get("description", ""),
+                                input_schema=tool.get("inputSchema", {})
+                            )
+                            for tool in tools_data
+                        ]
+                    break
+        elif content_type.startswith("application/json"):
+            content = response.read()
+            msg = JSONRPCMessage.model_validate_json(content)
+            if isinstance(msg.root, JSONRPCResponse) and msg.root.result:
+                tools_data = msg.root.result.get("tools", [])
+                self._tools = [
+                    MCPTool(
+                        name=tool.get("name", ""),
+                        description=tool.get("description", ""),
+                        input_schema=tool.get("inputSchema", {})
+                    )
+                    for tool in tools_data
+                ]
 
     async def list_tools(self) -> list[MCPTool]:
         if not self._session:
@@ -134,34 +211,53 @@ class MCPClient:
         return self._tools
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
-        if not self._session:
+        if not self._client or not self._session_id:
             await self.connect()
         
-        if not self._session:
+        if not self._client or not self._session_id:
             raise MCPConnectionError("Not connected")
         
         try:
-            result = await asyncio.wait_for(
-                self._session.call_tool(name, arguments),
-                timeout=30.0
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "mcp-session-id": self._session_id,
+            }
+            
+            response = await self._client.post(
+                self.url,
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "tools/call",
+                    "params": {
+                        "name": name,
+                        "arguments": arguments
+                    },
+                    "id": 3
+                },
+                headers=headers
             )
+            response.raise_for_status()
             
-            content_parts = []
-            is_error = False
-            
-            for item in result.content:
-                if hasattr(item, 'text'):
-                    content_parts.append(item.text)
-                elif hasattr(item, 'resource'):
-                    content_parts.append(str(item.resource))
-                elif hasattr(item, 'image'):
-                    content_parts.append(f"[Image: {item.image.mimeType}]")
-                else:
-                    content_parts.append(str(item))
-            
-            content = "\n".join(content_parts)
-            
-            return MCPToolResult(content=content, is_error=is_error)
+            content_type = response.headers.get("content-type", "").lower()
+            if content_type.startswith("text/event-stream"):
+                event_source = EventSource(response)
+                async for sse in event_source.aiter_sse():
+                    if sse.data:
+                        msg = JSONRPCMessage.model_validate_json(sse.data)
+                        if isinstance(msg.root, JSONRPCResponse) and msg.root.result:
+                            result_content = msg.root.result.get("content", [])
+                            content_parts = []
+                            for item in result_content:
+                                if isinstance(item, dict) and item.get("type") == "text":
+                                    content_parts.append(item.get("text", ""))
+                                else:
+                                    content_parts.append(str(item))
+                            return MCPToolResult(content="\n".join(content_parts))
+                        elif isinstance(msg.root, JSONRPCError):
+                            return MCPToolResult(content=f"Error: {msg.root.error.get('message', 'Unknown error')}", is_error=True)
+                        break
+            return MCPToolResult(content="No response from tool", is_error=True)
             
         except asyncio.TimeoutError:
             return MCPToolResult(content=f"Error: Tool call timed out after 30 seconds", is_error=True)
@@ -169,6 +265,13 @@ class MCPClient:
             return MCPToolResult(content=f"Error: {str(e)}", is_error=True)
 
     async def cleanup(self) -> None:
+        if hasattr(self, '_client') and self._client:
+            try:
+                await self._client.aclose()
+            except Exception:
+                pass
+            self._client = None
+        
         if self._exit_stack:
             try:
                 await self._exit_stack.aclose()

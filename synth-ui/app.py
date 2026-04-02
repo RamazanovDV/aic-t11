@@ -1420,6 +1420,72 @@ def update_session_mcp():
         return jsonify({"error": f"Backend error: {str(e)}"}), 500
 
 
+@ui_bp.route("/api/projects", methods=["GET"])
+def list_projects():
+    url = f"{ui_config.backend_url}/api/projects"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects", methods=["POST"])
+def create_project():
+    data = request.get_json()
+    if not data or "name" not in data:
+        return jsonify({"error": "Missing required field: name"}), 400
+
+    url = f"{ui_config.backend_url}/api/projects"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.post(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json()), 201
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>", methods=["DELETE"])
+def delete_project(project_name):
+    url = f"{ui_config.backend_url}/api/projects/{project_name}"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+    }
+    try:
+        response = requests.delete(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/sessions/<session_id>/project", methods=["PUT"])
+def set_session_project(session_id):
+    data = request.get_json()
+    if data is None:
+        return jsonify({"error": "Missing request body"}), 400
+
+    url = f"{ui_config.backend_url}/api/sessions/{session_id}/project"
+    headers = {
+        "X-API-Key": ui_config.backend_api_key,
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.put(url, headers=headers, cookies=get_auth_cookies(), json=data, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     app.register_blueprint(ui_bp)
@@ -1687,6 +1753,61 @@ def git_repo_info(project_name: str, repo_name: str):
     headers = {"X-API-Key": ui_config.backend_api_key}
     try:
         response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/files/tree", methods=["GET"])
+def project_files_tree(project_name: str):
+    """Get directory tree for project files - proxy to backend."""
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/files/tree"
+    params = {k: v for k, v in request.args.items() if v}
+    headers = {"X-API-Key": ui_config.backend_api_key}
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), params=params, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/files/read", methods=["GET"])
+def project_files_read(project_name: str):
+    """Read a file from project files - proxy to backend."""
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/files/read"
+    params = {k: v for k, v in request.args.items() if v}
+    headers = {"X-API-Key": ui_config.backend_api_key}
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), params=params, timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/files/status", methods=["GET"])
+def project_files_status(project_name: str):
+    """Get git status for project files - proxy to backend."""
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/files/status"
+    headers = {"X-API-Key": ui_config.backend_api_key}
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), timeout=10)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.RequestException as e:
+        return jsonify({"error": f"Backend error: {str(e)}"}), 500
+
+
+@ui_bp.route("/api/projects/<project_name>/files/diff", methods=["GET"])
+def project_files_diff(project_name: str):
+    """Get git diff for project files - proxy to backend."""
+    url = f"{ui_config.backend_url}/api/projects/{project_name}/files/diff"
+    params = {k: v for k, v in request.args.items() if v}
+    headers = {"X-API-Key": ui_config.backend_api_key}
+    try:
+        response = requests.get(url, headers=headers, cookies=get_auth_cookies(), params=params, timeout=10)
         response.raise_for_status()
         return jsonify(response.json())
     except requests.RequestException as e:

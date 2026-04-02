@@ -6,12 +6,32 @@
         // overridden in chat.html - no-op
     }
 </script>
-<div id="chat-panels-container" class="chat-panels">
-    <!-- Panels will be rendered by JavaScript -->
+<div id="file-browser-panel" class="file-browser-panel">
+    <div class="file-browser-inner">
+        <div class="file-browser-header">
+            <span class="file-browser-title">📁 Files</span>
+            <button class="btn btn-icon" onclick="refreshFileTree()" title="Обновить">↻</button>
+            <button class="btn btn-icon file-browser-close" onclick="closeFileBrowser()">×</button>
+        </div>
+        <div class="file-browser-content">
+            <div class="file-tree-container" id="file-tree">
+                <div class="file-tree-empty">Выберите проект для просмотра файлов</div>
+            </div>
+            <div class="file-preview-container" id="file-preview">
+                <div class="file-preview-empty">Выберите файл для просмотра</div>
+            </div>
+        </div>
+    </div>
 </div>
 
-<div id="chat-input-area" class="chat-input-area">
-    <!-- Input area will be rendered by JavaScript -->
+<div id="chat-area-wrapper">
+    <div id="chat-panels-container" class="chat-panels">
+        <!-- Panels will be rendered by JavaScript -->
+    </div>
+
+    <div id="chat-input-area" class="chat-input-area">
+        <!-- Input area will be rendered by JavaScript -->
+    </div>
 </div>
 
 <div id="debug-modal" class="modal" style="display: none;">
@@ -601,6 +621,13 @@
             
             panelEl.innerHTML = `
                 <div class="session-panel">
+                    <span class="panel-label">Проект:</span>
+                    <select class="project-select panel-project-select" data-panel="${index}" onchange="onPanelProjectChange(${index}, this.value)">
+                        <option value="">— Нет —</option>
+                    </select>
+                    <button class="btn btn-small" onclick="createProjectPanel(${index})" title="Создать проект">+</button>
+                    <button class="btn btn-small" onclick="deleteProjectPanel(${index})" title="Удалить проект">×</button>
+                    <span class="panel-divider">|</span>
                     <span class="panel-label">Сессия:</span>
                     <select class="session-select panel-session-select" data-panel="${index}" onchange="onPanelSessionChange(${index}, this.value)">
                         <option value="default">default</option>
@@ -617,8 +644,6 @@
                     <button class="btn btn-small" onclick="createCheckpointPanel(${index})" title="Создать чекпоинт">📸</button>
                     <button class="btn btn-small" onclick="showTreeModal(${index})" title="Дерево веток">🌳</button>
                     <span class="panel-divider">|</span>
-                    <span class="panel-label">Проект:</span>
-                    <span class="panel-project-name" data-panel="${index}">-</span>
                     <span class="panel-label">Задача:</span>
                     <span class="panel-task-name" data-panel="${index}">conversation</span>
                     <span class="panel-label">Этап:</span>
@@ -653,6 +678,7 @@
                         <button class="btn btn-icon" onclick="openRagModal(${index})" title="RAG Поиск">🔍</button>
                         <button class="btn btn-icon" onclick="openSchedulesModal(${index})" title="Расписание">⏰</button>
                         <button class="btn btn-icon" onclick="openReposModal(${index})" title="Репозитории">📦</button>
+                        <button class="btn btn-icon" onclick="openFileBrowser(${index})" title="Файлы">📁</button>
                     </div>
                     <button class="btn btn-secondary btn-small" onclick="resetPanelChat(${index})" title="Сбросить чат">🗑️</button>
                 </div>
@@ -821,6 +847,7 @@
         await loadSessionsList();
         await loadProviders();
         await loadAgents();
+        await loadProjects();
         
         for (let i = 0; i < panels.length; i++) {
             try {
@@ -904,6 +931,106 @@
             }
         } catch (err) {
             console.error('Failed to load agents:', err);
+        }
+    }
+
+    async function loadProjects() {
+        try {
+            const response = await authFetch('/api/projects');
+            if (response.ok) {
+                const data = await response.json();
+                const projects = data.projects || [];
+                
+                panels.forEach((panel, idx) => {
+                    const projectSelect = document.querySelector(`.panel-project-select[data-panel="${idx}"]`);
+                    if (projectSelect) {
+                        const currentValue = projectSelect.value;
+                        projectSelect.innerHTML = '<option value="">— Нет —</option>';
+                        for (const name of projects) {
+                            const option = document.createElement('option');
+                            option.value = name;
+                            option.textContent = name;
+                            projectSelect.appendChild(option);
+                        }
+                        if (projects.includes(currentValue)) {
+                            projectSelect.value = currentValue;
+                        } else if (panel.currentProject && projects.includes(panel.currentProject)) {
+                            projectSelect.value = panel.currentProject;
+                        }
+                    }
+                });
+            }
+        } catch (err) {
+            console.error('Failed to load projects:', err);
+        }
+    }
+
+    async function onPanelProjectChange(panelIndex, projectName) {
+        const panel = panels[panelIndex];
+        if (!panel.sessionId) return;
+        
+        panel.currentProject = projectName || null;
+        
+        try {
+            await authFetch(`/api/sessions/${panel.sessionId}/project`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project: projectName || null })
+            });
+        } catch (err) {
+            console.error('Failed to set project:', err);
+        }
+    }
+
+    async function createProjectPanel(panelIndex) {
+        const name = prompt('Введите имя нового проекта:');
+        if (!name) return;
+        
+        try {
+            const response = await authFetch('/api/projects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            
+            if (response.ok) {
+                await loadProjects();
+            } else {
+                const data = await response.json();
+                alert('Ошибка создания проекта: ' + (data.error || 'Unknown error'));
+            }
+        } catch (err) {
+            alert('Ошибка: ' + err.message);
+        }
+    }
+
+    async function deleteProjectPanel(panelIndex) {
+        const projectSelect = document.querySelector(`.panel-project-select[data-panel="${panelIndex}"]`);
+        const projectName = projectSelect?.value;
+        if (!projectName) {
+            alert('Выберите проект для удаления');
+            return;
+        }
+        
+        if (!confirm(`Удалить проект "${projectName}"? Это действие нельзя отменить.`)) {
+            return;
+        }
+        
+        try {
+            const response = await authFetch(`/api/projects/${encodeURIComponent(projectName)}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                projectSelect.value = '';
+                panels[panelIndex].currentProject = null;
+                await loadProjects();
+            } else {
+                const data = await response.json();
+                alert('Ошибка удаления проекта: ' + (data.error || 'Unknown error'));
+            }
+        } catch (err) {
+            alert('Ошибка: ' + err.message);
         }
     }
 
@@ -1047,12 +1174,12 @@
 
     function updatePanelProjectStatus(panelIndex, data) {
         const panel = panels[panelIndex];
-        const projectEl = document.querySelector(`.panel-project-name[data-panel="${panelIndex}"]`);
+        const projectSelect = document.querySelector(`.panel-project-select[data-panel="${panelIndex}"]`);
         const taskNameEl = document.querySelector(`.panel-task-name[data-panel="${panelIndex}"]`);
         const taskStateEl = document.querySelector(`.panel-task-state[data-panel="${panelIndex}"]`);
         
-        if (projectEl && data.project) {
-            projectEl.textContent = data.project;
+        if (projectSelect && data.project) {
+            projectSelect.value = data.project;
         }
         if (taskNameEl) {
             taskNameEl.textContent = data.task_name || 'conversation';
@@ -2184,13 +2311,19 @@
                                     });
                                 }
                                 
-                                if (data.project || data.task_name || data.state) {
-                                    updatePanelProjectStatus(panelIndex, {
-                                        project: data.project,
-                                        task_name: data.task_name || 'conversation',
-                                        state: data.state
-                                    });
-                                }
+                if (data.project || data.task_name || data.state) {
+                    updatePanelProjectStatus(panelIndex, {
+                        project: data.project,
+                        task_name: data.task_name || 'conversation',
+                        state: data.state
+                    });
+                }
+                
+                panel.currentProject = data.project || null;
+                const projectSelect = document.querySelector(`.panel-project-select[data-panel="${panelIndex}"]`);
+                if (projectSelect) {
+                    projectSelect.value = data.project || '';
+                }
                                 
                                 if (data.agent_role) {
                                     const badge = document.createElement('div');
@@ -4717,8 +4850,351 @@
         closeReposModal();
     }
 
+    // File Browser State
+    const FILE_PANEL_OPEN_KEY = 't6_file_panel_open';
+    const FILE_PANEL_PROJECT_KEY = 't6_file_panel_project';
+
+    let fileBrowserState = {
+        open: localStorage.getItem(FILE_PANEL_OPEN_KEY) === 'true',
+        project: localStorage.getItem(FILE_PANEL_PROJECT_KEY) || '',
+        currentPath: '',
+        selectedFile: null,
+        gitStatus: null
+    };
+
+    async function openFileBrowser(panelIndex) {
+        const panel = panels[panelIndex];
+        
+        fileBrowserState.project = panel?.currentProject || fileBrowserState.project || '';
+        fileBrowserState.open = true;
+        localStorage.setItem(FILE_PANEL_OPEN_KEY, 'true');
+        if (fileBrowserState.project) {
+            localStorage.setItem(FILE_PANEL_PROJECT_KEY, fileBrowserState.project);
+        }
+        
+        document.getElementById('file-browser-panel').classList.add('open');
+        
+        if (fileBrowserState.project) {
+            await loadFileTree('');
+            await loadGitStatus();
+        } else {
+            document.getElementById('file-tree').innerHTML = '<div class="file-tree-empty">Выберите проект для просмотра файлов</div>';
+            showFilePreviewEmpty();
+        }
+    }
+
+    function closeFileBrowser() {
+        fileBrowserState.open = false;
+        localStorage.setItem(FILE_PANEL_OPEN_KEY, 'false');
+        
+        document.getElementById('file-browser-panel').classList.remove('open');
+    }
+
+    async function refreshFileTree() {
+        if (fileBrowserState.project) {
+            await loadFileTree(fileBrowserState.currentPath || '');
+            await loadGitStatus();
+        }
+    }
+
+    async function loadFileTree(path = '') {
+        if (!fileBrowserState.project) return;
+        
+        const treeContainer = document.getElementById('file-tree');
+        treeContainer.innerHTML = '<div class="file-tree-empty">Загрузка...</div>';
+        
+        try {
+            const url = `/api/projects/${encodeURIComponent(fileBrowserState.project)}/files/tree?path=${encodeURIComponent(path)}&max_depth=3`;
+            const response = await authFetch(url);
+            if (!response.ok) {
+                treeContainer.innerHTML = '<div class="file-tree-empty">Ошибка загрузки</div>';
+                return;
+            }
+            
+            const data = await response.json();
+            fileBrowserState.currentPath = data.path || '';
+            
+            if (!data.entries || data.entries.length === 0) {
+                treeContainer.innerHTML = '<div class="file-tree-empty">Пустая директория</div>';
+                return;
+            }
+            
+            treeContainer.innerHTML = renderFileTree(data.entries, data.path || '');
+            
+        } catch (e) {
+            console.error('Error loading file tree:', e);
+            treeContainer.innerHTML = '<div class="file-tree-empty">Ошибка: ' + e.message + '</div>';
+        }
+    }
+
+    function renderFileTree(entries, parentPath) {
+        let html = '<div class="file-tree">';
+        
+        entries.forEach(entry => {
+            const entryPath = parentPath ? parentPath + '/' + entry.name : entry.name;
+            const isModified = fileBrowserState.gitStatus && 
+                (fileBrowserState.gitStatus.modified.includes(entryPath) ||
+                 fileBrowserState.gitStatus.modified.includes(entry.name));
+            
+            const icon = entry.type === 'dir' ? '📁' : '📄';
+            const modifiedClass = isModified ? ' modified' : '';
+            
+            if (entry.type === 'dir') {
+                html += `
+                    <div class="file-tree-item${modifiedClass}" onclick="toggleTreeFolder(this, '${entryPath}')">
+                        <span class="tree-expand">▶</span>
+                        <span class="tree-icon">${icon}</span>
+                        <span class="tree-name">${entry.name}</span>
+                    </div>
+                    <div class="file-tree-children" style="display: none;"></div>
+                `;
+            } else {
+                html += `
+                    <div class="file-tree-item${modifiedClass}" onclick="selectFile('${entryPath}')">
+                        <span class="tree-expand" style="visibility: hidden;">▶</span>
+                        <span class="tree-icon">${icon}</span>
+                        <span class="tree-name">${entry.name}</span>
+                    </div>
+                `;
+            }
+        });
+        
+        html += '</div>';
+        return html;
+    }
+
+    async function toggleTreeFolder(element, path) {
+        const children = element.nextElementSibling;
+        const expandIcon = element.querySelector('.tree-expand');
+        
+        if (children.style.display === 'none') {
+            children.style.display = 'block';
+            expandIcon.textContent = '▼';
+            
+            if (!children.dataset.loaded) {
+                await loadTreeChildren(path, children);
+                children.dataset.loaded = 'true';
+            }
+        } else {
+            children.style.display = 'none';
+            expandIcon.textContent = '▶';
+        }
+    }
+
+    async function loadTreeChildren(path, container) {
+        try {
+            const url = `/api/projects/${encodeURIComponent(fileBrowserState.project)}/files/tree?path=${encodeURIComponent(path)}&max_depth=1`;
+            const response = await authFetch(url);
+            if (!response.ok) return;
+            
+            const data = await response.json();
+            
+            if (!data.entries || data.entries.length === 0) {
+                container.innerHTML = '<div class="file-tree-item" style="color: var(--text-secondary); padding-left: 1.5rem;">Пусто</div>';
+                return;
+            }
+            
+            container.innerHTML = renderFileTree(data.entries, path);
+            
+        } catch (e) {
+            console.error('Error loading tree children:', e);
+            container.innerHTML = '<div class="file-tree-item" style="color: var(--error); padding-left: 1.5rem;">Ошибка</div>';
+        }
+    }
+
+    async function loadGitStatus() {
+        if (!fileBrowserState.project) return;
+        
+        try {
+            const url = `/api/projects/${encodeURIComponent(fileBrowserState.project)}/files/status`;
+            const response = await authFetch(url);
+            if (!response.ok) return;
+            
+            const data = await response.json();
+            fileBrowserState.gitStatus = data;
+            
+            document.querySelectorAll('.file-tree-item').forEach(item => {
+                const nameSpan = item.querySelector('.tree-name');
+                if (nameSpan) {
+                    const name = nameSpan.textContent;
+                    if (data.modified && data.modified.some(f => f.endsWith(name))) {
+                        item.classList.add('modified');
+                    }
+                }
+            });
+            
+        } catch (e) {
+            console.error('Error loading git status:', e);
+        }
+    }
+
+    async function selectFile(path) {
+        document.querySelectorAll('.file-tree-item').forEach(item => {
+            item.classList.remove('selected');
+        });
+        
+        const items = document.querySelectorAll('.file-tree-item');
+        items.forEach(item => {
+            const nameSpan = item.querySelector('.tree-name');
+            if (nameSpan && nameSpan.textContent === path.split('/').pop()) {
+                item.classList.add('selected');
+            }
+        });
+        
+        fileBrowserState.selectedFile = path;
+        
+        const isModified = fileBrowserState.gitStatus && 
+            (fileBrowserState.gitStatus.modified.includes(path) ||
+             fileBrowserState.gitStatus.modified.some(f => f.endsWith(path.split('/').pop())));
+        
+        if (isModified) {
+            await showFileDiff(path);
+        } else {
+            await showFilePreview(path);
+        }
+    }
+
+    async function showFilePreview(path) {
+        const previewContainer = document.getElementById('file-preview');
+        
+        const header = document.createElement('div');
+        header.className = 'file-preview-header';
+        header.innerHTML = `
+            <span class="file-name">${path.split('/').pop()}</span>
+            <div class="file-actions">
+                <button class="btn btn-small" onclick="showFileDiff('${path}')" title="Показать diff">Diff</button>
+            </div>
+        `;
+        
+        previewContainer.innerHTML = '';
+        previewContainer.appendChild(header);
+        
+        const content = document.createElement('div');
+        content.className = 'file-preview-content';
+        content.innerHTML = '<div class="file-preview-empty">Загрузка...</div>';
+        previewContainer.appendChild(content);
+        
+        try {
+            const url = `/api/projects/${encodeURIComponent(fileBrowserState.project)}/files/read?path=${encodeURIComponent(path)}`;
+            const response = await authFetch(url);
+            
+            if (!response.ok) {
+                const data = await response.json();
+                content.innerHTML = `<div class="file-preview-empty">Ошибка: ${data.error || 'Не удалось загрузить файл'}</div>`;
+                return;
+            }
+            
+            const data = await response.json();
+            content.innerHTML = '<code>' + escapeHtml(data.content) + '</code>';
+            hljs.highlightElement(content);
+            
+        } catch (e) {
+            content.innerHTML = `<div class="file-preview-empty">Ошибка: ${e.message}</div>`;
+        }
+    }
+
+    async function showFileDiff(path) {
+        const previewContainer = document.getElementById('file-preview');
+        
+        const header = document.createElement('div');
+        header.className = 'file-preview-header';
+        header.innerHTML = `
+            <span class="file-name">${path.split('/').pop()}</span>
+            <div class="file-actions">
+                <button class="btn btn-small" onclick="showFilePreview('${path}')" title="Показать файл">View</button>
+            </div>
+        `;
+        
+        previewContainer.innerHTML = '';
+        previewContainer.appendChild(header);
+        
+        const diffContent = document.createElement('div');
+        diffContent.className = 'diff-view';
+        diffContent.innerHTML = '<div class="file-preview-empty">Загрузка...</div>';
+        previewContainer.appendChild(diffContent);
+        
+        try {
+            const url = `/api/projects/${encodeURIComponent(fileBrowserState.project)}/files/diff?path=${encodeURIComponent(path)}`;
+            const response = await authFetch(url);
+            
+            if (!response.ok) {
+                const data = await response.json();
+                diffContent.innerHTML = `<div class="file-preview-empty">Ошибка: ${data.error || 'Не удалось загрузить diff'}</div>`;
+                return;
+            }
+            
+            const data = await response.json();
+            
+            if (!data.diff) {
+                diffContent.innerHTML = '<div class="file-preview-empty">Нет изменений</div>';
+                return;
+            }
+            
+            diffContent.innerHTML = renderDiff(data.diff);
+            
+        } catch (e) {
+            diffContent.innerHTML = `<div class="file-preview-empty">Ошибка: ${e.message}</div>`;
+        }
+    }
+
+    function renderDiff(diffText) {
+        const lines = diffText.split('\n');
+        let html = '<div class="diff-content">';
+        
+        let leftLine = 1;
+        let rightLine = 1;
+        
+        for (const line of lines) {
+            if (line.startsWith('@@')) {
+                const match = line.match(/@@ -(\d+),?\d* \+(\d+),?\d* @@/);
+                if (match) {
+                    leftLine = parseInt(match[1]);
+                    rightLine = parseInt(match[2]);
+                }
+                html += `<div class="diff-line header">${escapeHtml(line)}</div>`;
+            } else if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff') || line.startsWith('index')) {
+                html += `<div class="diff-line header">${escapeHtml(line)}</div>`;
+            } else if (line.startsWith('+')) {
+                html += `<div class="diff-line added"><span class="diff-line-number">${rightLine++}</span><span class="diff-line-content">${escapeHtml(line)}</span></div>`;
+            } else if (line.startsWith('-')) {
+                html += `<div class="diff-line removed"><span class="diff-line-number">${leftLine++}</span><span class="diff-line-content">${escapeHtml(line)}</span></div>`;
+            } else {
+                html += `<div class="diff-line context"><span class="diff-line-number">${leftLine++},${rightLine++}</span><span class="diff-line-content">${escapeHtml(line)}</span></div>`;
+            }
+        }
+        
+        html += '</div>';
+        return html;
+    }
+
+    function showFilePreviewEmpty() {
+        const previewContainer = document.getElementById('file-preview');
+        previewContainer.innerHTML = '<div class="file-preview-empty">Выберите файл для просмотра</div>';
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function restoreFileBrowserState() {
+        if (fileBrowserState.open) {
+            document.getElementById('file-browser-panel').classList.add('open');
+        }
+    }
+
+    async function applyFileBrowserState() {
+        if (fileBrowserState.open && fileBrowserState.project) {
+            await loadFileTree('');
+            await loadGitStatus();
+        }
+    }
+
+    restoreFileBrowserState();
     initPanels();
     renderPanels();
     initSessionEventSources();
+    applyFileBrowserState();
 </script>
 {% endblock %}

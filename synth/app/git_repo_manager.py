@@ -246,7 +246,8 @@ class GitRepoManager:
         project_name: str,
         repo_name: str,
         target: str = "HEAD",
-        base: str | None = None
+        base: str | None = None,
+        file_path: str | None = None
     ) -> tuple[bool, str, str | None]:
         repo_path = self.get_repo_path(project_name, repo_name)
         if not repo_path:
@@ -256,7 +257,49 @@ class GitRepoManager:
             return False, "Local repository not found", None
         
         diff = git_clone_service.get_diff(repo_path, target, base)
+        
+        if file_path and diff:
+            lines = diff.split("\n")
+            filtered_lines = []
+            in_file_section = False
+            current_file = None
+            
+            for line in lines:
+                if line.startswith("diff --git"):
+                    if file_path in line:
+                        in_file_section = True
+                        current_file = line
+                    else:
+                        in_file_section = False
+                        current_file = None
+                elif in_file_section or current_file is None:
+                    if line.startswith("diff --git"):
+                        if filtered_lines and filtered_lines[-1] == current_file:
+                            filtered_lines.pop()
+                        filtered_lines.append(line)
+                        in_file_section = True
+                        current_file = line
+                    else:
+                        filtered_lines.append(line)
+            
+            diff = "\n".join(filtered_lines)
+        
         return True, "Diff retrieved", diff
+    
+    def get_repo_status(
+        self,
+        project_name: str,
+        repo_name: str
+    ) -> tuple[bool, str, dict]:
+        repo_path = self.get_repo_path(project_name, repo_name)
+        if not repo_path:
+            return False, "Repository not found", {"status": "unknown", "modified": [], "staged": [], "untracked": []}
+        
+        if not repo_path.exists():
+            return False, "Local repository not found", {"status": "unknown", "modified": [], "staged": [], "untracked": []}
+        
+        status_data = git_clone_service.get_status_detailed(repo_path)
+        return True, "Status retrieved", status_data
     
     def get_repo_commit_diff(
         self,
