@@ -405,9 +405,12 @@ class StreamHandler(BaseHandler):
                 if result:
                     final_chunk, tool_group_id, tool_debug_info = result
                     if final_chunk:
-                        full_content = final_chunk.content or ""
-                        full_reasoning = final_chunk.reasoning or ""
-                        total_usage = final_chunk.usage or {}
+                        if final_chunk.content:
+                            full_content += final_chunk.content
+                        if final_chunk.reasoning:
+                            full_reasoning += final_chunk.reasoning
+                        if final_chunk.usage:
+                            total_usage = final_chunk.usage
                 continue
             
             if chunk.is_final:
@@ -444,14 +447,14 @@ class StreamHandler(BaseHandler):
                 reasoning=full_reasoning,
                 agent_role=agent_role
             )
-        
-        from app.status_validator import validate_status_block
-        parsed_status, cleaned_content = validate_status_block(full_content)
-        if parsed_status:
-            session.update_status(parsed_status)
-            handle_project_updates(session)
-        
-        self.save_session(session.session_id)
+            
+            from app.status_validator import validate_status_block
+            parsed_status, cleaned_content = validate_status_block(full_content)
+            if parsed_status:
+                session.update_status(parsed_status)
+                handle_project_updates(session)
+            
+            self.save_session(session.session_id)
         
         disabled_indices = [i for i, m in enumerate(session.messages) if m.disabled]
         
@@ -489,7 +492,8 @@ class StreamHandler(BaseHandler):
             model=provider.model,
             reasoning=chunk.reasoning,
             tool_use=chunk.tool_calls,
-            group_id=group_id
+            group_id=group_id,
+            agent_role=agent_role
         )
         
         current_tool_calls = chunk.tool_calls
@@ -599,7 +603,8 @@ class StreamHandler(BaseHandler):
                 debug=debug_info,
                 model=provider.model,
                 reasoning=reasoning,
-                group_id=group_id
+                group_id=group_id,
+                agent_role=agent_role
             )
             
             yield "data: [DONE]\n\n"
